@@ -1,5 +1,7 @@
 # Open Terraria
 
+**[简体中文](README.md) | [English](README_EN.md)**
+
 > [!NOTE]
 > 当前代码仍在积极迭代更新，可能仍存在一些尚未解决的Bug与待优化的性能项，如果您发现游戏中与原版不一致的情况，欢迎在issue中提出问题
 
