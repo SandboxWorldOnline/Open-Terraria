@@ -1,38 +1,38 @@
 {
- "at": "2026-10-19T16:53:02.447Z",
+ "at": "2026-10-21T15:17:38.310Z",
  "release": true,
- "totalJsMb": 32.14,
+ "totalJsMb": 32.2,
  "chunks": [
   {
-   "file": "assets/index-2ZyJuDC8.js",
-   "kb": 13099.3
+   "file": "assets/index-2NiMA6ag.js",
+   "kb": 13143.4
   },
   {
-   "file": "assets/worldGen.worker-BqcLAKlr.js",
-   "kb": 6789.3
+   "file": "assets/worldGen.worker-CJ5cBMDo.js",
+   "kb": 6792.2
   },
   {
-   "file": "assets/BakeWorker-CykxikRY.js",
-   "kb": 5077
+   "file": "assets/BakeWorker-CJiLFKh6.js",
+   "kb": 5079.1
   },
   {
-   "file": "assets/LightWorker-BF_r_7-t.js",
-   "kb": 4811.6
+   "file": "assets/LightWorker-nb5Ku5RE.js",
+   "kb": 4813.1
   },
   {
    "file": "assets/save.worker-va58pX0G.js",
-   "kb": 3033.7
+   "kb": 3035.9
   },
   {
    "file": "assets/WaveWorker-9Kry1UwV.js",
-   "kb": 37.1
+   "kb": 41.9
   },
   {
    "file": "sw.js",
-   "kb": 30.5
+   "kb": 34
   },
   {
-   "file": "assets/ResourcePackPage-CMzB7pEp.js",
+   "file": "assets/ResourcePackPage-DyFbr3RR.js",
    "kb": 13.8
   },
   {
@@ -40,7 +40,7 @@
    "kb": 13.7
   },
   {
-   "file": "assets/hotReload-BLBSa_uw.js",
+   "file": "assets/hotReload-CqR8ajDL.js",
    "kb": 3.1
   },
   {

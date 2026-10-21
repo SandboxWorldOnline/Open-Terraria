@@ -51,12 +51,12 @@ self.addEventListener('install', (e) => {
 });`;
 
 // ---------- 补丁② 文档 stale-while-revalidate ----------
-const DOC_SRC = `  if (isDoc) {
+const DOC_SRC = `  if (isDocPath(req, path)) {
     e.respondWith((async () => {
-      let cache = null;
-      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通(同 shell 支 2026-09-24 修) */ }
+      const ver = await recoverVersion();
+      const cache = ver ? await caches.open(CACHE_PREFIX + ver).catch(() => null) : null;
       try {
-        const res = await fetch(req);
+        const res = await fetchShell(req);   // ★BJ704-G8 F2:导航类=超时+单次重试(挂死整页→16s 有界+离线缓存回退)
         if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch (err) {
