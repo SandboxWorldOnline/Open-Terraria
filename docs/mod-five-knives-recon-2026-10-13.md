@@ -1272,3 +1272,42 @@ true+面板 false/addedAt·icon·行序)。途中一次缺省收紧(false)炸 12
 (夹具 install 无 opts 依赖缺省装载)——缺省回归 true+意图显式化,
 「导入不自动启用」由面板调用方承担。
 **验收**:mod+Tier1+集成 **41 文件测试**全绿;tsc 净。
+---
+
+## AGENTS.md 移植/材质包手册 + L1 假目录文档案定谳清偿(2026-10-22)
+
+**AGENTS.md §九/§十**(用户令):移植 tML mod 方案(六步流程:解包
+_TmodFile.cs:198-260 定谳→画像对标 calamity-port-assessment 工时锚 8k 行/日
+→提取器文化→L1→L2→tML headless oracle 验证)+ tML→sw 概念映射表 +
+五参考移植索引 + 材质包导入要求(原版 ResourcePack.cs 1:1 形态/三通道/
+逐像素验收/五坑判例)。§七档案表补三行指针。
+
+**定谳(AGENTS.md「16 域」口径核对时炸出)**:mod-dev-guide 三处假目录
+——`content/pets|drops|achievements/` 装载器零消费(pets=物品 `pet` 字段/
+drops=NPC `drops` 内嵌/成就纯脚本),`recipes|shops` 目录形亦假(实=单文件
+content/recipes.json|shops.json)。mod 作者照文档写=内容静默丢失零报错
+(判例㊷ sw.spawnDust 文档谎同族)。
+
+**清偿三刀**:
+1. **成就 JSON 面补真**(L1 哲学:纯条件成就零脚本):plan.parseAchievement
+   (键/title/conditions 五 kind 白名单校验)→ achSpecs → register 期
+   collectModAchievement 与脚本路径合流(apply 先于 entry 相位=跨形态同键
+   在脚本侧 fail-fast 成 mod 级错误;JSON 内同键=plan 级整批拒载);
+   loader 出口 buildModAchievementDefs 统一翻译不变。热重载沿
+   teardown 既有 _resetModAchievements 清账天然闭环。
+2. **未知 content/ 目录 fail-loud 警告**:plan.ts KNOWN_CONTENT_DIRS
+   (12 目录域)外任何 content/<dir>/ → console.warn 一次(不拒载);
+   新增目录域必须同步该表。
+3. **文档讲实话**:guide §2 布局(recipes.json/shops.json 单文件+pets/drops
+   内嵌注记)、§3.7/§3.8 标题与示例(数组形 {recipes:[...]}——旧示例裸对象
+   对单文件约定也是错的)、§3.11 重写(pet 字段+buff 必填)、§3.15 重写
+   (drops 数组四形态:chance/bossBag/flag 条件门/vid 直通——buildDropRules
+   实装面)、「15 域」→16 域(成就域 2026-10-14 落,战役档案的「15 域」
+   为当时真值不动);README 同步。
+
+**守卫**:tests/mod-achievement-l1.test.ts 4 断言(JSON 全链翻译+图标 job+
+引擎通知驱动/JSON 同键整批拒载/JSON+脚本同键脚本相位 fail-fast——
+modId=achl1 断言同时证明 JSON 先入列相位序/未知目录警告不拒载)。
+存量零误伤:mods/ 与 tests/ 的 content 目录形态全在已知集
+(calamity/rivals/magic-storage 等实形核对)。
+**验收**:mod 域 41 文件 224 测全绿;tsc 净(并行会话文件除外)。

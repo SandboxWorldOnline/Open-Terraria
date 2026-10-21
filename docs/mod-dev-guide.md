@@ -18,7 +18,7 @@
 
 1. [快速开始(10 分钟)](#1-快速开始)
 2. [包格式 .swmod](#2-包格式-swmod)
-3. [L1 声明式内容(15 域)](#3-l1-声明式内容15-域)
+3. [L1 声明式内容(16 域)](#3-l1-声明式内容16-域)
 4. [L2 脚本 API 总表](#4-l2-脚本-api-总表)
 5. [浏览器独有接口(Tier1 六件)](#5-浏览器独有接口tier1-六件)
 6. [实战示例](#6-实战示例)
@@ -118,16 +118,17 @@ content/
   npcs/*.json             NPC(§3.4)
   projectiles/*.json      弹幕(§3.5)
   buffs/*.json            Buff(§3.6)
-  recipes/*.json          配方(§3.7)
-  shops/*.json            商店(§3.8)
+  recipes.json            配方(§3.7;★单文件,数组或 {recipes:[...]})
+  shops.json              商店(§3.8;★单文件)
   gores/*.json            死亡碎块(§3.9)
   rarities/*.json         稀有度档色(§3.10)
-  pets/*.json             宠物(§3.11)
   mounts/*.json           坐骑(§3.12)
   hairs/*.json            发型(§3.13)
   dusts/*.json            尘埃粒子(§3.14)
-  drops/*.json            NPC 掉落表(§3.15)
   achievements/*.json     成就(§3.16)
+                          ★宠物(§3.11)=物品 pet 字段、掉落(§3.15)=NPC drops
+                          字段——内嵌声明,无独立目录;写 content/pets/ 或
+                          content/drops/ 目录会被 fail-loud 警告并忽略
 textures/
   items/ tiles/ npcs/ ... 贴图(PNG;路径即 content 里 texture 字段)
   ui/*.png                sw.ui.htmlPage/addImage 用(约定目录)
@@ -147,7 +148,7 @@ icon.png                  面板图标
 
 ---
 
-## 3. L1 声明式内容(15 域)
+## 3. L1 声明式内容(16 域)
 
 声明面全部走 `content/*.json`(零代码执行,装载期 schema 校验 fail-fast)。
 **规则:能声明就声明**——声明面自动获得存档/联机/资产/l10n 全链支持,
@@ -261,18 +262,19 @@ icon.png                  面板图标
 脚本侧 `sw.buff('void_curse', { texture, onTick(player, game) {} })` 挂行为
 (声明+代码二选一,行为重的走脚本)。
 
-### 3.7 配方 content/recipes/*.json
+### 3.7 配方 content/recipes.json(★单文件:数组或 {recipes:[...]})
 
 ```jsonc
-{ "create": "void_blade", "createStack": 1,
-  "items": [ { "item": "void_shard", "stack": 12 } ],   // mod 键或原版数字 vid
-  "tile": "void_altar",                                   // 站点(本 mod tile 键/原版数字)
-  "water": false, "honey": false, "lava": false }
+{ "recipes": [
+  { "create": "void_blade", "createStack": 1,
+    "items": [ { "item": "void_shard", "stack": 12 } ],   // mod 键或原版数字 vid
+    "tile": "void_altar",                                   // 站点(本 mod tile 键/原版数字)
+    "water": false, "honey": false, "lava": false } ] }
 ```
 
-### 3.8 商店 content/shops/*.json
+### 3.8 商店 content/shops.json(★单文件:数组或 {shops:[...]})
 
-城镇 NPC 的商品清单(host npc 键/物品键/价格)。
+城镇 NPC 的商品清单(npcId=原版 vid 或 mod 城镇 NPC 键/物品键/价格)。
 
 ### 3.9 Gore(死亡碎块)content/gores/*.json
 
@@ -288,12 +290,18 @@ NPC json `deathGore: [...]` 引用;死亡时按物理弹射(引擎池 600)。
 ```
 物品 `rare: {"$rarity": "void"}` 引用——档色进 tooltip/拾取飘字/词缀位移全链。
 
-### 3.11 宠物 content/pets/*.json
+### 3.11 宠物(物品 `pet` 字段——无独立目录)
+
+宠物 = **物品 json 的 `pet` 字段**(tML 同构:buff+proj 组合,无 ModPet 类);
+召唤/跟随/光宠槽/换装全链自动接通:
 
 ```jsonc
-{ "key": "void_wisp", "proj": "wisp", "light": true }
+// content/items/void_wisp_item.json
+{ "key": "void_wisp_item", "name": "虚空幽火", "value": 50000,
+  "pet": { "buff": "void_wisp",        // ★必填:mod buff 键(content/buffs 注册)
+           "proj": "wisp",              // 本 mod 弹键(content/projectiles 声明)
+           "light": true } }            // true=光宠槽(装备槽 1);缺省=宠物槽 0
 ```
-物品 `pet: {...}` 声明即通(召唤/跟随/光宠槽/换装全链白嫖 tML 同构)。
 
 ### 3.12 坐骑 content/mounts/*.json
 
@@ -321,9 +329,19 @@ id 段 228-255(28 槽);角色创建/理发店自动入列。
 ```
 `sw.spawnDust(game, type, x, y, ...)` 生成(数字 type=原版型/本 mod 400+ 分配型);mod 键 400+ 段反查表=登记。
 
-### 3.15 掉落表 content/drops/*.json
+### 3.15 掉落表(NPC `drops` 字段——无独立目录)
 
-规则树(chance/条件 flag/bossBag 专家袋/CoinsBasedOnNPCValue)。
+掉落 = **NPC json 的 `drops` 数组**(见 §3.4),逐条翻译成引擎掉落 Rule:
+
+```jsonc
+"drops": [
+  { "item": "void_essence", "min": 8, "max": 14, "chance": 1 },
+  { "item": 23, "chance": 0.1 },                                  // 原版裸 vid 直通
+  { "item": "void_bag", "bossBag": 1 },                           // 专家档掉袋(经典档不掉)
+  { "item": "void_key", "chance": 0.5, "flag": "hardMode" }       // 条件门:hardMode/downed_* 世界旗
+]
+```
+更复杂的规则树走 L2 钩(`sw.onNpcDeath`/`sw.globalNpc`)。
 
 ### 3.16 成就 content/achievements/*.json(或 sw.achievement 声明)
 

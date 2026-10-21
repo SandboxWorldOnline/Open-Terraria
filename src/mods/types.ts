@@ -9,6 +9,7 @@ import type { ModWallContent } from './walls';      // ★刀3-墙:墙声明 sch
 import type { ModMountContent } from './mounts';    // ★第三批:坐骑声明 schema(类型单向)
 import type { ModHairContent } from './hairs';      // ★第三批:发型声明 schema(类型单向)
 import type { ModDustContent } from './dusts';      // ★第四批:尘埃声明 schema(类型单向)
+import type { ModAchievementSpec } from './modAchievements';   // ★成就域 L1 面 schema(类型单向)
 export type { ModRarityContent };
 export type { ModGoreContent };
 export type { ModWallContent };
@@ -386,6 +387,10 @@ export interface RegistrationPlan {
   hairSpecs: Array<{ modId: string; spec: ModHairContent; hairId: number; fullKey: string }>;
   /** ★第四批:mod 尘埃计划(400+ 段) */
   dustSpecs: Array<{ modId: string; spec: ModDustContent; dustType: number; fullKey: string }>;
+  /** ★成就域 L1 面(2026-10-22):content/achievements/*.json(纯条件成就零脚本)。
+   *  无 id 分配——全键即存档名;register 期经 collectModAchievement 与
+   *  sw.achievement 脚本路径合流(跨形态同键 fail-fast)。 */
+  achSpecs: Array<{ modId: string; key: string; spec: ModAchievementSpec }>;
 }
 
 /** 解析后的 mod 包(zip 展开) */

@@ -11,8 +11,16 @@ import {
 } from './types';
 import { modItemFullKey, versionSatisfies } from './manifest';
 import { discoverPackJsonPaths, readPackJson } from './pack';
+import type { ModAchievementSpec } from './modAchievements';   // ★成就域 L1 面(类型单向)
 
 export class ModPlanError extends Error {}
+
+/** 已知 content/ 子目录域(fail-loud 未知目录警告用;recipes/shops=单文件
+ *  约定 content/<域>.json,目录形=未知要警告)。新增目录域必须同步此表。 */
+const KNOWN_CONTENT_DIRS = new Set([
+  'items', 'tiles', 'walls', 'npcs', 'projectiles', 'buffs', 'gores',
+  'rarities', 'mounts', 'hairs', 'dusts', 'achievements',
+]);
 
 // ---- 内容 spec 校验(坏条目 fail-fast 整 mod 拒载;错误信息带 modId+键) ----
 
@@ -52,6 +60,27 @@ function parseGore(modId: string, raw: unknown): ModGoreContent {
   if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'gore', key);
   if (typeof o.texture !== 'string' || o.texture.length === 0) fail(modId, 'gore', key);
   return o as unknown as ModGoreContent;
+}
+
+/** ★成就域 L1 面(2026-10-22):content/achievements/*.json
+ *  {key,title,desc?,category?,icon?,conditions:[{kind,keys?,many?}]}——与
+ *  sw.achievement 脚本路径同 spec(纯条件成就零脚本;custom 条件仍须脚本
+ *  completeAchievement 驱动)。曾为 guide §3.16 文档谎言(装载器零消费),
+ *  本函数=JSON 面补真的校验口。 */
+function parseAchievement(modId: string, raw: unknown): { key: string; spec: ModAchievementSpec } {
+  const o = raw as Record<string, unknown>;
+  const key = typeof o.key === 'string' ? o.key : fail(modId, 'achievement', String(o.key ?? ''));
+  if (!/^[a-z][a-z0-9_]{0,47}$/.test(key)) fail(modId, 'achievement', key);
+  if (typeof o.title !== 'string' || o.title.length === 0) fail(modId, 'achievement', key);
+  if (!Array.isArray(o.conditions) || o.conditions.length === 0) fail(modId, 'achievement', key);
+  for (const c of o.conditions) {
+    const kind = (c as Record<string, unknown> | null)?.kind;
+    if (kind !== 'npcKilled' && kind !== 'itemPickup' && kind !== 'itemCraft' && kind !== 'tileDestroyed' && kind !== 'custom') {
+      fail(modId, 'achievement', key);
+    }
+  }
+  const { key: _drop, ...spec } = o as unknown as { key: string } & ModAchievementSpec;
+  return { key, spec };
 }
 
 /** ★刀3-墙:mod 墙(content/walls/*.json {key,texture,...}) */
@@ -193,6 +222,9 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
   const mountSpecs: RegistrationPlan['mountSpecs'] = [];
   const hairSpecs: RegistrationPlan['hairSpecs'] = [];
   const dustSpecs: RegistrationPlan['dustSpecs'] = [];
+  const achSpecs: RegistrationPlan['achSpecs'] = [];
+  /** 成就全键去重(镜像 modAchievements.fullKeyOf 语义:mod_ 前缀键=显式全键) */
+  const achSeen = new Set<string>();
   const idOf = (manifestId: string) => order.indexOf(manifestId);
   const sortedPacks = [...packs].sort((a, b) => idOf(a.manifest.id) - idOf(b.manifest.id));
 
@@ -367,8 +399,34 @@ export function buildRegistrationPlan(packs: ModPack[]): RegistrationPlan {
         shops.push({ modId, spec: s });
       }
     }
+    // ★成就域 L1 面(2026-10-22):content/achievements/*.json(纯条件成就零
+    //  脚本;无 id 分配——全键即存档名。register 期经 collectModAchievement 与
+    //  脚本路径合流,跨形态同键在脚本侧 fail-fast 成 mod 级错误)
+    for (const path of discoverPackJsonPaths(pack, 'achievements')) {
+      const { key, spec } = parseAchievement(modId, readPackJson(pack, path));
+      const fullKey = key.startsWith('mod_') ? key : `mod_${modId}_${key}`;
+      if (achSeen.has(fullKey)) throw new ModPlanError(`mod ${modId} 成就键重复: ${key}`);
+      achSeen.add(fullKey);
+      achSpecs.push({ modId, key, spec });
+    }
+    // ★fail-loud(2026-10-22):未知 content/ 子目录警告——装载器只发现已知域,
+    //  写错目录名(如不存在的 pets//drops/)或用目录形写单文件域(recipes/shops)
+    //  =内容静默丢失零报错(mod-dev-guide pets/drops 假目录案的根因类)
+    {
+      const unknownDirs = new Set<string>();
+      for (const p of pack.files.keys()) {
+        const m = /^content\/([A-Za-z0-9_-]+)\//.exec(p);
+        if (m && !KNOWN_CONTENT_DIRS.has(m[1])) unknownDirs.add(m[1]);
+      }
+      for (const dir of unknownDirs) {
+        console.warn(
+          `[mods] ${modId} 未识别的 content/${dir}/ 目录(内容将被忽略)。` +
+          `目录域: ${[...KNOWN_CONTENT_DIRS].join('/')};recipes/shops 走单文件 content/<域>.json`,
+        );
+      }
+    }
   }
-  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs, mountSpecs, hairSpecs, dustSpecs };
+  return { mods: sortedPacks.map((p) => ({ manifest: p.manifest, pack: p })), order, allocation, itemSpecs, tileSpecs, npcSpecs, projSpecs, shops, recipes, buffSpecs, raritySpecs, goreSpecs, wallSpecs, mountSpecs, hairSpecs, dustSpecs, achSpecs };
 }
 
 // ---- 引用校验(分配完成后统一验:跨 mod 引用也在此捕获;注册阶段因此不会中途抛错) ----

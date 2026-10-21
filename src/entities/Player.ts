@@ -6500,6 +6500,10 @@ export class Player extends Entity {
       // 1457: 慢速/燃烧爬坡门已删（:20091/:20121），Chilled 压 accRun 门改
       // oldStyleParkour-only（:19901）——减速统一折入 strongestMoveSpeedDebuff
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
+      // ★BJ705-B：非叠加坐骑骑乘期「覆写前乘区全灭」镜像旗（:26852-54 覆写冲掉的
+      //   净效;见下方 mount 覆写块内定谳注）+ :26826-28 摩擦平值复位旗
+      let mntWipeBoost = false;
+      let mntSlowFlat = false;
       // ★水中不缩 Run 参数：原版 reset(:24096-24099)/moveSpeed 乘区(:25694-25695)/
       // 装备链(:26184-26300) 全链无任何 wet 因子——水中减速全在位移积分层
       //（:27874-27888 WetCollision：位移 ×0.5/蜜 0.25/微光 0.375，见下方 liqFactor 段）。
@@ -6532,6 +6536,22 @@ export class Player extends Entity {
           maxRun = mnt.runSpeed();
           accRun = mnt.dashSpeed;
         }
+        // ★BJ705-B（2026-10-21 用户实报「远古号角坐骑二段跳后平地最高速度 41→63mph」
+        //   定谳）：vanilla 一切【覆写前】乘区（翱翔徽章 runAcc×1.75 :26700-03/荧光体
+        //   :26704-10/暗影套 :26711-17/瓶族跳 boost :26778-26812/坐骑特殊跳 boost
+        //   :26788-26807——G19 已撤消费线）对非叠加坐骑被 :26852-54 赋值覆写【整体
+        //   冲掉】=骑乘期零效果;本仓覆写在本块先行 → 上述乘区落在覆写后=骑乘期 live。
+        //   活码面:骑 14 Basilisk（Mount.cs:1648-1697 无 blockExtraJumps 赋值=瓶跳
+        //   放行,Player.cs:26245-56 只清 BlockExtraJumps=true 族;:20875 选择序坐骑
+        //   族先瓶族后）空中第 2 跳耗瓶置 performingJump='Blizzard'/'Fart'/'Sail' →
+        //   maxRun=8×1.5/×1.75/×1.25+runAcc×3 过冲 → 弧内峰 ≈12.7/14.7/10.35px/t ≈
+        //   63/73/52mph（用户实报 41→63 数值吻合;判别锁=tests/bj705b-basilisk-
+        //   lowsweep.test.ts §0A）。镜像=非叠加骑乘期这些乘区整块跳过;加法坐骑（滚轴
+        //   鞋）乘叠加前基底（mulPreAdd ≙ vanilla 先乘后加序,add=0 退化恒等）。
+        mntWipeBoost = !mnt.movementStatsAdditive;
+        // :26826-26828 `if (!mount.CanUseWings) runSlowdown = 0.2f`——骑乘期摩擦平值
+        //   复位（gear runSlowMul 与荧光体 ×1.75 均为覆写前乘区=同被冲掉）
+        mntSlowFlat = MOUNT_DATA[String(mnt.type)]?.CanUseWings !== true;
       }
       // 翼飞行横移加速倍率（WingAirLogicTweaks :28838-28862：悬浮档
       // runAcceleration *= DownHoverAccelerationMult :28852,常规档
@@ -6545,7 +6565,7 @@ export class Player extends Entity {
         accRun = maxRun;                                  // 翼空中横移上限覆盖(原 WingAirLogicTweaks)
         wingAccMul = hoverDownMove ? ws.hoverAccelMult : ws.accelMult;   // :28852/:28856
       }
-      let runSlow = RUN_SLOWDOWN * eqM.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
+      let runSlow = mntSlowFlat ? RUN_SLOWDOWN : RUN_SLOWDOWN * eqM.runSlowMul;   // 暗影套 ×1.75(:26195-26201);★BJ705-B :26826-28 骑乘平值 0.2 复位(mntSlowFlat)
       // ★FX58b：加法坐骑（滚轴鞋 57-60,MovementStatsAreAdditive=Mount.cs:2580）的乘区
       // 序代数。原版荧光体(:26704-26710)/沙丘支(:26742-26749)/地面材质链(:26722-26772)
       // 都作用在坐骑 stats 叠加(:26838-26842)【之前】的基底上;本仓叠加先行(上方 mnt 支),
@@ -6588,12 +6608,12 @@ export class Player extends Entity {
       //  (:26722-26772) 之前,无 velocity/坐骑门（坐骑域在 :26835-26853 其后,加法族
       //  乘叠加前基底 → 随 FX58b mulPreAdd 序;钩爪/舌头支门与荧光体等邻居共域,同 modeling 面）。
       //  另 :14880 moveSpeed += 0.075 经 accfx '4989'.move 已进 moveMult 乘区
-      if (eqM.empressBrooch) runAcc = mulPreAdd(runAcc, 1.75, additiveAcc);
+      if (eqM.empressBrooch && !mntWipeBoost) runAcc = mulPreAdd(runAcc, 1.75, additiveAcc);   // ★BJ705-B:vanilla :26700-03 覆写前=非叠加骑乘期被冲掉
       // 荧光体 5107（★1457 :26703-26709,旧注 :26188-26194 系 1456 锚）：地面四参数
       // ——acc×1.75/maxRun×1.15/accRun×1.15/slowdown×1.75（velocity.Y==0 门 ≈
       // onGround;手持光走 emitMagiluminescenceLight——ApplyEquipFunctional case 5107
       // :14663-14669 无地面门）
-      if (this.onGround && eqM.magiluminescence) {
+      if (this.onGround && eqM.magiluminescence && !mntWipeBoost) {   // ★BJ705-B:vanilla :26704-10 覆写前=非叠加骑乘期被冲掉(修前 8×1.15=9.2≈46mph 持续)
         // ★FX58b：加法坐骑乘叠加前基底（原版 :26704-26710 先于 :26838-26842 叠加）——
         // 滚轴鞋地面 maxRun=(3×1.15)+1=4.45、acc=(0.08×1.75)+0.1=0.24；旧序乘在已
         // 叠加值上 =(3+1)×1.15=4.6 / (0.08+0.1)×1.75=0.315。add=0 时退化 ×m 不变。
@@ -6607,7 +6627,7 @@ export class Player extends Entity {
       // maxRunMul 曾零消费死数据,vanillaArmorSets.ts '5|5|5'/'74|48|44'）。原版
       // shadowArmor 无地面门（与荧光体 :26704 的 velocity.Y==0 门不同）。加法坐骑乘
       // 叠加前基底;add=0 时补齐裸装暗影套同面（×1 恒等,漂移为零）。
-      if (eqM.runAccMul !== 1 || eqM.maxRunMul !== 1) {
+      if ((eqM.runAccMul !== 1 || eqM.maxRunMul !== 1) && !mntWipeBoost) {   // ★BJ705-B:vanilla :26711-17 覆写前=非叠加骑乘期被冲掉(修前暗影套 8×1.15=9.2≈46mph 持续)
         runAcc = mulPreAdd(runAcc, eqM.runAccMul, additiveAcc);
         maxRun = mulPreAdd(maxRun, eqM.maxRunMul, additiveRun);
         accRun = mulPreAdd(accRun, eqM.maxRunMul, additiveDash);
@@ -6682,10 +6702,13 @@ export class Player extends Entity {
       //   CCed 清位由 performingJump 清（:7692/:7261 承载）。松键面:原版 :21201-21208
       //   else 支松键即 jump=0（窗止）,仓内 jumpHold 耗尽制=松键后余量照跑——
       //   jumpHold 全体消费者共有近似,登记 [g19-jump-release-zero] 待机动面批。
-      if (this.jumpHold > 0 && !this.grappling[0] && !this.pulley) {
-        if (this.performingJump === 'Blizzard' && eqM.jumpOpts.includes('Blizzard')) { runAcc *= 3; maxRun *= 1.5; }
-        else if (this.performingJump === 'Fart' && eqM.jumpOpts.includes('Fart')) { runAcc *= 3; maxRun *= 1.75; }
-        else if (this.performingJump === 'Sail' && eqM.jumpOpts.includes('Sail')) { runAcc *= 1.5; maxRun *= 1.25; }
+      if (this.jumpHold > 0 && !this.grappling[0] && !this.pulley && !mntWipeBoost) {
+        // ★BJ705-B：!mntWipeBoost=vanilla :26778-26812 瓶族 boost 在 :26852-54 坐骑
+        //   覆写【前】=非叠加骑乘期被整体冲掉（骑 14 瓶跳弧内 63/73/52mph 活码面,
+        //   见上方 mount 覆写块定谳注）;mulPreAdd=加法坐骑乘叠加前基底(≙先乘后加)
+        if (this.performingJump === 'Blizzard' && eqM.jumpOpts.includes('Blizzard')) { runAcc = mulPreAdd(runAcc, 3, additiveAcc); maxRun = mulPreAdd(maxRun, 1.5, additiveRun); }
+        else if (this.performingJump === 'Fart' && eqM.jumpOpts.includes('Fart')) { runAcc = mulPreAdd(runAcc, 3, additiveAcc); maxRun = mulPreAdd(maxRun, 1.75, additiveRun); }
+        else if (this.performingJump === 'Sail' && eqM.jumpOpts.includes('Sail')) { runAcc = mulPreAdd(runAcc, 1.5, additiveAcc); maxRun = mulPreAdd(maxRun, 1.25, additiveRun); }
       }
       // ★滚轴鞋滑行分支（Player.RollerSkateMovement :28736-28778，台账批 A×2+B）：
       // 无输入阻尼带（减速带 accRun−1f + 空中门 flag2）+ runSlowdown 尾钳 + 沥青

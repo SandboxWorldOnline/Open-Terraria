@@ -25,6 +25,7 @@ import { registerModNpcDrawSpec, registerModItemGlowmask } from './drawspecs';  
 import { registerModCanUseRule } from './hooks';   // ★刀5-A 族:canUse 声明规则
 import { registerModHairData } from './hairs';   // ★第三批:mod 发型
 import { registerModDustData } from './dusts';   // ★第四批:mod 尘埃
+import { collectModAchievement } from './modAchievements';   // ★成就域 L1 面(content/achievements/*.json)
 import { bumpHairCountMax } from '../player/Appearance';   // ★R-A:hairCountMax 可变顶(零调用修正)
 import { registerModMountData } from './mounts';   // ★第三批:mod 坐骑
 
@@ -175,6 +176,10 @@ export function applyRegistrationPlan(plan: RegistrationPlan): RegistrationAppli
   (globalThis as unknown as { __calamityTileDefs?: unknown }).__calamityTileDefs = TILE_DEFS;
   // ★一百一十二刀:键→内部 id 全表(运行时事件链消费;TILE_BY_KEY 含 vanilla v_* 键)
   (globalThis as unknown as { __calamityTileIdByKey?: unknown }).__calamityTileIdByKey = TILE_BY_KEY;
+  // ★成就域 L1 面(2026-10-22):content/achievements/*.json → collect(与
+  //  sw.achievement 脚本路径共用 pending;apply 先于 entry 相位=JSON 先入列,
+  //  跨形态同键由脚本侧 collect 的重复闸 fail-fast;build 出口统一翻译)
+  for (const a of plan.achSpecs ?? []) collectModAchievement(a.modId, a.key, a.spec);
   // projectiles(P2):数据 spec → ModProj 注册簿(代码钩由 entry 的 sw.projectileHook 追加)
   for (const pr of plan.projSpecs) {
     const s = pr.spec;
