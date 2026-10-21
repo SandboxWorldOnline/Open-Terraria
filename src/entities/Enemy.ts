@@ -7,6 +7,8 @@ import { entityNet } from '../net/entitySyncHooks';
 import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
 import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
 import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS } from '../data/tiles';
+import { TOWN_CRITTER_IDS, NPC_CATCHABLE } from '../data/critters';   // ★BJ704-G3 D7/D10：TownCritter 集(NPCID.cs:4827)/npcCatchable 集(Main.cs:9469+)单源
+import { walkPrediction } from './npcWalkPrediction';   // ★BJ704-G6 D12：AI_007 行走预测共享叶子（TownNPC 同源;Enemy↔TownNPC import 环防）
 import { paintColor } from '../world/Paint';
 import { inAPlaceWithWind } from './Mounts';
 import { anchorSpecOf, validateAnchors } from '../world/TileAnchorValidator';
@@ -72,6 +74,7 @@ import { spawnStardustMarks } from './StardustMarkProj';
 import { moveAndCollide, moveNoSlopeBox } from '../physics/TileCollision';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { Dart } from './Dart';
+import { Arrow } from './Arrow';
 import { PoopProj } from './PoopProj';
 import { BookProj } from './BookProj';
 import { SquidCloud } from './SquidCloud';
@@ -597,6 +600,18 @@ export class Enemy extends Entity {
   spawnedFromStatue = false;
   /** 捕获物释放出生（NPC.releaseOwner != 255 语义，NPC.cs:78709 不计 nearby 槽） */
   releasedFromItem = false;
+  /** ★BJ704-G3 D10：NPC.catchableNPCTempImmunityCounter（NPC.cs:6536）承载位——
+   *  SetDefaults 尾（:17883-17887）对 npcCatchable 型置 90（friendly=true 同拍）,
+   *  SubAI（:91649-91670,本仓拍位=fixedUpdate 尾 AI 分发后）`releaseOwner!=255 ‖
+   *  SpawnedFromStatue` → 清零,窗内每拍自减。★极性勘误（BJ703-C 登记读反）：90t
+   *  玩家免伤窗属【自然出生】捕获型小动物,释放/雕像出生首拍即清零 */
+  catchImmunityT = 0;
+  /** ★BJ704-G3 D10：SubAI 投影的运行时 friendly 窗位（NPC.friendly 的 catchable
+   *  覆写面）——npcCatchable 型 = catchImmunityT>0（原版每拍强写,稳态恒 false）,
+   *  非捕获型恒 false（静态 def.friendly 另算）。消费面：playerCanHitEnemy
+   *  （玩家免伤门）+ AI_007 逃逸档（:54467 friendly 门,下一拍读=原版 AI 先于
+   *  SubAI 的上拍值时序）+ npcVsNpcContactUpdate 互殴通道（:91592） */
+  catchFriendly = false;
   /** NPC.AnyInteractions（NPC.cs:5431 playerInteraction[who] 任一 true）——本仓 hurt 调用方
    *  全为玩家武器/弹幕/荆棘链 → hurt 生效即等价玩家交互；雕像门 :79651 消费 */
   playerInteracted = false;
@@ -1546,6 +1561,13 @@ export class Enemy extends Entity {
     // 恒 0，与旧归零语义一致）
     e.hp = ss.lifeMax;
     e.maxHp = ss.lifeMax;
+    // ★BJ704-G3 D10：SetDefaults 尾捕获窗初始化（NPC.cs:17883-17887——npcCatchable
+    //   型 catchableNPCTempImmunityCounter=90+friendly=true；蚱蜢 377/446 json
+    //   friendly=true 系同窗的静态投影,与计数并行不冲突）。释放/雕像出生的清零由
+    //   fixedUpdate 尾 SubAI 拍（releasedFromItem/spawnedFromStatue 首拍归零=原版
+    //   :91653 在 NewNPC→ReleaseNPC/雕像置位后首拍生效同构）
+    e.catchImmunityT = NPC_CATCHABLE.has(id) ? 90 : 0;
+    e.catchFriendly = e.catchImmunityT > 0;
     e.noGravity = flying;   // 运行时位初值=静态飞行档（按态族由各自 AI 每 tick 改写）
     // 碰撞盒乘 npc.scale(NPC.cs:17745-17747 width/height=(int)(×scale))——
     // 史莱姆王/毁灭者 1.25、血肉墙 1.2:此前未乘,贴图放大了盒子没放大,
@@ -1659,6 +1681,22 @@ export class Enemy extends Entity {
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
   mimicFrameT = 0;       // ★BJ464 AI_025 宝箱怪族帧累加器（FindFrame case 85 :74247-74252：腾空++/落地--，钳 0..12；伪装态清零。mimicAI 维护，vanillaFrameIdx 消费）
+  /** ★BJ700b 龟族(616/617/625) FindFrame 计数器（frameCounter,NPC.cs:77486-77578）。
+   *  每拍 +1；站定(vx==0)/腾空(vy≠0,仅 616/617——625 无腾空钉)清零=周期重启。
+   *  turtleFindFrameStep（fixedUpdate 尾=findFrameRotation 层,读碰撞末态）维护,
+   *  vanillaFrameIdx 消费。 */
+  turtleFrameT = 0;
+  /** 龟族 FindFrame 帧行(frame.Y/num)：干走带 0..7(625:0..5)/湿泳带 8..13(625:6..11);
+   *  腾空钉帧行 8(=蜷壳旋跳)——落地后保持 8 拍再回卷 0（「跳旋落地→蜷壳定拍→出壳」
+   *  原版节拍,旧全局相位实现落地即跳任意中幅帧=BJ700b 用户实报病灶） */
+  turtleFrame = 0;
+  /** ★BJ704 陆龟族(153/154/496/497) FindFrame 计数器（frameCounter,NPC.cs:78093-78162,
+   *  type≠417 门）——态 0 走带 +=|vx|×1.1（带 6/12/18/24/32,≥32 回卷;vy<0 锁 0）;
+   *  态 1 缩壳 5→6→7 / 态 5 出壳 7→6→5（ai1 带 10/20）/ 态 3/4 恒帧 7。 */
+  tortoiseFrameT = 0;
+  /** 陆龟族帧行（frame.Y/num）：走带 0..4 / 缩壳带 5..7（vanilla 同帙,496/497 12 帧表
+   *  仅消费 0-7）。tortoiseFindFrameStep 维护（fixedUpdate 尾 findFrameRotation 层）。 */
+  tortoiseFrame = 0;
   justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
   /** StrikeNPC 返回值 num41 等价（2026-08-31 批⑥：本次命中防后实扣,hurt() 实扣路径写；
    *  弹幕调用方读走做 on-hit 门——Projectile.ghostHurt 的 dmg<=1 早退） */
@@ -2003,7 +2041,7 @@ export class Enemy extends Entity {
   lightRGBAt: { x: number; y: number } | null = null;
   lai0 = 0;              // localAI 语义位（萤火虫：闪烁间隔计时）
   lai1 = 0;              // localAI 语义位（萤火虫：发光剩余帧）
-  lai2 = 0;              // localAI[2] 语义位（AI_054 克脑：二阶段入场演出门）
+  lai2 = 0;              // localAI[2] 语义位（AI_054 克脑：二阶段入场演出门；AI_007 critter：卡墙折返粘滞计数——NPC.cs:54789 `localAI[2]++>=30` 短路累加,仅触发时清零再积（无衰减清零）;★BJ704-G6 D13。两族不共实例）
   lai3 = 0;              // localAI[3] 语义位（AI_054 克脑：玩家死/离场下坠计数；AI_008 法师 32：RedHat 变体带 +3）
   /** 红帽骷髅王标记（NPC.cs:81262-81266 redHatMode 召唤置 ai[3]=1；RedHatSkeletron
    *  AdjustmentsEnabled :67282 消费——35 看 ai[3]、36/32 看 localAI[3]、33 看 ai[3]）。
@@ -2168,6 +2206,14 @@ export class Enemy extends Entity {
    *  会把 X 挪 position.X/16+10×direction） */
   critterHomeX = -1;
   critterHomeY = -1;
+  /** ★BJ704-G6 D13：AI_007 卡墙折返快照（=原版 oldPosition :93748 移动前 /
+   *  oldVelocity :93681 碰撞前——townCritterWalkAI 尾 moveAndCollide 前采样,
+   *  行走臂尾卡墙检查（NPC.cs:54789）消费;仅本 AI 族读写,初值 0=首拍无可比
+   *  （x===0 不可达）自然不触发） */
+  critterPreMoveX = 0;
+  critterPreMoveY = 0;
+  critterOldVX = 0;
+  critterOldVY = 0;
   /** AI_112 仙灵 localAI[1] 寿命计数（仅引导态 ai[2]>1 才累计,cs:48459-48473;
    *  与各状态复用的 ai3 计时器分离——曾共用导致寿命被状态转换反复清零） */
   fairyAge = 0;
@@ -2276,6 +2322,7 @@ export class Enemy extends Entity {
       this.netPuppetStep();
       this.onGround = Math.abs(this.vy) < 0.6;
       if (Math.abs(this.vx) > 0.05) this.walkCycleT += Math.abs(this.vx);
+      this.turtleFindFrameStep();   // ★BJ700b 傀儡龟帧机推进（wet 未同步→干侧语义,联机近似备案）
       if (this.iframes > 0) this.iframes--;
       this.recordTrailHistory();   // 傀儡无本地 AI 但拖尾渲染同样需要历史位置
                                    // （同走 TrailingMode 分派;ai0 未同步的傀儡宝箱怪
@@ -2384,6 +2431,14 @@ export class Enemy extends Entity {
           if (this.vanillaId === 412) crawltipedeAI(this, game, p);
           else this.wormAI(game, p);
           break;
+        // ★BJ703-C D3（2026-10-21）：aiStyle 7 非 CountsAsCritter 面（唯 614 爆炸兔
+        //   ——453 骷髅商走 TownNPC 桶不达此）此前落 default zombieAI（释放 1338 放出
+        //   的兔追人=非原版）；原版 aiStyle 7 一律 AI_007（NPC.cs:18879 case 7，
+        //   isLikeATownNPC=false → critter 游荡支）——路由 critterWanderAI（内层
+        //   default → townCritterWalkAI）。★614 不在 TownCritter 集（NPCID.cs:4827）,
+        //   其走/站计时器三闸差异（:54287/:54308/:54382-54389 + 夜间即停支
+        //   :54352-54358）登记债 BJ703-C D7。
+        case 7: this.critterWanderAI(game, hasPlayer ? player : null); break;
         // 玩家死亡也传原对象（A 批 2026-08-19）：法师族对尸体坐标继续运转（cs:20786
         // TargetClosest→:78539 dead 时 faceTarget=false 只冻结朝向,传送采样/弹幕照跑）
         case 8: this.casterAI(game, player ?? null); break; // AI_008 法师族（传送+弹幕）；M11：分发级索敌目标（尸体语义同 case 4）
@@ -2545,6 +2600,39 @@ export class Enemy extends Entity {
       case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
       case 'eye_of_cthulhu': this.eocAI(game, player ?? null); break;
     }
+
+    // ---- ★BJ703-C D6（2026-10-21）：原版小 vx 清零（NPC.cs:91588-91591
+    //      `|vx|<0.005 → 0`，UpdateNPC 在 AI 后、UpdateCollision 前对全体 NPC 无条件
+    //      跑）——刹车/僵立 ×0.8 衰减链的浮点残尾（2.8e-17 量级）不再多活 1 拍；
+    //      帧机站定钉（vx==0 门,如龟族 :77520）读到清零值 = 与原版同拍面。
+    //      本仓拍位 = AI 分发后（碰撞在各 AI 内已毕,拍内位差 <0.005px/tick 无感;
+    //      战士族 0.001 哨兵（:56656-56659）同被清零=原版 :91588 同样清它,零冲突）。
+    //      TownNPC 侧同款缺（独立类 fixedUpdate 全量自写）——登记债 BJ703-C D9。
+    //      ★BJ704-G3 D9（2026-10-21）：TownNPC 侧三臂（微光/被缚/主物理段）已补。
+    //      ★BJ704-G19 销案锁死（G3 备案①「|vx|<0.005 拍位差」,2026-10-21 复核）：
+    //      原版清位在重力后/碰撞前（UpdateNPC :91588-91591）,本仓在 AI 分发后（各
+    //      AI 内碰撞已毕）——差异面=碰撞所见残速 <0.005px/t（亚像素）+ 卡墙稳态
+    //      vx=±acc(≥0.07) 不在清零带（两拍位皆不辖）。【可感知面=零,正式销案】;
+    //      勿再以「拍位与原版不同」重登记——改拍位须重构 Enemy AI 分发/碰撞序,
+    //      收益为亚像素位差=负收益刀。 ----
+    // ---- ★BJ704-G3 D10（2026-10-21）：SubAI_HandleTemporaryCatchableNPC
+    //      PlayerInvulnerability（NPC.cs:91649-91670,UpdateNPC :91533 AI 后即拍）——
+    //      npcCatchable 型（NPC_CATCHABLE,Main.cs:9469+）：`releaseOwner!=255 ‖
+    //      SpawnedFromStatue` → 计数清零（本仓=releasedFromItem/spawnedFromStatue,
+    //      释放/雕像首拍归零）；窗内 friendly=true 且每拍自减,窗外强制 false。
+    //      极性（BJ703-C 登记勘误）：90t 玩家免伤窗属【自然出生】捕获型小动物。
+    //      拍位=AI 分发后（原版 AI() 先于 SubAI → AI 读上拍投影值,本仓同构——
+    //      AI_007 逃逸档 friendly 门在本拍 AI 内读的是上拍 catchFriendly）。
+    //      CheckLifeRegen（:91594,friendly 通道随行）对无 buff 小动物为 no-op
+    //      （lifeRegen=0）——不移植=边界备案。 ----
+    if (this.vanillaId !== null && NPC_CATCHABLE.has(this.vanillaId)) {
+      if (this.releasedFromItem || this.spawnedFromStatue) this.catchImmunityT = 0;
+      this.catchFriendly = this.catchImmunityT > 0;
+      if (this.catchImmunityT > 0) this.catchImmunityT--;
+    } else {
+      this.catchFriendly = false;
+    }
+    if (this.vx < 0.005 && this.vx > -0.005) this.vx = 0;
 
     // ---- AI 家族外的三段恒走点光（与 AI 分发无关，原版各自独立方法）----
     // ★B 批:GlobalNPC PostAI(AI 派发完成后;全域;空表零成本)
@@ -3336,8 +3424,99 @@ export class Enemy extends Entity {
    *  原版 FindFrame 每 tick 在 AI 后跑，其中十余 case 写 rotation；本仓此前只搬了
    *  帧 logic 漏了旋转，2026-08-20 旋转三件套审计补齐。spriteDirection=direction
    *  的 case 全部保留通用 facing 镜像（不进 rotationDriven）。 */
+  /** ★BJ700b 龟族(616/617/625) FindFrame 逐字帧机（NPC.cs case 616 :77486-77530 /
+   *  case 625 :77532-77578;FindFrame 在 UpdateCollision 后跑=读碰撞末态 vx/vy/wet,
+   *  本方法挂 fixedUpdate 尾 findFrameRotation 层同拍面）。三带：
+   *  · 湿泳带 8..13（625:6..11）——阈值 vx==0 加倍（num196 5→10 / num187 4→8）,
+   *    >wetWrap 回 wetBase；616/617 入水【无】带切换（帧号续走,原版 quirk 照抄）,
+   *    625 入水 <wetBase 抬 wetBase（:77543）/ 出水 >wrap 回 0（:77559）。
+   *  · 干走带 0..7（625:0..5）——9t/帧（num195=8,625 num186=7 → 8t）。
+   *  · 站定(vx==0)清零钉帧 0；腾空(vy≠0)清零钉帧行 8（625 无此钉）。
+   *  ★落地节拍:腾空每拍清零 → 落地拍 counter 从 0 起步 → 帧 8 保持 8 拍(L..L+7),
+   *  L+8 拍 8+1=9 过回卷门 >wrap → 帧 0,再 9 拍进 1——「跳旋落地→蜷壳定拍→出壳
+   *  起步」；旧 Renderer 全局相位（floor(t/9)%8）落地即跳任意中幅帧（BJ700b 病灶）。 */
+  private turtleFindFrameStep(): void {
+    const vid = this.vanillaId ?? 0;
+    if (vid !== 616 && vid !== 617 && vid !== 625) return;
+    const sea = vid === 625;
+    const walkStep = sea ? 7 : 8;                                    // num186 / num195
+    const wetStep = this.vx === 0 ? (sea ? 8 : 10) : (sea ? 4 : 5);  // num187 / num196(vx==0 加倍)
+    const wrap = sea ? 5 : 7;                                        // 干带回卷上界
+    const wetBase = sea ? 6 : 8, wetWrap = sea ? 11 : 13;
+    if (this.wet) {
+      if (sea && this.turtleFrame < wetBase) this.turtleFrame = wetBase;   // :77543 入水抬带
+      this.turtleFrameT++;
+      if (this.turtleFrameT > wetStep) {
+        this.turtleFrameT = 0;
+        this.turtleFrame++;
+        if (this.turtleFrame > wetWrap) this.turtleFrame = wetBase;
+      }
+    } else {
+      if (sea && this.turtleFrame > wrap) this.turtleFrame = 0;           // :77559 出水回落带
+      this.turtleFrameT++;
+      if (this.turtleFrameT > walkStep) {
+        this.turtleFrameT = 0;
+        this.turtleFrame++;
+        if (this.turtleFrame > wrap) this.turtleFrame = 0;
+      }
+      if (this.vx === 0) { this.turtleFrameT = 0; this.turtleFrame = 0; } // 站定钉（:77520）
+      if (!sea && this.vy !== 0) { this.turtleFrameT = 0; this.turtleFrame = 8; }   // 腾空钉（:77525,625 无）
+    }
+  }
+
+  /** ★BJ704（用户实报「巨型陆龟倒着走+边走边缩龟壳」定谳）：AI_039 陆龟族 FindFrame
+   *  （NPC.cs:78093-78162,type≠417——417 Sroller 走态 6 专支不入本帧机）。
+   *  旧仓 153/154/496/497 【零帧机路由】=两症状同根：
+   *  · 症状①倒走：态 3 旋冲 visAngle 累计（:8035/:8060）经 justHit 直跳态 0
+   *    （:7728 无中途态 5）后无人清角——原版 FindFrame 态 0 头 :78097 `rotation=0f`
+   *    【每帧复位】是唯一回收点,仓内整块缺失 → 残留 π 量级累计角=倒挂行走;
+   *  · 症状②缩壳帧混播：渲染层无专支落通用年龄循环,8 帧表连播走带(0-4)+缩壳带
+   *    (5-7)=「边走边缩龟壳」（Renderer 533 支同病先例「两带混播」）。
+   *  帧机逐字：态 0 vy==0 → spriteDirection=direction（仓 facing≡direction 同源,
+   *  写面内含）;vy<0 → frameCounter=0（上升锁帧 0）;counter += |vx|×1.1,带
+   *  <6/<12/<18/<24/<32 → 帧 0/1/2/3/4,≥32 回卷（帧 4 多停一拍=原文 else 只清
+   *  counter 不写 Y 的 quirk 照录）。态 1（ai1<10/<20/else→5/6/7）,态 5 反序
+   *  （7/6/5）,态 3/4 恒帧 7+counter=0。 */
+  private tortoiseFindFrameStep(): void {
+    const vid = this.vanillaId ?? 0;
+    if (vid !== 153 && vid !== 154 && vid !== 496 && vid !== 497) return;
+    // ★BJ704-R12 P2-1：496/497 巨贝=FindFrame【双段】——switch case 块（NPC.cs
+    //   :70776-70846）先跑 +=|vx|×1.1 且自身 ≥24 回卷掐周期,switch 外的 aiStyle-39
+    //   尾段（:78093+）再 += 并以尾段帙（0-4/<32）覆写 ⇒ 双增量=走态 ~2×速、帧 4
+    //   仅 ~1t 闪现（|vx|=1 周期 ≈12t）。态 1/5/else 的 case 帙（4/5/6、10/11/3）
+    //   被尾段覆写=无行为差。153/154 无 case 块=单增量（勿连坐）。旧注「帧机逐字」
+    //   对 496/497 不确切,本刀勘正。
+    const shellyDouble = vid === 496 || vid === 497;
+    if (this.ai0 === 0) {
+      this.visAngle = 0;                                   // :78097 逐帧清（justHit 出旋冲残角唯一回收点）
+      if (this.vy < 0) this.tortoiseFrameT = 0;            // :78104 上升锁帧计数（帧落带 0）
+      if (shellyDouble) {
+        this.tortoiseFrameT += Math.abs(this.vx) * 1.1;    // :70788 case 侧第一增量
+        if (this.tortoiseFrameT >= 24) this.tortoiseFrameT = 0;   // :70807-70810 case 侧 ≥24 回卷（Y 不写,尾段再赋）
+      }
+      this.tortoiseFrameT += Math.abs(this.vx) * 1.1;      // :78108 尾段第二增量（153/154=唯一增量）
+      if (this.tortoiseFrameT < 6) this.tortoiseFrame = 0;
+      else if (this.tortoiseFrameT < 12) this.tortoiseFrame = 1;
+      else if (this.tortoiseFrameT < 18) this.tortoiseFrame = 2;
+      else if (this.tortoiseFrameT < 24) this.tortoiseFrame = 3;
+      else if (this.tortoiseFrameT < 32) this.tortoiseFrame = 4;
+      else this.tortoiseFrameT = 0;                        // :78128-78130 回卷（Y 不写=帧 4 多停一拍原文形）
+    } else if (this.ai0 === 1) {
+      this.tortoiseFrameT = 0;
+      this.tortoiseFrame = this.ai1 < 10 ? 5 : this.ai1 < 20 ? 6 : 7;   // :78134-78146 缩壳递进
+    } else if (this.ai0 === 5) {
+      this.tortoiseFrameT = 0;
+      this.tortoiseFrame = this.ai1 < 10 ? 7 : this.ai1 < 20 ? 6 : 5;   // :78149-78161 出壳反序
+    } else {
+      this.tortoiseFrameT = 0;
+      this.tortoiseFrame = 7;                              // :78163-78167 态 3/4 恒壳
+    }
+  }
+
   private findFrameRotation(game?: GameHooks): void {
     const vid = this.vanillaId ?? 0;
+    if (vid === 616 || vid === 617 || vid === 625) this.turtleFindFrameStep();   // ★BJ700b 龟族帧机（无 rotation 写点,只推进计数器）
+    if (vid === 153 || vid === 154 || vid === 496 || vid === 497) this.tortoiseFindFrameStep();   // ★BJ704 陆龟族帧机+态 0 rotation 复位
     if (vid === 75) this.visAngle = this.vx * 0.1;                    // 精灵 :74820
     else if (vid === 122) this.visAngle = this.vx * 0.05;             // 蜗牛怪 :74307
     else if (vid === 330) {
@@ -4817,6 +4996,13 @@ export class Enemy extends Entity {
     } else if (vid === 541) {
       g = 0;
     }
+    // ★BJ704-G6 R3-P2④（2026-10-21 判语销案+完备性备注,勿落死码）：原表此处还有
+    //   `else if (aiStyle == 7 && ai[0] == 25f) gravity = 0f`（NPC.cs:92036-92038）
+    //   ——ai[0]==25 = GetShimmered ShimmerTownTransform 微光上升态（:92695-99
+    //   唯一 setter,城镇 NPC 专属）。Enemy 域不可达：①敌怪侧 aiStyle7=critter 42 型
+    //   （城商族走 TownNPC 桶）,townCritterWalkAI 头 ai0 钳 0..8 恒不达 25;
+    //   ②TownNPC 独立类已移植该档（TownNPC.ts 微光上升臂重力=0,注释锚
+    //   UpdateNPC_UpdateGravity）。补入本表=死码,不入。
     // ① 高空衰减（worldSurface/6 与 (60+10num) 为原版双参，浮点同式；
     //    groundLevel<=0 的手工/测试世界无地表线 → 视作全重力，防 ÷0/NaN）
     const surf = game.world.groundLevel;
@@ -6970,6 +7156,14 @@ export class Enemy extends Entity {
     // 同式：种子/remix 命中才写，经典世界不写=缺省 1 零漂移）
     this.canDisplayBuffs = seedS.canDisplayBuffs !== false;
     if (seedBox || remixHit) this.vanillaScale = seedS.scale / (v.scale ?? 1);
+    // ★BJ704-G3 D10：SetDefaults 全链重跑 ⇒ 捕获窗同链复位——① releaseOwner=255
+    //   （SetDefaults 复位块 NPC.cs:8473）：变身即脱「释放出生」籍（释放鸭湿身
+    //   走→飞形 Transform 后重新计入 nearby 槽=原版同拍）；② catchable 计数重置
+    //   （:17883-17887）——变身型为 npcCatchable 时窗口重新武装（释放鸭变身即
+    //   重新获得 90t 玩家免伤窗=原版 quirk 照单全收）
+    this.releasedFromItem = false;
+    this.catchImmunityT = NPC_CATCHABLE.has(id) ? 90 : 0;
+    this.catchFriendly = this.catchImmunityT > 0;
     // Transform 换音组（如蝙蝠 158→吸血鬼 159 换 NPCHit/Death）同样预热——
     // 变形态首击的懒加载竞态与出生路径同构
     enemySoundPrewarm?.([...this.def.hitSound, ...this.def.killedSound]);
@@ -11005,11 +11199,15 @@ export class Enemy extends Entity {
 
   /** AI_007 小动物行走（NPC.cs:53366-54711 的 TownCritter 路径，isLikeATownNPC=false
    *  → 无对话/坐姿/开门/城镇史莱姆支；homeTileY 恒 −1 → flag22 恒 true → StepDown
-   *  永不跑（stepDownGate='never'）、StepUp holdsMatching 恒 true）。
-   *  速度表（cs:54280-54328）：默认 1/0.07；松鼠族(299/538/539/639-645) 1.5；
+   *  永不跑（stepDownGate='never'——★BJ703-C D1 后 'never' 只辖 StepDown,WalkDownSlope
+   *  预备阶段照跑=原版 :93667）、StepUp holdsMatching 恒 true）。
+   *  速度表（cs:54280-54328）：默认 1/0.07；爆炸兔(614) 危险档 1.5/0.1（:54427-54431
+   *  档头，★BJ703-C D3）；松鼠族(299/538/539/639-645) 1.5；
    *  龟(616/617/625) 陆 0.5、湿 2/acc1（625 覆写：湿 2.5、干 0.2）；鼠(300/447/610)
-   *  2/1；逃逸/溺水加成（friendly&&(flag16||flag21)，:54322-54328）＝1.5+残血×0.9/0.1
-   *  （覆写族表）。青蛙湿身（:54334-54344）：|v|<0.05 补 maxX×10 一窜，否则 ×0.9
+   *  2/1；逃逸/溺水加成（friendly&&(flag16||flag21)，:54467-54473）＝1.5+残血×0.9/0.1
+   *  （覆写族表；★BJ703-C D3 勘误：野生小动物 friendly 恒【假】——npcCatchable 每
+   *  tick 强制清旗 :91649-91670 → 该档野生面不触发=原版语义,释放后 90t 窗未建模
+   *  登记债 D10）。青蛙湿身（:54334-54344）：|v|<0.05 补 maxX×10 一窜，否则 ×0.9
    *  ——替代常规加速。超帽减速 = 向量 ×0.8（:54345-54351）。
    *  节奏：站→走 200+Next(300)+Next(200,400)=400-898（:54156-54168，蛙湿身
    *  700-899 :54049-54056；泡水逃离同式 :54136-54151）；走→站 300+Next(300)−Next(100)
@@ -11026,7 +11224,14 @@ export class Enemy extends Entity {
    *  → num15 双侧最近者；僵立态背向险 → 复走 300-599；非走态 → 走 120-239 + 背向；
    *  走态仅调向（不重置计时）。僵立 ai0=8（:54682-54711）：v×0.8 计时归零回站，
    *  险情续命 180。
-   *  钉水面（cs:55574-55612 flag12&&wet）：龟/蛙 Center 钉 GetWaterLine 液面（蛙走计时→50）。
+   *  钉水面（cs:55706-55750 flag12&&wet，1456 旧注 :55574-55612 漂移）：龟/蛙
+   *  Center 钉 GetWaterLine 液面（蛙走计时→50）;★G6 R3-P2⑤ 重力后移钉面后
+   *  （原版序=AI 内钉面/AI 外重力 :91579-83,旧重力先行=钳界 ±0.2/tick 差）。
+   *  ★G6 D12 避坠（GetWalkPrediction :56241——TownCritter :56268 恒 false=41 型
+   *  零扰动,唯 614 真值）：三消费位=遇险起步门 :54136/站立起走门 :54280（悬崖
+   *  边计时到点改掉头 60-179）/行走前视 :54534（支撑≤2 停走 50-99+40 / 前视无墙
+   *  但会坠（岩浆列）掉头）;★G6 D13 卡墙折返（:54789-54804 无位移+速度仅差重力
+   *  连续 31 拍 → 续走+双翻,快照=moveAndCollide 前）。
    *  鸭/海鸥/鷿鷈行走形(362/364/602/608)：wet（碰撞盒）或 |vy|>4 → Transform(+1) 飞形（cs:53585） */
   private townCritterWalkAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
@@ -11068,6 +11273,13 @@ export class Enemy extends Entity {
     const frog = vid === 361 || vid === 445 || vid === 687;     // flag9 蛙族
     const squirrel = vid === 299 || vid === 538 || vid === 539 || (vid >= 639 && vid <= 645);
     const canBreathe = turtle || frog;   // flag11/flag12：龟蛙水中呼吸（免溺水逃离/钉面）
+    // ★BJ704-G3 D7：NPCID.Sets.TownCritter（NPCID.cs:4827,TOWN_CRITTER_IDS 单源）——
+    //   计时器三闸+夜间即停支的集判据。敌怪侧 aiStyle7 达此的 42 型中唯 614 爆炸兔
+    //   非集成员（城商族走 TownNPC 桶不达）→ 起走短计时/站立长计时+夜间归家即停。
+    //   avoidFalling 面（GetWalkPrediction :56241——TownCritter 恒 false :56268,
+    //   614 真值）★BJ704-G6 D12 已接通（npcWalkPrediction.ts 共享叶子,三消费位
+    //   :54136 危险起步门/:54280 站立起走门/:54534 行走前视→悬崖停走+避坠掉头）
+    const townCritter = TOWN_CRITTER_IDS.has(vid);
     // ---- homeTile 锚（:53683-53699 出生一次：X=出生列,Y 恒 -1）+ FindGoodRestingSpot
     //  日间 floorX/floorY（:53195-53217：自 home 列下扫首个实心/站台；夜椅搜索未移植）----
     if (this.critterHomeX === -1) {
@@ -11092,11 +11304,25 @@ export class Enemy extends Entity {
       // `!flag11 && Collision.DrownCollision(position, width, height, 1f, includeSlopes: true)`
       // ★F4②（2026-09-01）：includeSlopes 补 true——坡面/半砖带液计水触发溺逃
       && drownCollision(st, this.x, this.y, this.w, this.h, 1, true);
+    // ★BJ704-G6 R3-P2⑤/D13 前置单源：湿侧重力档（UpdateNPC_UpdateGravity
+    //   :92055-92064 水 0.2/帽 7、蜜 0.1/4、微光 0.15/5.5——绝对值直替,覆盖
+    //   高空系数）。重力应用行已随 R3-P2⑤ 后移到钉面之后（=原版 AI 内钉面/
+    //   AI 外重力 :91579-83 同序）;D13 卡墙检查在行走臂尾（重力前）读此值。
+    const wetGrav = this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2;
+    const wetCap = this.shimmerWet ? 5.5 : this.honeyWet ? 4 : 7;
     // ---- 危险扫描（cs:53884-54028，每 tick；乌龟整段跳过）----
     let danger = false;           // flag16
     let dangerDir = -1;           // num15：朝最近险情侧
     if (!turtle) {
-      let leftDelta = -1, rightDelta = -1;   // num13（左侧最近,负）/ num14（右侧最近,正）
+      let leftDelta = -1, rightDelta = -1;   // num13 槽/ num14 槽（非 614=左最近负/右最近正）
+      // ★BJ704-R3 P1②：614 爆炸兔互换支（:54049-54061）——左距入 num14/右距入
+      //   num13,且守卫跨侧互斥（先见侧独占,后见同侧覆写=扫描序末位;两侧槽永不
+      //   并存,最近比较式不再达）→ num15 同式（:54103）反转 → direction=-num15
+      //   （:54156-54163,flag2=感染种向导专属 614 恒 false）=【追险情】——爆炸兔
+      //   冲向敌怪送死引爆=物品 1338 武器语义（危险速度档 1.5/0.1 BJ703-C D3 与
+      //   追向合成=冲刺扑敌）。★仅 NPC 支互换：玩家 stinky 支（:54088-54100）
+      //   原版无 614 特判=照常【逃离】臭玩家（原版 quirk 逐字保真）。
+      const swap614 = vid === 614;
       for (const o of game.enemies()) {
         const e = o as Enemy;
         if (e === this || e.dead) continue;
@@ -11110,8 +11336,8 @@ export class Enemy extends Entity {
           && !canHit(st, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         danger = true;
         const dx = e.cx - this.cx;
-        if (dx < 0 && (leftDelta === -1 || dx > leftDelta)) leftDelta = dx;
-        if (dx > 0 && (rightDelta === -1 || dx < rightDelta)) rightDelta = dx;
+        if (dx < 0 && (leftDelta === -1 || dx > leftDelta)) { if (swap614) rightDelta = dx; else leftDelta = dx; }
+        if (dx > 0 && (rightDelta === -1 || dx < rightDelta)) { if (swap614) leftDelta = dx; else rightDelta = dx; }
       }
       // 玩家 stinky 支（:54081-54100）：无 NPC 险情时,带臭味的玩家也置 flag16/17
       // ——num13/num14 并入同一方向结算（critter 分支只消费 num15,不消费 num16/17
@@ -11128,11 +11354,13 @@ export class Enemy extends Entity {
         }
       }
       if (danger) {
-        // num15（:53959）：右侧更近取 1 否则 −1
+        // num15（:54103）：num13 槽==-1→1 / num14 槽在→num14<−num13 取向 / 否则 −1。
+        //  614 经上方互换支=num13 装右距/num14 装左距 → 本式产出反向 → 三消费位
+        //  facing=-dangerDir 随之=追险情（非 614=逃离最近险情侧,原语义）。
         dangerDir = leftDelta === -1 ? 1
           : rightDelta !== -1 ? (rightDelta < -leftDelta ? 1 : -1) : -1;
         if (this.ai0 === 8) {
-          // 僵立背向险情 → 复走（:53969-53978）
+          // 僵立背向险情 → 复走（:54146-54156;614 互换后=面向险情即复走=扑敌前奏）
           if (this.facing === -dangerDir) {
             this.ai0 = 1;
             this.ai1 = 300 + Math.floor(Math.random() * 300);
@@ -11140,14 +11368,27 @@ export class Enemy extends Entity {
             this.lai3 = 0;
           }
         } else if (this.ai0 !== 1) {
-          // 非走态 → 起步逃离（:54007-54019；TownCritter 的 avoidFalling 恒 false）
-          this.ai0 = 1;
-          this.ai1 = 120 + Math.random() * 120;
-          this.ai2 = 0;
-          this.lai3 = 0;
-          this.facing = -dangerDir;
+          // ★BJ704-G6 D12①：非走态 → 起步逃离门（NPC.cs:54130-54170——先
+          //   GetWalkPrediction（:54136,前视探针=center+15·dir/脚上一行,同
+          //   :54277/:54520 三站同式）,!avoidFalling 才整段起步+定向。TownCritter
+          //   :56268 恒 false=41 型零扰动;唯 614：悬崖边遇险不冲（原位僵待险情
+          //   离开——方向也不写=原版整段包在 if 内）。flag2（感染种向导）614 恒
+          //   false → direction=-num15（追险情,R3 互换支）不引入新分支。
+          const tileX1 = Math.floor((this.x + this.w / 2 + 15 * this.facing) / TILE);
+          const tileY1 = Math.floor((this.y + this.h - 16) / TILE);
+          const avoidFalling1 = walkPrediction(
+            st, Math.floor((this.x + this.w / 2) / TILE), homeX, townCritter,
+            this.facing, tileX1, tileY1, this.h, false, wet && !canBreathe, false, this.w,
+          ).avoidFalling;
+          if (!avoidFalling1) {
+            this.ai0 = 1;
+            this.ai1 = 120 + Math.random() * 120;
+            this.ai2 = 0;
+            this.lai3 = 0;
+            this.facing = -dangerDir;
+          }
         } else if (this.facing !== -dangerDir) {
-          this.facing = -dangerDir;   // 走态仅调向,不重置计时（:54022-54026）
+          this.facing = -dangerDir;   // 走态仅调向,不重置计时（:54168-54175）
         }
       }
     }
@@ -11158,6 +11399,12 @@ export class Enemy extends Entity {
       if (this.tryTransformTo(vid + 1, st, false, game)) { this.ai0 = 0; this.ai1 = 0; }
       return;
     }
+    // ★BJ704-G3 D7：IsInAGoodRestingSpot（NPC.cs:53165-53183 非坐姿路径）单源求值
+    //   ——蛙湿恒否;余 = 正踩 (floorX,floorY)。原版 AI 头 :53851-52 算 num6/num7 后
+    //   站/走两臂共用（AI 内无位移,状态机前一次求值等价）
+    const restSpot = !((vid === 361 || vid === 445 || vid === 687) && wet)
+      && Math.floor((this.x + this.w / 2) / TILE) === homeX
+      && Math.floor((this.y + this.h + 1) / TILE) === floorY;
     if (this.ai0 === 0) {
       // ---- 站立（:54103-54202）----
       // 自身 stinky(120) 强制起走（:54179-54182 `if (stinky) ai[0] = 1f;`——带臭味的
@@ -11170,31 +11417,73 @@ export class Enemy extends Entity {
         this.ai1 = 200 + 500 + Math.floor(Math.random() * 200);
         this.ai2 = 0;
         this.lai3 = 0;
+      } else if (notCalm && !townCritter) {
+        // ★BJ704-G3 D7：夜间/风雨即停支·站定臂（NPC.cs:54202-54244
+        //   `else if (flag && !flag5 && !TownCritter[type])`——flag=notCalm,
+        //   flag5=对话中,敌怪侧小动物无对话恒假）。614 爆炸兔等非 TownCritter 型
+        //   夜间不再游荡：正踩家格（IsInAGoodRestingSpot :53165——蛙湿恒否,余=正踩
+        //   (floorX,floorY)）→ 刹停挂机（原版续跑 AI_007_TryForcingSitting :53413
+        //   椅面检测转 ai[0]=5 坐姿——敌怪侧坐姿态未建模=边界备案,免刹停不坐）;
+        //   不在家 → 朝家走 200+Next(200)（该臂取代常规件——站计时递减/泡水逃离
+        //   全部跳过,即夜袭/雨夜 614 恒归家）
+        const num6n = Math.floor((this.x + this.w / 2) / TILE);
+        const num7n = Math.floor((this.y + this.h + 1) / TILE);
+        if (num6n === homeX && num7n === floorY) {
+          if (this.vx > 0.1) this.vx -= 0.1;                // 同款 ±0.1 线性刹车（:54212-54220）
+          else if (this.vx < -0.1) this.vx += 0.1;
+          else this.vx = 0;
+        } else {
+          this.facing = num6n > homeX ? -1 : 1;             // :54234-54237 朝家定向
+          this.ai0 = 1;
+          this.ai1 = 200 + Math.floor(Math.random() * 200);   // :54238 200-399
+          this.ai2 = 0;
+          this.lai3 = 0;
+        }
       } else {
         if (rat) this.vx *= 0.5;                            // :54105-54108
         if (this.vx > 0.1) this.vx -= 0.1;                  // ±0.1 线性刹车（:54109-54120）
         else if (this.vx < -0.1) this.vx += 0.1;
         else this.vx = 0;
         if (this.ai1 > 0) this.ai1 -= 1;
+        // ★BJ704-G6 D12②：站立起走 avoidFalling 门（NPC.cs:54276-54322——
+        //   GetWalkPrediction（:54280）后 `flag20 && !avoidFalling2`（flag20 仅
+        //   被 avoidFalling2 置 false ≡ 取非）才 startWalk；else = 掉头 +
+        //   站计时 60+Next(120)=60-179（:54314-54318）。TownCritter 恒 false
+        //   =旧直通;唯 614：悬崖边站计时到点不起步,改朝崖背侧掉头再等。
+        //   泡水逃离（:54282-95）前置且【不受门辖】——照旧先行。
+        const tileX2 = Math.floor((this.x + this.w / 2 + 15 * this.facing) / TILE);
+        const tileY2 = Math.floor((this.y + this.h - 16) / TILE);
+        const avoidFalling2 = walkPrediction(
+          st, Math.floor((this.x + this.w / 2) / TILE), homeX, townCritter,
+          this.facing, tileX2, tileY2, this.h, false, wet && !canBreathe, false, this.w,
+        ).avoidFalling;
         const startWalk = (): void => {
           this.ai0 = 1;
+          // ★BJ704-G3 D7：startWalk 两拍同门（:54161-54166/:54289-54292/:54305-54311）
+          //   ——TownCritter 型 +Next(200,400)=400-898;非集（614）裸 200+Next(300)
+          //   =200-499（短起走计时）
           this.ai1 = 200 + Math.floor(Math.random() * 300)
-            + 200 + Math.floor(Math.random() * 200);        // 400-898（:54161-54166）
+            + (townCritter ? 200 + Math.floor(Math.random() * 200) : 0);
           this.ai2 = 0;
           this.lai3 = 0;
         };
         if (wet && !canBreathe && drowning) {
           startWalk();                                       // 泡水逃离（:54136-54151）
         } else if (this.ai1 <= 0) {
-          startWalk();
+          if (!avoidFalling2) {
+            startWalk();
+          } else {
+            this.facing *= -1;                               // :54315 掉头（悬崖背侧）
+            this.ai1 = 60 + Math.floor(Math.random() * 120); // :54316 60-179
+          }
         }
       }
       // ---- 家域约束（:54179-54202，仅站立态）----
       const num6 = Math.floor((this.x + this.w / 2) / TILE);
       const num7 = Math.floor((this.y + this.h + 1) / TILE);
       // IsInAGoodRestingSpot（:53165-53183）：蛙湿身恒否；余 = 正踩 (floorX,floorY)
-      const atRest = !((vid === 361 || vid === 445 || vid === 687) && wet)
-        && num6 === homeX && num7 === floorY;
+      // ★BJ704-G3 D7：改读 AI 头单源 restSpot（同式同值——AI 内无位移）
+      const atRest = restSpot;
       if (!notCalm || atRest) {
         if (num6 < homeX - 25 || num6 > homeX + 25) {
           if (this.lai3 === 0) {
@@ -11206,8 +11495,11 @@ export class Enemy extends Entity {
           this.facing *= -1;
         }
       }
-    } else if (this.ai0 === 1) {
+    } else if (this.ai0 === 1 && !(notCalm && !townCritter && restSpot)) {
       // ---- 行走（:54205-54658）----
+      // ★BJ704-G3 D7：分支头排夜间即停态（NPC.cs:54352-54358 `flag &&
+      //   IsInAGoodRestingSpot && !TownCritter → 停走`——取非入行走条件,夜态转
+      //   下方专用臂 = 原版 if/else 同构,行走体零位移改动）
       if (!drowning) {
         // 离家 >35 格逆行 → 走计时额外 −5（:54219-54229）
         const num6w = Math.floor((this.x + this.w / 2) / TILE);
@@ -11218,15 +11510,22 @@ export class Enemy extends Entity {
         this.ai1 -= 1;
       }
       if (this.ai1 <= 0) {
-        // 走→站（:54232-54246，TownCritter 300+Next(300)−Next(100)=201-599）
+        // 走→站（:54232-54246）★BJ704-G3 D7 集判据：TownCritter −Next(100)
+        //   =300+Next(300)−Next(100)=201-599;非集（614）+Next(900)
+        //   =300+Next(300)+Next(900)=300-1498（长站立计时）
         this.ai0 = 0;
-        this.ai1 = 300 + Math.floor(Math.random() * 300) - Math.floor(Math.random() * 100);
+        this.ai1 = 300 + Math.floor(Math.random() * 300)
+          + (townCritter ? -Math.floor(Math.random() * 100) : Math.floor(Math.random() * 900));
         this.ai2 = 0;
         this.lai3 = 60;
       }
       // ---- 速度表（:54280-54328）----
       let maxX = 1, acc = 0.07;
-      if (squirrel) maxX = 1.5;
+      // ★BJ703-C D3：档头 (type==614)&flag16 → 1.5/0.1（NPC.cs:54427-54431——爆炸兔
+      //   危险档;else-if 链头位,无危险时 614 落全默认 1/0.07）
+      if (vid === 614 && danger) {
+        maxX = 1.5; acc = 0.1;
+      } else if (squirrel) maxX = 1.5;
       else if (turtle) {
         if (wet) { acc = 1; maxX = 2; } else { acc = 0.07; maxX = 0.5; }
       }
@@ -11234,8 +11533,18 @@ export class Enemy extends Entity {
         if (wet) { acc = 1; maxX = 2.5; } else { acc = 0.07; maxX = 0.2; }
       }
       if (rat) { maxX = 2; acc = 1; }
-      if (danger || drowning) {
-        // 逃逸/溺水加成（:54322-54328，friendly 恒真）：1.5+残血比×0.9 / 0.1
+      // ★BJ703-C D3 勘误：逃逸/溺水加成（:54467-54473）原注「friendly 恒真」系误读
+      //   ——野生小动物 friendly 恒【假】：SubAI_HandleTemporaryCatchableNPCPlayer
+      //   Invulnerability（NPC.cs:91649-91670）对 87 型 npcCatchable（Main.cs:9469+）
+      //   每 tick 强制 friendly=false（释放后 90t 免疫窗 :17885 例外——本仓未建模,
+      //   登记债 D10）；SetDefaults 侧亦仅蠕虫 357 等零星置 true。补 friendly 门后
+      //   野生小动物遇险/溺水维持族速（原版语义;城镇 NPC 面 friendly=true 不受影响
+      //   ——TownNPC.ts 独立 AI 不走此）。
+      // ★BJ704-G3 D10：friendly 读运行时投影（NPC.friendly 当前值——npcCatchable 型
+      //   被 SubAI 每拍强写:自然出生首 90t 窗内 true → 逃逸档生效（新刷小动物遇险
+      //   1.5+残血×0.9 族速）,窗外/释放/雕像 false → 族速；蚱蜢 377/446 json
+      //   friendly=true 静态位与窗并行=原版 AI_001 自清 :62057-66 双清结构同构）
+      if (((this.vanilla?.friendly ?? false) || this.catchFriendly) && (danger || drowning)) {
         maxX = 1.5 + (1 - this.hp / this.maxHp) * 0.9;
         acc = 0.1;
       }
@@ -11257,7 +11566,38 @@ export class Enemy extends Entity {
       if (this.vy === 0) {
         const num26 = Math.floor((this.x + this.w / 2 + 15 * this.facing) / TILE);
         const num27 = Math.floor((this.y + this.h - 16) / TILE);   // ★脚上一行
-        let keepwalking = drowning;         // GetWalkPrediction TownCritter 支（:54403）
+        // ★BJ704-G6 D12③：行走前视预测真值（NPC.cs:54534——GetWalkPrediction
+        //   (num6,floorX,flag11,flag21,num25,num26)：critter 无 isLikeATownNPC →
+        //   keepwalking=drowning 单值（=旧实现同构）;avoidFalling 对 614 真值。
+        //   flag24（:54537 isLikeATownNPC 跳出水面旗）critter 恒 false。
+        const pred3 = walkPrediction(
+          st, Math.floor((this.x + this.w / 2) / TILE), homeX, townCritter,
+          this.facing, num26, num27, this.h, false, drowning, false, this.w,
+        );
+        let keepwalking = pred3.keepwalking;
+        let avoidFalling3 = pred3.avoidFalling;
+        // ★BJ704-G6 D12③a：悬崖停走（NPC.cs:54556-54577——avoidFalling 且脚下
+        //   3 支撑格（中心±1 × 地面行 num26+1,`nactive() && Main.tileSolid`
+        //   =isVanillaTileSolid,平台计入/家具顶不计——BJ656 三站同式）≤2 →
+        //   停走：ai0=0/站计时 50+Next(50)=50-99/lai3=40,keepwalking 与
+        //   avoidFalling 同拍清 false（后续障碍段 keepwalking→90 与避坠掉头
+        //   分支均不再消费）。不早退=原版续跑跳点回位/障碍链。
+        if (avoidFalling3) {
+          const centerCol = Math.floor((this.x + this.w / 2) / TILE);
+          let support = 0;
+          for (let d = -1; d <= 1; d++) {
+            const sx = centerCol + d, sy = num27 + 1;
+            if (st.inBounds(sx, sy) && st.isActive(sx, sy) && st.isVanillaTileSolid(sx, sy)) support++;
+          }
+          if (support <= 2) {
+            keepwalking = false;
+            avoidFalling3 = false;
+            this.ai0 = 0;
+            this.ai1 = 50 + Math.floor(Math.random() * 50);
+            this.ai2 = 0;
+            this.lai3 = 40;
+          }
+        }
         const solidNotTop = (x: number, y: number): boolean =>
           st.inBounds(x, y) && st.isActive(x, y) && st.isSolid(x, y) && !st.isPlatform(x, y);
         const solidTiles = (x1: number, x2: number, y1: number, y2: number): boolean => {
@@ -11330,6 +11670,21 @@ export class Enemy extends Entity {
             } else {
               turn = true;
             }
+          } else if (avoidFalling3) {
+            // ★BJ704-G6 D12③b：避坠掉头（NPC.cs:54710-54716——前视列无墙
+            //   （t5/t4/半砖三档全空）但会坠崖/入岩浆 → flag26 掉头;flag16 险情
+            //   另置 flag27 僵立（`if(!flag24) flag26`——flag24=跳出水面旗
+            //   critter 恒 false=恒掉头）。可达面（探针列≈中心±1 格,与支撑
+            //   三列共面）：岩浆前视（:56236-40 液断先于实心 → 恒避）为主
+            //   ——深水/悬空因支撑 ≤2 先落 ③a 停走分支。flag14（城镇史莱姆
+            //   跳水）不移植——★BJ704-G19 销案锁死（G3 备案③,2026-10-21 复核）：
+            //   flag14 = NPCID.Sets.IsTownSlime[type]（:56329/:56347——城镇史莱姆
+            //   专属跳水/避水支）。Enemy 域 aiStyle7 = 42 型 critter,零成员在
+            //   IsTownSlime 集（城镇史莱姆走 TownNPC 桶,仓内消费面= TownNPC.ts
+            //   flag14 臂）→ 本域恒 false=结构性不可达。【正式销案,勿以「walk AI
+            //   有 flag14 分支未移植」重登记——正确宿主在 TownNPC 域且已接】。
+            turn = true;
+            if (danger) freeze = true;
           }
           if (freeze) {                          // 危险中跳不过 → 僵立 240t（:54595-54602）
             keepwalking = false;
@@ -11345,8 +11700,49 @@ export class Enemy extends Entity {
           if (this.vy < 0) this.lai3 = this.x;   // 记跳点 X（:54614-54617）
         }
         if (this.vy < 0 && wet) this.vy *= 1.2;  // :54619-54622（湿身恒乘）
-        if (this.vy < 0 && !rat) this.vy *= 1.2; // :54623-54626 TownCritter 补偿（鼠豁免）
+        // ★BJ704-R9 P1-1：:54754 原文 = `vy<0 ∧ TownCritter[type] ∧ !flag7`——614 非
+        //   集成员（D7 定谳）→ 原版对 614 干跳无第二乘（障碍跳 -6/-5/-4.4 原值）。
+        //   旧 `!rat` 恒乘 = 614 跳 -7.2/-6.0/-5.28 偏高（BJ703-C 前旧码,D3 路由转活;
+        //   D7 集判据刀扫了计时器四闸,漏同 AI 第五个 TownCritter 消费面）。
+        if (this.vy < 0 && !rat && (this.vanillaId !== null && TOWN_CRITTER_IDS.has(this.vanillaId))) this.vy *= 1.2; // TownCritter 补偿（鼠豁免,614 不乘）
       }
+      // ★BJ704-G6 D13：卡墙折返（NPC.cs:54789-54804——`oldPosition==position &&
+      //   oldVelocity==velocity+(0,gravity) && !flag16 && localAI[2]++>=30` →
+      //   续走 200+Next(300)（+TownCritter Next(200,400)=三拍第三处,G3 D7 已注）
+      //   +direction/velocity.X 双翻,localAI[2] 清零再积）。oldPosition/oldVelocity
+      //   语义 = 上拍 UpdateCollision（:93681 oldVelocity=AI+重力后碰撞前 /
+      //   :93748 oldPosition=position+=前）——本仓 = 下方 moveAndCollide 前快照
+      //   （critterPreMoveX/Y + critterOldVX/VY,重力+钉面后）;检查点在行走臂尾
+      //   （本拍重力前）：this.x/y=上拍碰撞后位置 ↔ oldPosition==position 同构;
+      //   critterOldVY===vy+g ↔ oldVelocity==velocity+(0,gravity)（g=本拍将加
+      //   重力,湿 wetGrav/干 0.3 平档——高空带 D11 备案不缩放,与重力行同值）。
+      //   ★可达面（先证可达再落刀——1 格墙场景）：前视 t3 实心/t4·t5 空
+      //   （1 格台阶）且 StepUp 无净空失败（applyStepUp flag 门 j=2 探柱被
+      //   顶棚拦）→ 障碍三档全不触发、碰撞逐拍清 vx → 每拍两条件恒真,31 拍
+      //   （后置 ++ 比较旧值）触发;鼠类槽位折返（vx×0）同稳态。危险（flag16）
+      //   抑制且不计数（短路 ++ 在前三真后）;计数粘滞=原版 localAI[2] 无衰减
+      //   清零（仅触发时归零）。残差备案：原版 |vx|<0.005→0（:91586）在重力后
+      //   碰撞前,本仓 D6 拍位在碰撞后——卡墙稳态 vx=±acc(≥0.07)>0.005 不受辖。
+      if (this.x === this.critterPreMoveX && this.y === this.critterPreMoveY
+        && this.critterOldVX === this.vx && this.critterOldVY === this.vy + (this.wet ? wetGrav : ENEMY_GRAVITY)
+        && !danger && this.lai2++ >= 30) {
+        this.lai2 = 0;
+        this.ai0 = 1;                                        // :54794 续走（走态幂等）
+        this.ai1 = 200 + Math.floor(Math.random() * 300)
+          + (townCritter ? 200 + Math.floor(Math.random() * 200) : 0);   // :54795-98 三拍第三处
+        this.ai2 = 0;
+        this.facing *= -1;                                   // :54799 双翻
+        this.vx *= -1;
+      }
+    } else if (this.ai0 === 1) {
+      // ★BJ704-G3 D7：夜间即停支·行走臂（NPC.cs:54352-54358——notCalm ∧
+      //   IsInAGoodRestingSpot ∧ !TownCritter → 立即停走回站,200+Next(200) 站计时
+      //   +localAI[3]=60;速度表/台阶跳整段跳过=原版 else 结构同构）。614 夜间走到
+      //   家位即挂机（TownCritter 型无此臂=夜行游荡照旧）
+      this.ai0 = 0;
+      this.ai1 = 200 + Math.floor(Math.random() * 200);
+      this.ai2 = 0;
+      this.lai3 = 60;
     } else if (this.ai0 === 8) {
       // ---- 僵立（:54682-54711）----
       this.vx *= 0.8;
@@ -11359,15 +11755,24 @@ export class Enemy extends Entity {
         this.lai3 = 30 + Math.floor(Math.random() * 60);
       }
     }
-    // ---- 龟/蛙钉水面（cs:55574-55612 flag12&&wet，AI_007 顶层非状态分支）----
+    // ---- 龟/蛙钉水面（cs:55706-55750 flag12&&wet，AI_007 顶层非状态分支——
+    //      旧注 :55574-55612 系 1456 行带漂移）----
     // flag12 = 龟族(616/617/625) ∪ 蛙族(361/445/687)。湿身时 Center 钉在 GetWaterLine
     // 线上（Collision.cs:1501，液面 = 行×16 − liquid/16 整除）：线下 → 上浮 0.8 钳 −4
     // 且不过线（num95=Center+1）；线上 → 只允许落到线。蛙另把走计时砍到 50（连窜）。
     // 撞墙/贴图边 → 掉头 ×−0.25。无液面可钉（中心上 2 行仍有液=深处/越界）→ vy−0.2。
-    // 重力走原版湿侧（UpdateNPC_UpdateGravity :91936：0.2/落速帽 7）——干侧
-    // ENEMY_GRAVITY 0.3（原版 npc.gravity，2026-08-20 对齐批换正）
+    // 湿侧重力档（UpdateNPC_UpdateGravity :92055-92064 wet 尾置直替：water 0.2/帽 7、
+    // honey 0.1/4、shimmer 0.15/5.5——全 NPC 无差别）——★BJ703-C D2（2026-10-21）：
+    // 旧实现 wet 0.2/帽 7 只覆盖龟/蛙（pinSurface 门），其余湿身小动物（兔/企鹅/鼠…）
+    // 0.3/10 = 原版漂移；且龟/蛙在蜜/微光中恒 0.2/7（原版 0.1/4、0.15/5.5）同修。
+    // 干侧平 0.3/10 维持（原版高空衰减 num2 钳 0.25 带仅空域生效——真世界地表
+    // num2=1 恒等;applyGravity 全档化登记债 BJ703-C D11 备案）
+    // ★BJ704-G6 R3-P2⑤（2026-10-21）：重力应用后移到钉面【后】——原版钉面在
+    //   AI 内（:55706-50）、重力在 AI 外（UpdateNPC :91579-83 AI() 后统一
+    //   `velocity.Y+=gravity` + maxFallSpeed 钳）,旧序（重力先行）= 钳界
+    //   ±0.2/tick vy 差（`min(vy,line−anchor)` 支:原版=钳值+0.2 / 旧=钳值;
+    //   −0.8 支 −4 钳:原版 −3.8 / 旧 −4;无液面支 −0.2↔+0.2 交换=净零,不受序影响）。
     const pinSurface = (turtle || frog) && wet;
-    this.vy = Math.min(this.vy + (pinSurface ? 0.2 : ENEMY_GRAVITY), pinSurface ? 7 : MAX_FALL_SPEED);
     if (pinSurface) {
       if (frog) this.ai1 = 50;
       const ctx = Math.floor(this.cx / TILE);
@@ -11389,7 +11794,21 @@ export class Enemy extends Entity {
         this.vy -= 0.2;                                   // 与湿侧重力 0.2 抵消 → 深水中性悬浮
       }
     }
-    // StepDown 门（AI_007 critter：flag22 恒 true → 原版永不 StepDown）
+    // ★BJ704-G6 R3-P2⑤：重力 = AI 外（原版 :91579-83 UpdateNPC 在 AI() 后统一
+    //   加 + maxFallSpeed 钳）——钉面先行、重力+帽后置 = 原版序（见上块注）。
+    this.vy = wet
+      ? Math.min(this.vy + wetGrav, wetCap)
+      : Math.min(this.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
+    // ★BJ704-G6 D13：卡墙折返快照（=原版 oldPosition :93748 / oldVelocity
+    //   :93681——移动前/碰撞前采样;含重力+钉面终值）。仅本 AI 族读写; duck
+    //   Transform/blackened 松鼠转族后不再回本 AI=残值无害。
+    this.critterPreMoveX = this.x;
+    this.critterPreMoveY = this.y;
+    this.critterOldVX = this.vx;
+    this.critterOldVY = this.vy;
+    // StepDown 门（AI_007 critter：flag22 恒 true → 原版永不 StepDown）。
+    // ★BJ703-C D1：'never' 只辖 StepDown——moveAndCollide 内的 WalkDownSlope 预备
+    //   阶段（= 原版 UpdateCollision 首步 :93667,无条件跑）已解耦照跑,下坡贴地。
     this.stepDownGate = 'never';
     moveAndCollide(this, game.world, this.vx, this.vy);
     // （原版行走态无地面摩擦：velocity.X 持续到 cap，仅站立 ±0.1 刹车 + 超帽向量
@@ -12793,7 +13212,11 @@ export class Enemy extends Entity {
     // TakesDamageFromHostilesWithoutBeingFriendly[type])`——37 老人（friendly=true）
     // 显式豁免互殴通道；T-set 96 型（松露虫 374 等）非 friendly 也开 AllNPCs 通道
     const friendlyChannel = id !== 37
-      && (!!this.def.friendly || Enemy.TAKES_DAMAGE_FROM_HOSTILES.has(id));
+      // ★BJ704-G3 D10：friendly 读运行时投影（:91592 原文 `friendly || T-set`——
+      //   npcCatchable 型窗内 friendly=true ⇒ 自然出生小动物首 90t 互殴通道开
+      //   （敌怪接触可伤）;窗外强制 false 通道关（玩家可打/敌怪不可打的稳态反转
+      //   = TemporaryCatchableNPCPlayerInvulnerability 本义）
+      && (!!this.def.friendly || this.catchFriendly || Enemy.TAKES_DAMAGE_FROM_HOSTILES.has(id));
     if (!friendlyChannel && !beeHurtable) return;
     // npcsFoundForCheckActive 预门（:91540）：蜂通道需场上有蜂——懒扫等价（无蜂
     // 即无蜂攻击者，循环体自筛）；enemies 缺省 = 测试桩无实体桶，静默跳过
@@ -15656,7 +16079,9 @@ export class Enemy extends Entity {
       //  （DropItemFromNPC CommonCode.cs:13-14 position+w/2,+h/2）；窗口=整个掉落段
       //  （规则+钱币+心星+Boss 药水+MP instanced 袋+地牢魂墙门,原版 NPCLoot 全程顶替
       //  ——死亡音/尘/gore 在原版 HitEffect/78997 先行,不在此窗,仍用头真位）。
-      //  段 dead 不滤：级联 :15631 已先翻位而原版 active=false 在 NPCLoot 后才置
+      //  段 dead 不滤：级联段（上方「蠕虫任一段死亡 → 整链同死」s.dead=true 循环,
+      //  ★BJ704-G6 注锚随迁——旧自引行号 :15631→:15723 系本文件增行漂移,改按
+      //  代码身份引用防再漂）已先翻位而原版 active=false 在 NPCLoot 后才置
       //  （数组在场=active 同义）;含头自身（原版扫描含 whoAmI 槽,头最近时锚=头）。
       //  非 134 恒自身中心 = 零漂移（134 的规则集无位置条件,ctx.x/y 不受影响）。
       let lootX = this.cx, lootY = this.cy;
@@ -16019,6 +16444,23 @@ export class Enemy extends Entity {
       // 傀儡端不加门=通用支语义（客户端也出 132/133）
       if (!wofHungryAuthority) {
         spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
+      }
+      // ★BJ704-R3 P1②b：爆炸兔死亡爆弹（checkDead case 614,NPC.cs:80182-80191——
+      //  1.4.4 起【任意死因】的兔 614 皆炸:NewProjectile(Center,0,0,281,dmg,kb 0,
+      //  owner=Main.myPlayer,ai[0]=-2,ai[1]=releaseOwner+1)。dmg=175,
+      //  SpawnedFromStatue → 0（雕像兔=纯 FX 爆,Arrow.bunnyBlastExplode damage<=0
+      //  早退）。释放链 releasedFromItem → ai[1]=1（爆炸可炸释放者本人,Arrow 侧
+      //  :14873-77 门）;野兔 releaseOwner=255 → 256（不可炸玩家）。弹体侧 AI_049
+      //  头 :28651-56 hostile+Kill 即灭,载荷全在 Kill case 281（盒扩 128×128+
+      //  dealContacts idStatic 10+FX）。兔炮 1338 弹药面/活兔投掷支（ai[0]>=0
+      //  跳跃态）未实装=边界声明（另刀）。
+      if (this.vanillaId === 614) {
+        const bBlast = new Arrow(this.cx - 14, this.cy - 14, 0, 0,
+          this.spawnedFromStatue ? 0 : 175, 0, 281, {});
+        bBlast.bunnyBlastForm = -2;
+        bBlast.bunnyOwner = this.releasedFromItem ? 1 : 256;
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
+          .add(bBlast, 'projectiles');
       }
       // 死亡尘各精确块（鸟族/猪鲨/圣骑士/唾液/岩浆族）已全部转查表（BJ254,上方
       // spawnNpcDeathDust 单源）；★通用彩色粒子近似（def.gore 三簇 spawnParticles）

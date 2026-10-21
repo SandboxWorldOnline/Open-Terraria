@@ -103,7 +103,11 @@ const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' |
   317: { branch: 'generic', impl: 'generic' }, 373: { branch: 'generic', impl: 'generic' },
   375: { branch: 'generic', impl: 'generic' }, 377: { branch: 'generic', impl: 'generic' },
   387: { branch: 'generic', impl: 'generic' }, 390: { branch: 'generic', impl: 'generic' },
-  407: { branch: 'generic', impl: 'generic' }, 533: { branch: 'generic', impl: 'generic' },
+  407: { branch: 'generic', impl: 'generic' },
+  // 533 致命球：★BJ704-G9 插队刀（用户实报自旋原点不对）——原版真身=:30609 glowmask
+  // 族支（:31578 盒心+帧心,提取器四支口径归 generic）;本仓 impl 改 'special'
+  // （MinionProj.draw 533 专支,旧落通用尾=锚错位）。946 同形（branch generic/impl special）。
+  533: { branch: 'generic', impl: 'special' },
   688: { branch: 'generic', impl: 'generic' }, 689: { branch: 'generic', impl: 'generic' },
   690: { branch: 'generic', impl: 'generic' }, 755: { branch: 'generic', impl: 'generic' },
   838: { branch: 'generic', impl: 'generic' }, 864: { branch: 'generic', impl: 'generic' },

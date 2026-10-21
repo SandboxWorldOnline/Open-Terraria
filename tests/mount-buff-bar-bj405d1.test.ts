@@ -114,7 +114,9 @@ describe('① BJ405-D1 源锚：通道 + 跳过哨 + 右键下马挂线', () => 
   });
 
   it('Mounts.tryDismount 透传 game（下马尘 DoSpawnDust :6234 面;既有调用方零变化）', () => {
-    expect(MOUNTS_TS).toContain('tryDismount(p: MountedPlayerView, game?: {');
+    // ★BJ704-G18 锁随刀迁移：game 参由旧内联结构类型改 MountDustGame（G17 债2/3
+    //  typed 尘通道）——透传语义不变,锁锚同步
+    expect(MOUNTS_TS).toContain('tryDismount(p: MountedPlayerView, game?: MountDustGame)');
     expect(MOUNTS_TS).toContain('this.dismount(p, game);');
   });
 });

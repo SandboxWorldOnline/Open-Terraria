@@ -64,7 +64,13 @@ function makeHooks(enemies: StubEnemy[] = [], store?: TileStore, player?: Record
     stack: { anyTagged: () => false, hasActiveEffect: () => false },
     whipTagShot: true,
     // proj1457/MinionProj 侧 entities.add 通道(捕获生成)
-    entities: { add: (e: unknown, b: string) => { added.push({ e, bucket: b }); } },
+    // ★BJ703-F 夹具勘误(2026-10-21,存量红分诊=夹具病):BJ650件1 起 MinionProj.
+    //  fixedUpdate 头 whoAmI 槽位懒快照读 game.entities.projectiles.indexOf(this)
+    //  ——补活体表(added 的 e 面;未入表弹 indexOf=−1→Math.max(0,−1)=0 同语义)
+    entities: {
+      add: (e: unknown, b: string) => { added.push({ e, bucket: b }); },
+      projectiles: added.map((x) => x.e),
+    },
     added,
   };
   return hooks as unknown as GameHooks;

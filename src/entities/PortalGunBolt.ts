@@ -24,6 +24,10 @@ import { texId } from '../render/texId';
 import { projectileWetSection, projWaterDragFactor, projShimmerStep,
   type ProjShimmerFace } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+// ★BJ704-G2（2026-10-21,债① 601 员）：残影环接线——601 TrailingMode=0/CacheLen 10
+//  （ProjectileID.cs:385/:387）,通用表 P(1,8,1,0.3)（Main.cs:31101-31106）,
+//  extraUpdates=30 → 31 子步/t 逐子步记录（UpdateTrails 位序=子步环内位移后）。
+import { ProjGhostRing, drawProjGhosts } from './projGhostTrail';
 
 /** 601 SetDefaults（:6225-6226）碰撞盒 */
 const BOLT_W = 10;
@@ -49,6 +53,14 @@ export class PortalGunBolt extends Entity {
   /** timeLeft（每 tick 减 1，撞块/出界先死） */
   private life = BOLT_LIFE;
   private static frameCache = new Map<string, HTMLCanvasElement>();
+
+  // ---- ★BJ704-G2（债① 601 员）：oldPos 残影环（mode0,31 子步/t;MinionProj 755
+  //      接线式同构——单 id 域内 ghostRing 恒建,余型不达本类）。 ----
+  private ghostRing = new ProjGhostRing(601);
+  private recordGhostTrail(): void {
+    // mode0 只记 oldPos（UpdateTrails :17197-17204）;ghost 角/翻转=本体当前态
+    this.ghostRing.record(this.x, this.y, 0, 1, true);
+  }
 
   // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F3 清偿）----
   //  域 id = {601}（SetDefaults :6504-6512：10×10 aiStyle1 alpha255 friendly
@@ -201,6 +213,8 @@ export class PortalGunBolt extends Entity {
         this.dead = true;                                          // :18213 Kill()
         break;
       }
+      // ★BJ704-G2：UpdateTrails 位序（:17198 子步环内位移后一记;cap10×3px/子步=30px 短轨）
+      this.recordGhostTrail();
     }
   }
 
@@ -209,11 +223,45 @@ export class PortalGunBolt extends Entity {
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_601.png');
     const [pr, pg, pb] = portalColor(this.form);
+    // ---- ★BJ704-G2（债① 601 员）：通用残影（P(1,8,1,0.3),先于本体）。色=
+    //      GetAlpha :80870-80873 整支替换 PortalHelper.GetPortalColor(owner,ai[0])
+    //  （PortalHelper.cs:380-394——单机门色 hsl(0.12/0.52)、A=66）→ tintOverride
+    //  门色+aMul 66/255（调用位持 form 单源直取）;帧锚=当前帧行（2 帧循环）。
+    //  本体姿态勘误（同刀）：270 族分派 :58579-58589 `spriteDirection=direction;
+    //  rotation = direction<0 ? atan2(−vy,−vx) : atan2(vy,vx)`——旧「速度角 rotOff 0
+    //  TrapShot 同款」缺左飞 +π 与镜像（601 贴图 79-93% 非对称,D2 像素普查）。 ----
+    const mvAng = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+    if (img && (img.width > 0) && this.ghostRing.filled > 0) {
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: 601,
+        tex: img,
+        frames: 2,
+        frame: this.frame,
+        bodyW: this.w, bodyH: this.h,
+        bodyRot: mvAng,
+        bodyScale: 1,
+        bodyAlpha: 1,
+        ai0: 0, ai1: 0,
+        timeLeft: this.life,
+        opacity: 1,
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+        mirror: this.vx < 0,
+        tintOverride: { rgb: [pr, pg, pb], aMul: 66 / 255 },   // GetAlpha 门色 A=66
+      });
+    }
     ctx.save();
     ctx.translate(this.cx, this.cy);
-    // 与 TrapShot 'portalbolt' 同款朝向约定（速度角，rotOff 0）
-    ctx.rotate(Math.atan2(this.vy, this.vx));
-    ctx.globalAlpha = 1 - this.alpha / 255;                        // alpha 255→0 = 透明→全显
+    // 270 族（:58579-58589）：direction<0 → atan2(−vy,−vx)≡速度角+π,spriteDirection=direction 镜像
+    ctx.rotate(mvAng);
+    if (this.vx < 0) ctx.scale(-1, 1);
+    // ★BJ704-G10（件10,G2 登记债清偿）：本体 A 面=GetAlpha :80870-80873 整支替换
+    //  PortalHelper.GetPortalColor（PortalHelper.cs:380-394——单机门色 hsl(0.12/0.52)
+    //  【A=66 恒】）→ ga=66/255 常量。旧 `1−α/255` 淡入系误读（α 场仍由 AI 维护
+    //  :51204-51208——尘爆发窗/撞块音门行为面消费,视觉面零参与;ghost 侧 tintOverride
+    //  aMul=66/255 G2 已落同源）。α=255 出膛拍旧 ga=0 隐形 vs 原版恒 26% 可见。
+    ctx.globalAlpha = 66 / 255;
     if (img && (img.width > 0) && img.width > 0) {
       // GetAlpha（:76199-76202）：601 整体贴图染门色——multiply + destination-in 保形
       const f = PortalGunBolt.tintedFrame(img, this.frame, pr, pg, pb);

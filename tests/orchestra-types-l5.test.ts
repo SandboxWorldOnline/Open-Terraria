@@ -54,6 +54,18 @@ function mkGame(store?: TileStore) {
     return ret;
   };
   g.playSfxWav = (file: string, vol?: number) => { wavs.push({ file, vol: vol ?? 1 }); };
+  // ★BJ704-G2（2026-10-21）夹具补：BJ703-B D3 白影改走 game.cloneDust 钩后本桩缺
+  //  cloneDust（Game.prototype.cloneDust 对 vanillaDust-undefined 桩返 null）→
+  //  尘计数 12≠24 恒红（D3 批回归清单外漏修）。补镜像桩：克隆=源尘浅拷贝入账
+  //  （真实语义=VanillaDust.clone 全字段拷贝回池）。
+  g.cloneDust = (d: import('../src/fx/VanillaDust').VDust) => {
+    const c = { ...d } as import('../src/fx/VanillaDust').VDust;
+    dusts.push({
+      x: c.x, y: c.y, w: 0, h: 0, type: c.type,
+      vx: c.vx, vy: c.vy, alpha: c.alpha, scale: c.scale, ret: c,
+    });
+    return c;
+  };
   g.playSfxFiles = (names: string[], vol?: number) => { files.push({ names, vol: vol ?? 1 }); };
   g.world = { store: store ?? new World(160, 200, 30, 'orch-stub').store } as never;
   return { g, particles, dusts, wavs, files };

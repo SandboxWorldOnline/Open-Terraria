@@ -183,6 +183,9 @@ for (let id = 25; id <= 32; id++) SINGLES.push(`Acc_HandsOn_${id}.png`);
 for (let id = 16; id <= 18; id++) SINGLES.push(`Acc_HandsOff_${id}.png`);
 for (let id = 304; id <= 315; id++) SINGLES.push(`Extra_${id}.png`);
 for (let id = 379; id <= 383; id++) SINGLES.push(`Glow_${id}.png`);
+// ★BJ704-G2（2026-10-21,债③）：Glow_200（32×54）——630 幻象弓载体 GlowMask[200]
+//  白127 柔光叠画（Main.cs:32670,EntitySpriteDraw GlowMask 表=Images/Glow_N.png 直引）
+SINGLES.push('Glow_200.png');
 // ★SW-FX9（2026-09-10）：Item_75 陨星（22×208 竖 8 帧）——764 UpbeatStar 宠物
 // DrawProjWithStarryTrail 覆绘消费（Main.cs:38326-38332 Frame(1,8) 取顶帧;
 // 资产面处置裁决=索资产:terraria-assets/Images/Item_75.png 在源池,非占位/跳过）

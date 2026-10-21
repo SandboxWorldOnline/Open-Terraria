@@ -28,6 +28,7 @@ import {
   JOURNEY_FILTER_KEYS, FILTER_L10N, runBrowserQuery, browserClickPlan,
   type JourneyFilterKey,
 } from './JourneyBrowser';
+import { claimUiBlocking, type UiBlockingRelease } from './uiBlockingClaim';   // ★BJ704-G7 件5
 
 /** 复制面板入包授予（★SW-FX15 起承担 shift 臂=TransferToBackpack + 无 UI 兜底；
  *  普点整组上光标走 UI.grantCraftToCursor，见 makeCell/browserClickPlan）——
@@ -178,14 +179,15 @@ function windText(wind: number): string {
 }
 function rainText(maxRaining: number): string { return `${Math.round(maxRaining * 100)}%`; }
 
-/** ★A9(2026-10-14):面板开启前的 uiBlocking 沿(关闭还原非覆写) */
-let journeySavedBlocking = false;
+/** ★A9(2026-10-14)→★BJ704-G7 件5(2026-10-21)：uiBlocking 保存/还原迁栈律单源
+ *  (uiBlockingClaim——旧模块级 journeySavedBlocking 非栈式已退役;交错开关序防御,
+ *  不可达声明见 uiBlockingClaim.ts 头注) */
+let journeyBlockingRelease: UiBlockingRelease | null = null;
 
 export function openJourneyPowersPanel(game: Game): void {
   ensureCss();
   if (panel) { closeJourneyPowersPanel(); return; }
-  journeySavedBlocking = game.input.uiBlocking;   // ★A9(2026-10-14):沿保存(close 还原非覆写)
-  game.input.uiBlocking = true;
+  journeyBlockingRelease = claimUiBlocking(game.input);
   if (category === 0) category = 3;   // 默认开时间页（原版主条无默认选中，UI 取常用页）
   panel = el('div', 'sw-jp-panel');
   const head = el('div', 'sw-jp-head');
@@ -824,8 +826,8 @@ function applyRainSlider(game: Game, v: number): void {
 }
 
 export function closeJourneyPowersPanel(): void {
-  (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
-    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = journeySavedBlocking);   // ★A9:还原非覆写
+  journeyBlockingRelease?.();   // ★BJ704-G7 件5:栈律还原(末出才下写;闭包持开启拍的 input,免 __swGame 重查拍错代实例)
+  journeyBlockingRelease = null;
   for (const fn of panelCleanup) fn();
   panelCleanup = [];
   browserRefresh = null;

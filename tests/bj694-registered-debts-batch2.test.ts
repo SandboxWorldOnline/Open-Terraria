@@ -146,10 +146,14 @@ describe('§5b CharacterStore.recordPlayedWorld（游玩史写入）', () => {
 });
 
 describe('§5c 接线源锚（面板快照 + 进世界写入位）', () => {
-  it('mainFlow：activeCharSnapshot 两面板位 + 两写入位（loadWorldFlow/createWorldFlow）', () => {
+  it('mainFlow：activeCharSnapshot 两面板位 + 写入位（★BJ704-G7 2026-10-21 改判：写入位由 loadWorldFlow/createWorldFlow 两处【进世界尝试拍】迁 doSave【玩家保存拍】——原版地图档唯写时点=Player.InternalSaveMap :55691←InternalSavePlayer :55355,失败路径零记;锁随刀更新,改判史=BJ694 初锁两写入位）', () => {
     const src = read(join(GAME, 'src', 'mainFlow.ts'));
     expect((src.match(/activeCharSnapshot\(\)/g) ?? []).length).toBeGreaterThanOrEqual(3);   // 定义+两调用
-    expect((src.match(/recordPlayedWorld\(cid, meta\.id\)/g) ?? []).length).toBe(2);
+    // doSave 玩家保存链唯一写入位（绑定=slotMeta ∨ joinRoomWorldId）
+    expect(src).toContain('const playedWorldId = slotMeta?.id ?? joinRoomWorldId;');
+    expect(src).toContain('void charStore.recordPlayedWorld(cid, playedWorldId)');
+    // 旧「尝试即记」位零残留（loadWorldFlow/createWorldFlow 不再直写）
+    expect(src).not.toContain('recordPlayedWorld(cid, meta.id)');
   });
   it('WorldSelectPanel：activeChar 第 4 参 + sortWorldsForChar 消费', () => {
     const src = read(join(GAME, 'src', 'ui', 'WorldSelect.ts'));

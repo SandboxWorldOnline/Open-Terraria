@@ -34,6 +34,10 @@ export interface MountData {
   playerHeadOffset?: number;
   bodyFrame?: number;
   spawnDust?: number;
+  /** ★BJ704-G18（G17 债2/3）Mount.cs:203 spawnDustNoGravity——出生/下坐失败尘的
+   *  noGravity 直置腿（DoSpawnDust :6593/DoFailedDismountDust :6423 消费;vanilla-
+   *  mounts.json 已提取:7/23/61 true,余 false 缺省） */
+  spawnDustNoGravity?: boolean;
   Minecart?: boolean;
   CanRideMinecartTracks?: boolean;
   CanUseWings?: boolean;

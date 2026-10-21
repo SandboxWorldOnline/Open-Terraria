@@ -12,6 +12,11 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
+// ★BJ704-G2（2026-10-21,债① 585 员）：残影环接线——585 TrailingMode=0/CacheLen 10
+//  （ProjectileID.cs:385/:387）,通用表 P(1,7,1,0.2)（Main.cs:31062-31067）,色=缺省
+//  白 aMul=1（GetAlpha :80880-80885 Lerp(光,White,0.5) 保 A——白化抬升=光照域项,
+//  本仓 compositeLight 全屏乘承载,projGhostTrail 头注登记②同账）。
+import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';
 import { projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { BuffType } from '../stats/Buffs';
@@ -70,7 +75,7 @@ const TOWN_DRAW_SPEC: Record<number, TownDrawSpec> = {
   134: { rot: 'up', cols: 0, spinRate: 0 },             // :44851 velocity≠0 → +π/2
   24:  { rot: 'upright', cols: 0, spinRate: 0 },        // aiStyle 14 不赋 rotation
   15:  { rot: 'upright', cols: 0, spinRate: 0 },        // aiStyle 8 不赋 rotation
-  585: { rot: 'mirror-right', cols: 0, spinRate: 0 },   // :54715 MIRROR 分支(28×112 四帧行,帧恒 0)
+  585: { rot: 'mirror-right', cols: 0, spinRate: 0 },   // :58579-58589 270 族(28×112 四帧行,★BJ704-G2 帧乒乓 townFrameIndex 585 支)
   582: { rot: 'spin', cols: 0, spinRate: Math.PI / 10 },// aiStyle 109 尾 :32893
   669: { rot: 'spin', cols: 0, spinRate: 0.25 },        // aiStyle 68 :29047
   880: { rot: 'upright-mirror', cols: 0, spinRate: 0 }, // AI_183 :40418-40430(34×256 八帧行)
@@ -94,7 +99,16 @@ export function townFrameIndex(projId: number, age: number, ai1: number, ai2: nu
       const base = ai2 === 1 ? 3 : 0;
       return base + (Math.floor(age / 4) % 3);
     }
-    default: return 0;                                                                 // 585/456 族 AI 不推帧
+    // ★BJ704-G2（2026-10-21,债① 585 员勘误）：AI_001 585 专属块【推帧】——
+    //  :57095-57104 frameCounter++（12 循环）→ frame=fc/2、>3 → 6−fc/2（乒乓
+    //  0,1,1,2,2,3,3,2,2,1,1,0 周期 12,age=tick 数,fc=age%12 对位:age1→fc1）。
+    //  旧注「585 恒帧 0（AI_001 不推帧）」系误读——ghost 帧锚/本体动画双面随修。
+    case 585: {
+      const fc = age % 12;
+      const f = Math.floor(fc / 2);
+      return f > 3 ? 6 - f : f;
+    }
+    default: return 0;                                                                 // 456 族 AI 不推帧
   }
 }
 
@@ -181,6 +195,18 @@ export class TownShot extends Entity {
   /** 出生预置已做(一次;NewProjectile :10886-10893 等价;共享体首调自做) */
   presetDone = false;
 
+  // ---- ★BJ704-G2（2026-10-21,债① 585 员）：oldPos 残影环（TrailingMode 表驱动,
+  //      UpdateTrails :17197-17204 mode0 逐拍位移后记录;域内唯一成员 585,余型
+  //      mode=-1 → null 短路零开销）。MinionProj 755 接线式同构。 ----
+  private ghostRing?: ProjGhostRing | null;
+  private recordGhostTrail(): void {
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    // mode0 不记 rot/dir（UpdateTrails 只写 oldPos）;绘制面 ghost 角=本体当前角
+    this.ghostRing?.record(this.x, this.y, 0, 1, true);
+  }
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, projId: number,
     opts?: { ai1?: number; ai2?: number; life?: number; noGravity?: boolean }) {
     super();
@@ -266,10 +292,33 @@ export class TownShot extends Entity {
     const spec = townDrawSpec(this.projId);
     const age = this.age0 - this.life;
     const fIdx = townFrameIndex(this.projId, age, this.ai1, this.ai2);
+    const ang = townRotation(spec.rot, this.vx, this.vy, this.rotAcc, age, spec.spinRate);
+    // ---- ★BJ704-G2（债① 585 员）：通用残影（Main.cs:30609+:31062-31067 P(1,7,1,0.2),
+    //      先于本体=原版层序）。bodyRot=本体当前角（mirror-right 含左飞 +π）;
+    //      mirror=本体当前翻转（mode0 ghost 恒吃 dir,Main.cs:31334）;
+    //      bodyW/H=SetDefaults 盒（26×26=Size/2 锚）,帧锚=当前帧行（缺省档）。 ----
+    if (this.ghostRing && img && img.width > 0) {
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: this.projId,
+        tex: img,
+        frames: projFrameCount(this.projId),
+        frame: fIdx,
+        bodyW: this.w, bodyH: this.h,
+        bodyRot: ang,
+        bodyScale: 1,
+        bodyAlpha: 1,          // GetAlpha lerpkeep：A 面 255 恒（白化=光照域,登记②）
+        ai0: 0, ai1: 0,
+        timeLeft: this.life,
+        opacity: 1,
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+        mirror: this.vx < 0,   // 585 mirror-right 族：spriteDirection=direction
+      });
+    }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     ctx.imageSmoothingEnabled = false;
-    const ang = townRotation(spec.rot, this.vx, this.vy, this.rotAcc, age, spec.spinRate);
     ctx.rotate(ang);
     // 水平镜像族:mirror-right(585 :54715)/up-mirror(930 :44844)/upright-mirror(880 AI_183)
     if ((spec.rot === 'mirror-right' || spec.rot === 'up-mirror' || spec.rot === 'upright-mirror')
@@ -325,6 +374,8 @@ export class TownShot extends Entity {
       if (this.projId === 669) this.kill669(game);
       this.dead = true; return;
     }
+    // ★BJ704-G2：UpdateTrails 位序（:17198 位移后;585 无 extraUpdates → 每拍一记）
+    this.recordGhostTrail();
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[]; friendly?: boolean } };

@@ -86,11 +86,24 @@ describe('BJ245-② 811 判镰 k 衰减（Remap(ai0,0,15,1,0.3),ai0≡age）', (
     expect(DART_STYLE[811].whiteLerp, '811 改走 draw 内 whiteK811(age) 动态支').toBeUndefined();
     expect(DART_STYLE[814].whiteLerp).toBeCloseTo(0.35, 9);
   });
-  it('draw 消费位结构锁：whiteFilter 首支 = 811 → whiteK811(this.age)', () => {
-    const i = DART_TS.indexOf('const whiteFilter =');
-    const seg = DART_TS.slice(i, i + 220);
+  it('draw 消费位结构锁：lerpK811 首支 = 811 → whiteK811(this.age)（BJ668b 件2 两遍制形态）', () => {
+    // ★BJ703-F 锁勘误（2026-10-21,存量红分诊=锁陈旧非回归）：BJ668b 件2（2026-10-13,
+    //  BJ667 债④）把 811/814 白化从静态 whiteFilter 滤镜改道 BJ668 两遍制算子
+    //  （基底 brightness(1−k)×ga + projFullbrightQueue 'lighter' ×k 光照后复绘 →
+    //  base×light+lift ≡ Lerp(light,White,k)——旧滤镜白抬升被 compositeLight 乘光
+    //  归零病根根除;行为面全锁=tests/bj668b-tail-clearance.test.ts 件2）。本结构锁
+    //  跟随新形态:k 源仍=811 → whiteK811(this.age) 动态（Remap 链不变）。
+    const i = DART_TS.indexOf('const lerpK811 =');
+    expect(i).toBeGreaterThan(-1);
+    const seg = DART_TS.slice(i, i + 240);
     expect(seg).toContain('this.projId === 811');
     expect(seg).toContain('whiteK811(this.age)');
     expect(seg.indexOf('this.projId === 811')).toBeLessThan(seg.indexOf('st.whiteLerp'));
+    // 两遍制消费位:基底 filter=brightness(1−k) + lift 闭包 'lighter' ×k
+    const j = DART_TS.indexOf('const whiteFilter =', i);
+    const seg2 = DART_TS.slice(j, j + 400);
+    expect(seg2).toContain('is596');
+    expect(DART_TS.indexOf('brightness(${Math.max(0, 1 - lerpK811)')).toBeGreaterThan(-1);
+    expect(DART_TS.indexOf('queueProjFullbright')).toBeGreaterThan(-1);
   });
 });

@@ -78,13 +78,17 @@ describe('小动物帧速档（FindFrame 专属 case）', () => {
     b.animT = 28; expect(vanillaFrameIdx(b, 15)).toBe(3);   // 带内回卷
   });
 
-  it('龟 616/617/625：陆带与 wet 游带分档，站定帧0', () => {
-    const t1 = shell(616, 7, { vx: 1 });
-    t1.animT = 9; expect(vanillaFrameIdx(t1, 14)).toBe(1);          // 陆上 9t 一帧
-    expect(vanillaFrameIdx(shell(616, 7, { wet: true, vx: 1, animT: 6 }), 14)).toBe(9);  // 游带 8..13
-    expect(vanillaFrameIdx(shell(616, 7, { vx: 0 }), 14)).toBe(0);   // 站定
-    expect(vanillaFrameIdx(shell(625, 7, { wet: true, vx: 1, animT: 5 }), 12)).toBe(7);  // 游带 6..11@5t
-    expect(vanillaFrameIdx(shell(625, 7, { vx: 1, animT: 8 }), 12)).toBe(1);             // 陆上 8t 一帧
+  it('龟 616/617/625：帧域直读 Enemy.turtleFrame（BJ700b 状态机；帧行 clamp）', () => {
+    // BJ700b（2026-10-20）起龟族帧行由 Enemy.turtleFindFrameStep 逐字维护（站定/腾空
+    // 双钉重启、湿泳带/陆带分档、落地蜷壳定拍——节拍锁全量在
+    // tests/bj700b-jungle-turtle.test.ts）。本档只锁 Renderer 直读 + 越界上限 clamp
+    // （旧 animT 相位档断言已随状态机退役;曾 NaN = shell 未带 turtleFrame 字段的
+    // 先存红,bj700b 换契约时漏更此锁,BJ703-C 2026-10-21 修复）。
+    expect(vanillaFrameIdx(shell(616, 7, { vx: 1, turtleFrame: 3 }), 14)).toBe(3);
+    expect(vanillaFrameIdx(shell(617, 7, { wet: true, vx: 1, turtleFrame: 9 }), 14)).toBe(9);
+    expect(vanillaFrameIdx(shell(616, 7, { vx: 0, turtleFrame: 0 }), 14)).toBe(0);
+    expect(vanillaFrameIdx(shell(625, 7, { wet: true, vx: 1, turtleFrame: 7 }), 12)).toBe(7);
+    expect(vanillaFrameIdx(shell(625, 7, { vx: 1, turtleFrame: 99 }), 12)).toBe(11);   // clamp frames-1
   });
 
   it('海豚 615：搁浅帧4；wet 7t 一帧', () => {

@@ -26,6 +26,11 @@ import { cutTilesBox } from './ProjCutTiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
+// ★BJ704-G2（2026-10-21,债① 709 员）：残影环接线——709 TrailingMode=0/CacheLen 10
+//  （ProjectileID.cs:385/:387）,通用表 P(1,8,2,0.5)（Main.cs:31078-31087,num164=8/
+//  num165=8/4=2 恒）,色=GetAlpha :81063-81066 (255,255,255,200) 恒 → GHOST_TINT[709]
+//  白染 aMul 200/255（alpha 淡入无视觉面,GetAlpha 不读 α）。
+import { ProjGhostRing, drawProjGhosts } from './projGhostTrail';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
@@ -434,6 +439,13 @@ export class SkyDragonShot extends Entity {
   /** 同主在场 1110 消费口（亡爆 :70256-70264） */
   consumeCircles: (x: number, y: number) => void = () => {};
 
+  // ---- ★BJ704-G2（债① 709 员）：oldPos 残影环（mode0;extraUpdates=1 → 2 子步/t
+  //      逐子步记录,UpdateTrails :17198 位移后位序;MinionProj 755 接线式同构）。 ----
+  private ghostRing = new ProjGhostRing(709);
+  private recordGhostTrail(): void {
+    this.ghostRing.record(this.x, this.y, 0, 1, true);   // mode0 只记 oldPos
+  }
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number) {
     super();
     this.x = x; this.y = y;
@@ -464,6 +476,8 @@ export class SkyDragonShot extends Entity {
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.explode(game); return; }
+    // ★BJ704-G2：UpdateTrails 位序（:17198 位移后,每子步一记——step() 每.tick 跑 2 次）
+    this.recordGhostTrail();
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
@@ -504,14 +518,43 @@ export class SkyDragonShot extends Entity {
     const img = projSprite(709);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const a = (255 - this.alphaI) / 255;
-    if (a <= 0.02) return;
     const fh = img.height / 3;                // 36×102 = 3 帧
-    const rot = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);   // :54760-54766
+    // :58624-58631 旋转组 435|459|682|709：rotation=ToRotation()+(direction==-1?π:0)
+    // + AI_001 709 块 :55666 spriteDirection=direction 镜像。★BJ704-G2 勘误：旧式
+    // 有 +π 缺镜像（左飞水平翻转缺失,709 贴图 73-80% 非对称 D2 普查可见;角注释
+    // :54760-54766 系错锚=鱼漂域）。★A 面：GetAlpha :81063-81066 (255,255,255,200)
+    // 恒——α−30 淡入无视觉面（旧 (255−α)/255 渐显系误读;vanillaProjAlpha[709]
+    // fixed 200 档本类消费,SKIP 位解除）。
+    const rot = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+    const a = 200 / 255;
+    // ---- ★BJ704-G2（债① 709 员）：通用残影（P(1,8,2,0.5),先于本体）。色=
+    //      GHOST_TINT[709] 白染 aMul 200/255;bodyW/H=SetDefaults 盒 12（判定盒
+    //      7×7=(12×0.6) 绘制解耦,ghost 锚=Size/2）;bodyScale=0.6（SetDefaults scale,
+    //      ghost 比例 Lerp(0.6,0.5,i/15)）;帧锚=当前帧行（3 帧循环）。 ----
+    if (this.ghostRing.filled > 0) {
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: 709,
+        tex: img,
+        frames: 3,
+        frame: this.frame,
+        bodyW: 12, bodyH: 12,
+        bodyRot: rot,
+        bodyScale: this.drawScale,
+        bodyAlpha: 1,          // GetAlpha 恒 (255,255,255,200)——A 面在 aMul,α 不读
+        ai0: 0, ai1: 0,
+        timeLeft: 30 - this.upd,
+        opacity: 1,
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+        mirror: this.vx < 0,
+      });
+    }
     ctx.save();
     ctx.globalAlpha = a;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(rot);
+    if (this.vx < 0) ctx.scale(-1, 1);   // spriteDirection=direction（:55666）
     ctx.imageSmoothingEnabled = false;
     const dw = img.width * this.drawScale, dh = fh * this.drawScale;
     ctx.drawImage(img, 0, this.frame * fh, img.width, fh, -dw / 2, -dh / 2, dw, dh);

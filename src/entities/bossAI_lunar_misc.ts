@@ -2552,7 +2552,7 @@ export class LunarOrb extends Entity {
         // SW-BL1 2026-09-06：attacker 位显式 null（运行时等价 undefined,falsy 同面）
         // 改缺省——GameHooks.damagePlayer 类型闸收窄（SW-BI1 两起 attacker 槽事故后）
         // 后 null 不再入域,语义零变化
-        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域旗(直调面进 modifyHitPlayerByProj 链;旧两链皆不进)
+        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.kind });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
       }
     }
   }

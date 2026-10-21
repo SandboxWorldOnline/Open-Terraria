@@ -50,6 +50,15 @@ function mkGame(store?: TileStore) {
     dusts.push({ type, scale, ret, perfect });
     return ret;
   }) as never;
+  // ★BJ704-R12 P1-1 夹具补：BJ703-B D3 白影改走 game.cloneDust 钩后本桩缺 cloneDust
+  // （Game.prototype.cloneDust 对 vanillaDust-undefined 桩返 null）→ 白影不入账
+  // （如 StardustPunch/PrincessWeapon d267=4 得 2 恒红）。镜像桩=L5 同款
+  // （G2 修 L5 漏 L6,D3 回归清单二漏）。
+  g.cloneDust = ((d: VDust) => {
+    const c = { ...d } as VDust;
+    dusts.push({ type: c.type, scale: c.scale, ret: c, perfect: false });
+    return c;
+  }) as never;
   g.playSfxWav = ((file: string, vol?: number) => { wavs.push({ file, vol: vol ?? 1 }); }) as never;
   g.playSfxFiles = ((names: string[], vol?: number) => { files.push({ names, vol: vol ?? 1 }); }) as never;
   g.playSfxAt = ((name: string) => { ats.push({ name }); }) as never;

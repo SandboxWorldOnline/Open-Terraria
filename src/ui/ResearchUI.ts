@@ -8,6 +8,7 @@
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
+import { claimUiBlocking, type UiBlockingRelease } from './uiBlockingClaim';   // ★BJ704-G7 件5
 
 /** 内部 item id → 原版 id（UI 侧轻量版 = vid 直读;★方案 A 键前缀反解链退役） */
 function vidOf(id: number): number {
@@ -73,14 +74,15 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-/** ★A9(2026-10-14):面板开启前的 uiBlocking 沿(关闭还原非覆写) */
-let researchSavedBlocking = false;
+/** ★A9(2026-10-14)→★BJ704-G7 件5(2026-10-21)：uiBlocking 保存/还原迁栈律单源
+ *  (uiBlockingClaim——旧模块级 researchSavedBlocking 非栈式已退役;交错开关序防御,
+ *  不可达声明见 uiBlockingClaim.ts 头注) */
+let researchBlockingRelease: UiBlockingRelease | null = null;
 
 export function openResearchPanel(game: Game): void {
   ensureCss();
   if (panel) { closeResearchPanel(); return; }
-  researchSavedBlocking = game.input.uiBlocking;   // ★A9(2026-10-14)
-  game.input.uiBlocking = true;   // 面板打开封游戏输入（摇杆/世界触摸）
+  researchBlockingRelease = claimUiBlocking(game.input);   // 面板打开封游戏输入（摇杆/世界触摸）
   const r = game.research;
   const inv = game.player.inv;
 
@@ -197,8 +199,8 @@ export function isResearchPanelOpen(): boolean {
 }
 
 export function closeResearchPanel(): void {
-  (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
-    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = researchSavedBlocking);   // ★A9:还原非覆写
+  researchBlockingRelease?.();   // ★BJ704-G7 件5:栈律还原(末出才下写;闭包持开启拍的 input,免 __swGame 重查拍错代实例)
+  researchBlockingRelease = null;
   panel?.remove();
   panel = null;
   if (escHandler) { window.removeEventListener('keydown', escHandler); escHandler = null; }

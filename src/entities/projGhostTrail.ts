@@ -43,8 +43,11 @@
 // 872 A×0.6、864 A/=4、833-835 A=0）双笔（黑染 cut=A 衰减 + 'lighter' add=rgb 贡献）。
 // 逐型特支色（AI_156/171/173、FQW、星座、悬浮魔剑辉光）按 Projectile.cs 原式 1:1。
 // 登记近似（参数面外,逐条注释锚定）：
-//   ① ring dir = 记录拍 sign(vx)（原版 spriteDirection 语义的速度向子集;本仓弹域无
-//      通用 spriteDirection 字段——镜像特异 id 未在活动集,偏差面登记）;
+//   ① ring dir = 记录拍 spriteDirection（★BJ703-B D1 勘误收编 2026-10-21:1457 全量
+//      普查后按员落真值——Arrow/Dart 记 1（其 mode2/3/4 成员原版 AI 全程无
+//      spriteDirection 写）;MinionProj 仅翻转员（755/833-835）记 facing、余记 1。
+//      旧案「镜像特异 id 未在活动集」已证伪（755/833-835 活跃且翻转）,dir 基底
+//      同刀接通（drawProjGhosts mirror=本体当前翻转,mode2/3/4 XOR 消费））;
 //   ② ★BJ235 勘误翻案：BJ219 原判「873/976 槽色×格光未乘=暗处残影偏亮」系误捆绑——
 //      反编译亲读 :31364-31368,通用环内逐槽 Lighting.GetColor 乘【仅 976】一块
 //      （873 的行号引用实际也落在 976 块内,873 染色=AI_171_GetColor×0.5×timeLeft 门,
@@ -456,8 +459,26 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
     if (c.i === 1) k /= 2;
     return { rgb: [255, 255 * k, 255 * k], aMul: k };
   },
-  706: (c) => ({ rgb: [255, 255 / c.i, 255 / c.i], aMul: 1 / c.i }),         // B,G,A/=i :31294-31298
+  // ★BJ704-G2（2026-10-21,ghost 缺面 7 员清算）706 GetAlpha 专属支勘误——原版
+  //  color38 = GetAlpha(:80830-80833 `706 → (255−α,255−α,255−α,180−⌊α/2⌋−⌊α/4⌋)`
+  //  int 除法、负 A byte 钳 0)【先于】/=i 段（:31273-31278 B,G,A/=num170）——旧表
+  //  白底 /i 漏 GetAlpha 面（淡入期残影偏亮,A 恒 255/i 过实;alpha=255 出拍 A=0
+  //  全隐=原版环爆前不可见）。rgb=A/=i 通道=byte 除截断。
+  706: (c) => {
+    const a = Math.round(255 * (1 - c.opacity));
+    const w = 255 - a;
+    const aBase = Math.max(0, 180 - Math.trunc(a / 2) - Math.trunc(a / 4));
+    return {
+      rgb: [w, Math.trunc(w / c.i), Math.trunc(w / c.i)],
+      aMul: Math.trunc(aBase / c.i) / 255,
+    };
+  },
   710: (c) => ({ rgb: [255, 255 / c.i, 255 / c.i], aMul: 1 / c.i }),
+  // ★BJ704-G2：459/709 GetAlpha :81063-81066 同支 `(255,255,255,200)` 恒（不读
+  //  alpha 淡入——AI 的 α−30 全无视觉面）→ 白染 + A 面 200/255（409 同族先例
+  //  走调用位 bodyAlpha,本组走 aMul 档与 GHOST_TINT 单源一致）。
+  459: () => ({ rgb: WHITE, aMul: 200 / 255 }),
+  709: () => ({ rgb: WHITE, aMul: 200 / 255 }),
   818: (c) => {                                                              // OurFavoriteColor :31299-31306
     const k = getLerp(0, 0.3, c.ai0) * getLerp(1, 0.7, c.ai0);
     const ofc: [number, number, number] = [255, 231, 69];
@@ -467,7 +488,11 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
         ofc[1] * k + (255 - ofc[1] * k) * k,
         ofc[2] * k + (255 - ofc[2] * k) * k,
       ],
-      aMul: 1,
+      // ★BJ704-G2（2026-10-21）aMul 1→0 勘误：原版 ourFavoriteColor.A=0 ∧
+      //  value17=(255,255,255,0).A=0 → Lerp A≡0 → A=0 纯加法（833-835 同族;
+      //  旧 aMul=1=source-over 黑染衰减背景——延迟相 ai0<0 时 num175=0 → 全黑
+      //  残影可见遮暗,原版加法黑=零贡献不可见）。
+      aMul: 0,
     };
   },
   // ★BJ235 补速染因子（:31307-31314 逐值）——lerpValue2 = GetLerpValue(0,6,|velocity|)
@@ -536,6 +561,39 @@ export interface DrawGhostOpts {
   spriteDirection: number;      // 当前 spriteDirection 语义（dirEdge 锚/镜像偏移;登记①）
   /** ★BJ650件1：whoAmI（弹实体序,864 辉光色相消费;缺省 0=旧 0 档近似） */
   whoAmI?: number;
+  /** ★BJ700-A（2026-10-20）mode0 本体翻转：原版 ghost 恒吃本体当前翻转
+   *  `SpriteEffects spriteEffects = dir`（Main.cs:31334——dir=DrawProjDirect
+   *  :30530-30534 的 spriteDirection==−1 → FlipHorizontally）。本仓 mode0 原无
+   *  翻转通道（仅 mode2/3/4 吃 oldSpriteDirection XOR）;408（PROJ_ROT_RIGHT
+   *  左飞镜像族）首例接入。
+   *  ★BJ703-B D1（2026-10-21）dir 基底扩权：本参=「本体当前翻转」单源,全 mode 消费
+   *  ——mode0/1/5 直取（:31334）;mode2/3/4 作 XOR 基底（:31336-31344
+   *  `spriteEffects = dir ^ oldSpriteDirection[i]`,豁免 1001/933/1100=基底直取）。
+   *  基底消费面（1457 全量普查,AI 函数逐支核）=755（AI_156 :52446-52451 每拍
+   *  spriteDirection=player.direction‖sign(vx),MinionProj facing 同源）/
+   *  833-835（AI_067 :50753-50970 多写位,MinionProj facing 同源）/1001
+   *  （AI_194 :42056 sign(vx),豁免档=基底直取,Arrow 传 vx<0）;其余 mode2/3/4
+   *  成员（671/680/686/710/711/729/811/814/872/873/931/976/977/1039/1045/1097/
+   *  864…）原版 AI 全程无 spriteDirection 写（基底恒 None）→ 缺省 undefined
+   *  =现状零改动。缺省 undefined=全族现状零改动。
+   *  ★BJ704-G9（2026-10-21,R1-P1-2 勘误销案）普查表勘正——533 系【mode0】
+   *  （TrailingMode[533]=0,ProjectileID.cs:385）非 mode2/3/4 员,旧列误并;
+   *  且「aiStyle-66 块尾 :30712 spriteDirection=direction ⇒ 387/388/533 幽灵按
+   *  dir 翻」系【结构误植】:亲证括号平衡,:30712 位于 aiStyle-【68】块尾
+   *  （:30654-30729,成员仅 399/669）;aiStyle-66 块=:30084-30649,【零】
+   *  spriteDirection 写（AI_066_TryInterceptingTarget :43142 同零写）⇒
+   *  387/388/533 spriteDirection 恒 1（SetDefaults 缺省）→ dir 恒 None →
+   *  mode0 幽灵（:31334 直取）与本体均【恒不翻】——仓内 mirror 恒 false=
+   *  1:1 正确,R1-P1-2 假信念销案,勿再收编 533/388 入翻转集。864/946 本体
+   *  不翻同谳（AI_169_Smolstars :46559-46700 零写/AI_156 :52457 写位仅 755 支）
+   *  ——「本体不翻=存量债」登记随销。*/
+  mirror?: boolean;
+  /** ★BJ704-G2（2026-10-21）调用侧整色覆写（GHOST_TINT 无法自取的运行时色）：
+   *  601 GetAlpha :80870-80873 `→ PortalHelper.GetPortalColor(owner,ai[0])` 整支
+   *  替换 color38（PortalHelper.cs:380-394 A=66）→ rgb=门色、aMul=66/255——
+   *  调用位（PortalGunBolt.draw）持 form 直取 portalColor 传入。设置即短路
+   *  GHOST_TINT[id]。 */
+  tintOverride?: { rgb: [number, number, number]; aMul: number };
 }
 
 /** 通用残影绘制（Main.cs:31134-31349 循环 1:1）。在【本体之前】调用（原版残影块
@@ -565,7 +623,12 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
       case 'curHalfW': sw = Math.floor(iw / 2); ox = sw / 2; sx = iw - sw; sy = sh * o.frame; break;
       case 's976': sw = 32; sh = 18; sy = 18 * o.frame; ox = 16; oy = 9; break;
       case 'g873': sh = Math.floor(ih / 7); sy = sh * o.frame; ox = sw / 2; oy = sh / 2; break;
-      case 'g916': sh = Math.floor(ih / 7); sy = sh * o.frame; ox = sw / 2; oy = sh / 2; break;
+      // ★BJ704-G11（件5b）：916 除数 7→6 勘正——projFrames[916]=6（Main.cs:8592）,
+      //  ghost 帧矩形 = rectangle4 = 帧高 ih/6;873 的 /7 系 ghost 循环硬编码行数
+      //  （:31380 num180×7,projFrames[873] 无赋值）不可混源。本 spec 现无消费载体
+      //  （鞭族无 ghost 环,WhipProj 不经 drawProjGhosts）——除数随判语勘正防未来
+      //  鞭 ghost 刀继承错值,载体缺口维持登记（whip ghost 域）。
+      case 'g916': sh = Math.floor(ih / 6); sy = sh * o.frame; ox = sw / 2; oy = sh / 2; break;
     }
     if (spec.originY !== undefined) {
       oy = spec.originY < 0 ? sh + spec.originY : spec.originY;
@@ -573,8 +636,11 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     if (spec.originX === 'dirEdge') {
       ox = o.spriteDirection === 1 ? sw - 20 : 20;
     } else if (spec.originX !== undefined && spec.originX < 0) {
-      // 833-835：origin8.X −= 7/2×flipInt（flipInt=(dir&FlipHorizontally)!=0 ? 1 : 0）
-      ox += spec.originX * (o.spriteDirection === -1 ? 1 : 0);
+      // ★BJ704-G11（件1）：833-835 origin8.X −= 7|2×ToDirectionInt（Main.cs:30711/
+      //  :30718,Utils.cs:2131 flip?1:−1）——右向 W/2+7|2 / 左向 W/2−7|2。旧 0/1 乘数
+      //  =右向漏 +7|2px（G10「ghost 侧已建模同值」表述勘误:帧门/zeroHalfH 同值,
+      //  乘数语义差一角）;ghost 绘制与本体共用 origin8/zero（:31383 直传）。
+      ox += spec.originX * (o.spriteDirection === -1 ? 1 : -1);
     }
   } else {
     sy = sh * o.frame;
@@ -598,7 +664,9 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     let gScaleEff = gScale;
     let alphaOverride = -1;                               // 916 专用 fade 替换
     const tint = GHOST_TINT[o.id];
-    if (o.id === 916) {                                   // :31346-31357 整色替换
+    if (o.tintOverride) {                                 // ★BJ704-G2：调用侧整色覆写（601 门色）
+      rgb = o.tintOverride.rgb; aMul = o.tintOverride.aMul;
+    } else if (o.id === 916) {                                   // :31346-31357 整色替换
       const roll = rng();
       rgb = roll >= 2 / 3 ? [0, 0, 0]
         : lerpC([106, 90, 205], [0, 0, 0], 0.2 + 0.8 * rng());
@@ -612,7 +680,20 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     const fadeEff = alphaOverride >= 0 ? alphaOverride : fade;
     // ---- 姿态（:31333-31347）----
     const useOldRot = ring.mode === 2 || ring.mode === 3 || ring.mode === 4;
-    const ghostFlip = useOldRot && !mirrorExempt && slot.dir === -1;   // XOR 镜像
+    // ★BJ703-B D1（2026-10-21）dir 基底全 mode 接通（原版 :31330-31344 逐字）:
+    //  SpriteEffects dir = 本体当前翻转（DrawProjDirect :30530-30534,mirror 传参）;
+    //  mode2/3/4 非豁免 = dir XOR oldSpriteDirection[i]（:31340-31344）、豁免
+    //  （1001/933/1100）= dir 直取;mode0/1/5 = dir 直取（:31334,分支外=基底原样）。
+    //  drawOnce 的 rotate→scale(-1,1) 合成 = XNA R(rot)∘M 同相（BJ700-A 已证）。
+    const dirFlip = o.mirror === true;                                 // dir 基底
+    const ghostFlip = useOldRot
+      ? (mirrorExempt ? dirFlip : dirFlip !== (slot.dir === -1))       // XOR 镜像
+      : dirFlip;
+    // ★BJ704-G10 卫生注（R2-F8）：rotMul 项翻转因子原版 :31385 用【基底 dir】
+    //  （`−((dir & FlipHorizontally)!=0).ToDirectionInt()`）,本仓用 ghostFlip
+    //  （mode2/3/4 的 XOR 结果）。现员两式同值——rotMul≠0 全员（532/582/902 mode0;
+    //  533 ai0∈[6,8] 档 MinionProj 蝙蝠不翻转族）基底≡XOR 结果;未来出现
+    //  「mode2/3/4 + rotMul≠0 + 翻转员」组合时两式分叉,届时按 :31385 改用 dirFlip。
     const flipMul = ghostFlip ? -1 : 1;
     const rot = (useOldRot ? slot.rot : o.bodyRot)
       + o.bodyRot * rotMul * (i - 1) * flipMul;
@@ -842,7 +923,11 @@ export function drawHslMidpointTrail(
     const [r, g, b] = hslToRgb255(hue, 1, 0.5);
     const ga = Math.max(0, Math.min(1, (127 / 255) * (1 - t) * (1 - t) * 0.65));  // A=127×(1−t)²×0.65
     if (ga <= 0) continue;
-    const addTex = tintedTex(tex, [Math.round(r), Math.round(g), Math.round(b)], true);
+    // ★BJ704-G2（2026-10-21,BJ703-F 债④清偿）：flatten=true→false——563 悠悠球贴图
+    //  16×16 二值 α、81.3% 非零（资产实测）,摊平把 18.7% 透明域填成不透明染色底 →
+    //  A=127×0.65 半透单笔下方块边可见;保形=BJ371 判例（贡献=tex.rgb×tex.a×C.rgb,
+    //  透明域 0）。
+    const addTex = tintedTex(tex, [Math.round(r), Math.round(g), Math.round(b)], false);
     if (!addTex) continue;
     const drawAt = (x: number, y: number): void => {
       ctx.save();

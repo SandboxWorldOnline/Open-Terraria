@@ -3771,6 +3771,13 @@ export class Game implements GameHooks {
   private tileInteractHappened = false;
   /** 死亡界面跳跃键上一 tick 电平（1457 Main.cs:46124 JustBecameTrue(Jump) 边沿检测） */
   private _prevRespawnSkipJump = false;
+  /** ★BJ704-G14（件1 [g11-cannon-torch-fire]）：Player.cannonCooldown（:3153）等价——
+   *  火把手工点火兔炮 20t 冷却（Player.ShootFromCannon :42379 置 20 / ItemCheck_
+   *  OwnerOnlyCode :43922-43925 方法体级逐拍 −1——无 itemAnimation 门,括号平衡
+   *  亲证;G21 R8-F1 勘误:旧注「使用动画在途」系伪锚）。宿主在 Game（Player.ts 域
+   *  本批并行禁写——单机单玩家 Game 侧承载等价,语义同 snowballLauncherInteraction
+   *  Cooldown 的 Player 宿主形）;递减位=updateUse 头（ItemCheck 同拍序,先减后查） */
+  private cannonTorchCooldown = 0;
   /** 食人鱼枪 channel 态（1457 :43878 删 num>0 门后 0 条也补射——本仓 0 条场景
    *  由 Game 侧按电平补齐；实体侧 pTopUp 仍管 1-2 条场景） */
   private piranhaChanItemId = -1;
@@ -6030,46 +6037,76 @@ export class Game implements GameHooks {
     this.minecart = null;
   }
 
-  /** 坐骑召唤（Player.cs:42095：item.mountType != -1 且 flag2 → mount.SetMount）。
-   *  召唤物不消耗；再召同型 = 下坐（Player.cs:5768 TryToDismount 链） */
+  /** 坐骑召唤（物品路径 Player.cs:43099-43102：`item.mountType != -1 ∧ flag2 →
+   *  mount.SetMount`——同型 :6263 `_type == m` 早退 = 无操作保持骑乘,见 useMountItem
+   *  同型支;召唤物不消耗。★BJ704-G18 勘误:旧注「:42095/再召同型=下坐:5768」系旧
+   *  世代行号+近似分歧描述,1457 实锚 :43099/:6263,同型=no-op） */
   /** Player.QuickMount（Player.cs:5728-5783）召唤段：QuickMount_GetItemToUse
    * （:5859-5878）miscEquips[3] 坐骑装备槽优先 → 背包顺序扫非矿车坐骑物品。
-   * 禁用门（:5757 frozen/tongued/webbed/stoned/死亡）经 setMount 内部 canMount 空间
-   * 门+此处 dead 门近似。返回是否找到并上坐（false → 调用方落 QuickMinecart） */
-  private quickMount(): boolean {
+   * ★BJ704-G20（R10-P2 quickmount-summon-cced-gate）：vanilla :6068 头门五腿
+   * 补齐——`CCed || tongued || gravDir == -1f || dead || noItems → return`（整支
+   * QuickMount 直退【不落 QuickMinecart】;SW-FX19 注「CCed/tongued/noItems 三腿随
+   * 各域批接续」欠账清偿——旧只拦 gravDir/dead=冻结玩家按 R 可召唤坐骑）。
+   * noItems 召唤侧源=buff23 诅咒（UpdateBuffs :11818-11824 noItems=true;钻头 8 的
+   * noItems（ItemCheck_HandleMount :53576）只在 mount.Active 时置=骑乘支域,召唤侧
+   * 未骑乘结构性不可达）;tongued=buff38 狂卷之舌。
+   * 返回三态：'blocked'（头门拒,调用方不得落矿车——原版 return）| 'ok'（找到并
+   * 上坐）| 'none'（无坐骑物品/上坐失败 → 调用方落 QuickMinecart,原版 :6091 else） */
+  private quickMount(): 'blocked' | 'ok' | 'none' {
     const p = this.player;
     // ★SW-FX19：倒挂拒召唤坐骑（Player.QuickMount :6068 头门
     //  `CCed || tongued || gravDir == -1f || dead || noItems → return`——
-    //  倒挂落座链未建模,原版同态直接拒;CCed/tongued/noItems 三腿随各域批接续）
-    if (p.gravDir === -1 || p.dead) return false;
+    //  倒挂落座链未建模,原版同态直接拒;★BJ704-G20 补 CCed/tongued/noItems 三腿）
+    if (p.cced || p.buffs.has(BuffType.TheTongue) || p.buffs.has(BuffType.Cursed)
+      || p.gravDir === -1 || p.dead) return 'blocked';
     const eq = p.inv.miscEquips[3];
     if (eq) {
       const vid = (ITEM_DEFS[eq.id]?.vid ?? -1);
-      if (mountOfItem(vid) >= 0 && !isCartMount(mountOfItem(vid))) return this.useMountItem(vid);
+      if (mountOfItem(vid) >= 0 && !isCartMount(mountOfItem(vid))) {
+        return this.useMountItem(vid) ? 'ok' : 'none';
+      }
     }
     for (const s2 of p.inv.slots) {
       if (!s2) continue;
       const vid = (ITEM_DEFS[s2.id]?.vid ?? -1);
       const mid = mountOfItem(vid);
-      if (mid >= 0 && !isCartMount(mid)) return this.useMountItem(vid);
+      if (mid >= 0 && !isCartMount(mid)) {
+        return this.useMountItem(vid) ? 'ok' : 'none';
+      }
     }
-    return false;
+    return 'none';
   }
 
   private useMountItem(vanillaItemId: number): boolean {
     const mountId = mountOfItem(vanillaItemId);
     if (mountId < 0) return false;
     const p = this.player;
+    // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆
+    // Item_81 / 帕鲁坐骑 62-65 = PalSummon——1457 Item.cs:44510-44535（5665/5666）与
+    // :47385-47410（6150/6151）同 `UseSound = SoundID.PalSummon`，SoundID.cs:1072 音量
+    // 0.15；62/63 曾误落缺省 Item_25,随本表一并订正）。★BJ704-G18 提前共用：同型
+    // no-op 支亦播——vanilla 物品使用恒经 ItemCheck_StartActualUse :52315-52331 播
+    // UseSound（SkipsInitialUseSound={2350,4870} 不含鞍族）,与 SetMount 早退无关
+    const snd: Record<number, string> = {
+      0: 'Item_25', 1: 'Item_79', 2: 'Item_80', 3: 'Item_81', 4: 'Item_25', 5: 'Item_8',
+      62: 'pal_summon', 63: 'pal_summon', 64: 'pal_summon', 65: 'pal_summon',
+    };
+    const mountSfx = (m: number): void => {
+      this.playSfxFile(snd[m] ?? 'Item_25', m >= 62 && m <= 65 ? 0.15 : 0.8, p.x, p.y);
+    };
     // 矿车族召唤物仍走轨道上车链（Minecart.ts 已接 MountID.Cart 路径，不回退）
     if (isCartMount(mountId)) { this.tryQuickMinecart(); return true; }
     if (p.ridingMount) {
-      // 已骑乘：同型下坐；异型换骑（SetMount :6194-6204 先 ClearBuff 再上）。
-      // 下坐路径同样吃 useAnimation 冷却——否则按住左键会在同一次按压里
-      // 下坐→再上坐来回翻转（ItemCheck 每帧重入）
+      // ★BJ704-G18（G17 登记债5）：vanilla 物品路径 :43099 SetMount(:6263) `_type == m`
+      //  早退 = 同型鞍使用【无操作】（保持骑乘）;使用面照常（useAnimation+UseSound）。
+      //  早拆门 :31935 `HeldItem.mountType != mount.Type` 同型亦不拆 ⇒ 55/56/61 同型
+      //  鞍使用同样保持骑乘。旧「同型下坐」系有意近似分歧（旧注显式登记）,随本刀
+      //  对齐 vanilla——主动下坐唯一入口 = R 键 QuickMount 骑乘支 / buff 栏右键。
+      //  异型换骑（SetMount :6267-6278 active 支先 ClearBuff 再上）落下方 setMount。
       if (p.mount.type === mountId) {
-        this.tryDismountMount();
         p.useTime = 20;                               // useAnimation 20（Item.cs 鞍族）
-        return true;
+        mountSfx(mountId);                            // UseSound（StartActualUse 面）
+        return true;                                  // 坐骑状态不变（no-op）
       }
     }
     if (p.ridingCart) return true;                    // 车上换坐骑需先下车（QuickMount 语义）
@@ -6092,51 +6129,81 @@ export class Game implements GameHooks {
     //  承载;此 BUFF_DEFS 补挂面仅余五伴生 BuffType 的兼容残面（真值在 mount.active）
     const mbt = buffTypeByVanilla(p.mount.data?.buff ?? -1);
     if (mbt !== undefined) p.buffs.apply(mbt, 60);
-    // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆
-    // Item_81 / 帕鲁坐骑 62-65 = PalSummon——1457 Item.cs:44510-44535（5665/5666）与
-    // :47385-47410（6150/6151）同 `UseSound = SoundID.PalSummon`，SoundID.cs:1072 音量
-    // 0.15；62/63 曾误落缺省 Item_25,随本表一并订正）
-    const snd: Record<number, string> = {
-      0: 'Item_25', 1: 'Item_79', 2: 'Item_80', 3: 'Item_81', 4: 'Item_25', 5: 'Item_8',
-      62: 'pal_summon', 63: 'pal_summon', 64: 'pal_summon', 65: 'pal_summon',
-    };
-    this.playSfxFile(snd[mountId] ?? 'Item_25', mountId >= 62 && mountId <= 65 ? 0.15 : 0.8, p.x, p.y);
+    // 起坐音效 = 函数头共用 mountSfx（snd 表已上移,同型 no-op 支与本支同源）
+    mountSfx(mountId);
     p.useTime = 20;                                   // useAnimation 20（Item.cs 鞍族）
     return true;
   }
 
-  /** 下坐（Mount.TryDismount :6124：空间不足失败 → DoFailedDismountDust 尘 10） */
-  /** FailedNoSpace 计数（QuickMount 三连败门，Player.cs:5738-5753） */
+  /** 下坐（QuickMount 骑乘支 Player.cs:6036-6066：TryDismountWithResult 分道消费;
+   *  FailedNoSpace 才入三连败门 = Sound 0 + DoFailedDismountDust(计数×20),
+   *  第 3 次 Dismount(ignoreEffect) + PlayerNoSpaceTeleport） */
+  /** FailedNoSpace 计数（QuickMount 三连败门，Player.cs:6046-6059） */
   private mountNoSpaceCount = 0;
+  /** ★BJ704-G18（G17 登记债4）FailedNoSpaceLocation（Player.cs:301/:6047——失败拍
+   *  记 position.ToTileCoordinates 截断格位;UpdateFailedDismount 异地即清零） */
+  private mountNoSpaceLocation: { tx: number; ty: number } | null = null;
 
   private tryDismountMount(): void {
     const p = this.player;
     if (!p.ridingMount) return;
-    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231（下坐即停抚摸）
-    // ★BJ357 清坐骑伴生 buff（Dismount :6214 ClearBuff(_data.buff)——法埃的形态等）。
+    // ★BJ704-G17（G13 登记债2）：QuickMount :6043 分道——TryDismountWithResult ≠
+    //  FailedNoSpace（Succeeded/FailedCCed）即 return;FailedCCed 全静默（不入 3 连
+    //  强制链/不停抚摸/无尘无 toast——旧 boolean 合流把 CCed 拒下坐误入强制链）。
+    //  停抚摸+清伴生 buff 皆在 Dismount 体内（:6228-6231/:6214）=只在真实下坐拍发生
+    //  （G13 湿链同款收拢——拒下坐拍停抚摸=幽灵失骑态;旧头位预停在 cced/nospace
+    //  失败拍也停=错面）。
+    //  ★BJ357 清坐骑伴生 buff（Dismount :6214 ClearBuff(_data.buff)——法埃的形态等）。
     //  ★buff id 须在下坐【前】捕获：dismount 内部 reset() 后 mount.data 已 null
     const prevBuffVanilla = p.mount.data?.buff ?? -1;
-    if (p.mount.tryDismount(p)) {
-      this.mountNoSpaceCount = 0;
+    const res = p.mount.canDismountWithResult(p);
+    if (res === 'cced') return;                   // FailedCCed 静默（:6043-6045）
+    if (res === 'ok') {                           // TryDismountWithResult Succeeded → Dismount 体内效果
+      // ★BJ704-G18（G17 登记债3）：Dismount(ignoreEffect:false) → DoSpawnDust(
+      //  isDismounting:true)——传 this 出出生尘（旧不传=零尘,buff 栏右键路径双面
+      //  不对齐;typed 尘在 MountInstance.doSpawnDust,回退档=10 粒程序化圆）
+      p.mount.dismount(p, this);
+      this.mountNoSpaceCount = 0;                 // ≙ UpdateFailedDismount :6033（!mount.Active 清零——ok 支内联承载,逐拍链兜其余两腿）
       const mbt = buffTypeByVanilla(prevBuffVanilla);
-      if (mbt !== undefined) p.buffs.remove(mbt);
+      if (mbt !== undefined) p.buffs.remove(mbt); // Dismount :6214 ClearBuff
+      if (p.petting.mount) p.stopPettingAnimal(); // Mount.Dismount :6229-6231（体内效果,拒下坐拍不发生）
       return;
     }
-    // QuickMount（Player.cs:5738-5753）：失败 1/2 次 = Sound 0 + 尘(计数×20)；第 3 次
-    // 强制下坐 + PlayerNoSpaceTeleport（就近可容盒传送）——曾只弹 toast
+    // res === 'nospace'：QuickMount（Player.cs:6046-6059）三连败门：失败 1/2 次 =
+    // Sound 0 + 尘(计数×20)；第 3 次强制下坐 + PlayerNoSpaceTeleport（就近可容盒传送）
+    this.mountNoSpaceLocation = { tx: Math.trunc(p.x / 16), ty: Math.trunc(p.y / 16) };   // :6047 ToTileCoordinates
     this.mountNoSpaceCount++;
     if (this.mountNoSpaceCount < 3) {
-      this.sfx.play('dig', 1, p.cx, p.cy);
-      this.spawnParticles(p.cx, p.cy, '#C8C8C8', 10 + this.mountNoSpaceCount * 20, 1.2);
+      this.sfx.play('dig', 1, p.cx, p.cy);        // Sound 0（:6051）
+      // ★BJ704-G18（G17 登记债2）：DoFailedDismountDust(this, 计数×20)（:6052）——
+      //  尘型=_data.spawnDust/56 黑/61 仙灵彩/Inflate(10,10)（MountInstance 1:1）;
+      //  旧 10+计数×20 程序化圆（计数 30/50 vs 原版 20/40）随本刀订正
+      p.mount.doFailedDismountDust(p, this, this.mountNoSpaceCount * 20);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MountDismountBlocked'));
       return;
     }
     this.mountNoSpaceCount = 0;
-    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231
-    p.mount.dismount(p);
+    p.mount.dismount(p);                          // Dismount(ignoreEffect:true)——免尘
     const mbt = buffTypeByVanilla(prevBuffVanilla);            // ★BJ357 同 :6214 清 buff
     if (mbt !== undefined) p.buffs.remove(mbt);
+    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231（ignoreEffect 只免尘）
     this.playerNoSpaceTeleport();
+  }
+
+  /** ★BJ704-G18（G17 登记债4）UpdateFailedDismount（Player.cs:6031-6037,调用位
+   *  :24922 `i == Main.myPlayer`——单机恒本地,挂 Player.Update 逐拍;本仓挂
+   *  player.fixedUpdate 后同拍序）：count>0 ∧（dead ∨ 下坐（含矿车骑乘态）∨
+   *  失败格位 ≠ 当前格）→ 清零。旧仓只在成功/第 3 拍清——异地失败两次回原点再
+   *  败一次即误触第 3 拍强制（vanilla 已清,计数须同格三连）。矿车骑乘态
+   *  ≙ vanilla mount.Active（Cart 亦 Mount）不清,与 ridingMount（不含矿车）分立。 */
+  private updateFailedDismount(): void {
+    if (this.mountNoSpaceCount <= 0) return;
+    const p = this.player;
+    const tx = Math.trunc(p.x / 16), ty = Math.trunc(p.y / 16);   // position.ToTileCoordinates（截断）
+    const loc = this.mountNoSpaceLocation;
+    if (p.dead || (!p.ridingMount && !p.ridingCart) || !loc || loc.tx !== tx || loc.ty !== ty) {
+      this.mountNoSpaceCount = 0;
+    }
   }
 
   /** PlayerNoSpaceTeleport（Player.cs:5685-5726）：以当前格向上逐行扫可容纳
@@ -10566,11 +10633,18 @@ export class Game implements GameHooks {
         dead: player.dead,
       });
     }
+    // ★BJ704-G18（G17 登记债4）UpdateFailedDismount（Player.cs:24922 原位承接
+    //  ——Player.Update 内 i==myPlayer 门,IntentionGuesser :24786 之后同拍序）：
+    //  下坐失败计数的异地/死亡/下坐三腿清零（见方法注）
+    this.updateFailedDismount();
     // ★SW-FX27：呈现面翻转开关同步（GameViewMatrix.Effects=FlipVertically
     //  Main.cs:62944 `gravDir != 1f` 消费语义）——玩家 update 后（重力药水 Up 沿/
     //  克脑 forcedGravity 本 tick 内的翻转即刻生效）先于 updateSmartCursor/
-    //  updateSmartSelect 等鼠标→世界消费（8300+），渲染帧头二次同步兜底。
+    //  updateSmartSelect 等鼠标→世界消费（8300+）。
     //  原版 Draw 每帧读 player[myPlayer].gravDir——本仓 Camera.flipY 同口径。
+    //  ★33a65b85（interp 波,2026-10-14）合并了旧渲染帧头二次同步：gravDir 全部
+    //  写位都在玩家 update 链内先于本点,渲染期纯读（interp 块只 lerp 位置）→
+    //  单点同步足额（sw-fx27 结构锁已随迁,详该测试注）。
     this.camera.flipY = player.gravDir === -1;
     // ★IIIII61 SkyblockRuntime：30t/列滚动巡检（WorldGen.UpdateWorld :72065-72072
     //  totalD>=30 → CountTiles(totalX)；尾列 Calculate 重算八旗——lowTiles 翻转时
@@ -15107,6 +15181,16 @@ export class Game implements GameHooks {
     const eq = this.player.equipStats;   // ★IIIII250 函数级快照:本函数 37 次直读每读一次键重建(雨天 trace 固定Update 231.8ms 调用权重);stats 冻结,装备变更下一访问即时反映语义不变
     const inp = this.input;
     clearPlacePreviewFrame();            // ★BJ557：放置预览幽灵每帧重建（先清后写;下方各早退帧=隐藏,⟺原版 cursorItemIconEnabled 复位相）
+    // ★BJ704-G21 R8-F1（G14 件1 勘误迁位）：cannonCooldown 递减（Player.cs:43922-
+    //  43925）在 ItemCheck_OwnerOnlyCode【方法体级】——包着它的 if(itemAnimation>0)
+    //  块 :43817 早在 :43851 闭括（括号平衡亲证）=逐 tick 递减,与挥动/使用态无关;
+    //  且先于同方法内 PlaceThing :43948（→PlaceThing_CannonBall→ShootFromCannon
+    //  冷却门）=先减后查,fire-to-fire 恰 20 拍。旧位 updateSwingHits swing 门后=
+    //  闲时冻结（G14 注「itemAnimation>0 门」系伪锚,红队 R8-F1 定谳）;本函数为
+    //  ItemCheck 等价宿主（头部位=OwnerOnlyCode 早于 :16711 火把炮检查同拍序）。
+    //  死亡拍照减（原版 UpdateDead :24943 早退冻结）——复活窗 ≥90t ≫ 20t 冷却,
+    //  不可观测,不设门。
+    if (this.cannonTorchCooldown > 0) this.cannonTorchCooldown--;
     // pendingItemReuse 复位（ItemCheck :42921 函数头 `pendingItemReuse = false`）：
     // 该旗只在「归零拍 → 本函数下一拍」窗口为真（updateSwingHits 归零拍写真）
     this.player.pendingItemReuse = false;
@@ -15276,7 +15360,9 @@ export class Game implements GameHooks {
     // ★无坐骑物品才落 QuickMinecart（原版同序；曾缺此支——背包有鞍按 R 不上车）
     if (inp.downAction('QuickMount') && !this.cartKeyLatch) {
       this.cartKeyLatch = true;
-      if (!this.quickMount()) this.tryQuickMinecart();
+      // ★BJ704-G20：三态消费——'blocked'（CCed/tongued/诅咒/倒挂/死亡）不落矿车
+      //  （vanilla :6068 整支 return）;仅 'none' 落 QuickMinecart（:6091 else）
+      if (this.quickMount() === 'none') this.tryQuickMinecart();
     }
     if (!inp.downAction('QuickMount')) this.cartKeyLatch = false;
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
@@ -16639,6 +16725,26 @@ export class Game implements GameHooks {
       return;
     }
 
+    // ★BJ704-G14（件1 [g11-cannon-torch-fire]）：PlaceThing_CannonBall
+    //  （Player.cs:39900 分派序——Paintbrush/PaintRoller/PaintScraper 之后,
+    //  XMasTreeTops/Extractinator/Tiles/Walls 之前）——火把族对大炮 209 band<3
+    //  左键手工点火。不 return：原版 PlaceThing 各子函数无条件顺序执行,火把
+    //  放置链（下方 tile 臂）同拍照跑——炮格被占自然落空=同拍序;发射不吞挥动
+    //  （挥动由放置臂 useSwing 启动,原版 ApplyItemAnimation 在 TryStartUse）。
+    //  tryTorchFireCannon 内含冷却 20t/兔炮容量/使用门全套（Player.ShootFromCannon
+    //  :42347-42391 1:1）。
+    //  ★BJ704-G21 R8-N1（首拍 1 拍晚勘正）：原版 ApplyItemAnimation 在使用启动块
+    //  （:43074-43116）先于 PlaceThing 跑——启动拍 itemAnimation=15 已在途,炮发射
+    //  门首拍即过。仓内挥动原由下方放置臂启动（cannon 检查先行=首拍无 swing 不发,
+    //  第 2 拍才发）→ 本块前置 useSwing（与放置臂同款调用/同档 paintTileSpeed;
+    //  建后放置臂 t>1 不重建=同拍同形,非炮目标端态零变化——两臂间无 swing 消费面）。
+    if (heldDef && inp.mouseDown && !inp.rightDown
+      && TORCH_ITEMS.has(heldDef.vid ?? -1)
+      && this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1))) {
+      if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
+      this.tryTorchFireCannon(tx, ty, heldDef.vid ?? -1);
+    }
+
     // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手):左键,目标格可被占用
     // （★BJ569:宏伟蓝图 3611 不在本分派——updateUse 头 tickGrandDesignRoute 逐帧驱动,
     //  原版无 IsInTileInteractionRange 门,起手帧已吞 mouseDown 边沿,本支对其不可达）
@@ -16743,6 +16849,27 @@ export class Game implements GameHooks {
         const relItemId = (heldDef.vid ?? -1);
         const relNpc = CRITTER_RELEASE_BY_ITEM[relItemId];
         if (relNpc) {
+          // ★BJ704-G14（件2②）：ItemCheck_TryStartUse 门（Player.cs:52755-52758
+          //  `makeNPC>0 && !NPC.CanReleaseNPCs(whoAmI)` → flag=false 使用整支不启动）
+          //  ——超限无消耗/无动画/无释放（spawnNpcByVanilla 内门=ReleaseNPC :80930
+          //  二道,双门同相原版双层）
+          if (!this.canReleaseNpcs()) return;
+          // ★BJ704-G11（件2②）：makeNPC==614 特支（Player.cs:44400-44405）——
+          //  1338 爆炸兔手持使用 = 在【玩家位】直放（Center.X/Bottom.Y）,无鼠标格
+          //  /射程/实心门（其余小动物走下方鼠标格通用支）;Style=sItem.placeStyle=0
+          //  （Item.cs:16573 DefaultToCapturedCritter 不写 placeStyle）→ ReleaseNPC
+          //  case 614（NPC.cs:80957-80977）方向=player.direction、无雕像旗（死亡
+          //  爆弹 175 伤、bunnyOwner=1 可炸释放者本人——Enemy 614 死亡支既有链）。
+          //  useTime/useAnimation=20（Item.cs:16574-16575 覆写缺省 15/10）。
+          if (relItemId === 1338) {
+            const p614 = this.player;
+            const released614 = this.spawnNpcByVanilla(614, p614.cx, p614.y + p614.h, undefined, true);
+            if (released614) released614.facing = p614.facing < 0 ? -1 : 1;   // direction=player.direction
+            p614.inv.removeHeld(1);
+            this.cb.onInventoryChanged();
+            p614.useTime = 20;                       // :16574-16575
+            return;
+          }
           const mtx = Math.floor((this.camera.x + (inp.mouseX - vw2 / 2)) / TILE);
           const mty = Math.floor((this.camera.y + (inp.mouseY - vh2 / 2)) / TILE);
           const st = this.world.store;
@@ -30123,7 +30250,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 右键「格交互族 vs NPC 交谈」仲裁分派（★SW-BJ25 2026-09-07 抽方法+移位；
    *  ★SW-BJ52 2026-09-10 箱臂命中域收原版精确域，详箱臂注）：
-   *  序 = 宝箱（光标 tile 本体精确域）→ 可疑之眼 43 →
+   *  序 = 宝箱（光标 tile 本体精确域）→
    *  PlaceTileOnAltUse 放置族 → interactAt 全格交互 → NPC 交谈。
    *  交谈臂原版锚 = HoverOverNPCs Main.cs:43807 `talkNPC != i &&
    *  !tileInteractionHappened`——格交互（TileInteractionsUse Player.cs:32358，
@@ -32798,13 +32925,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         return false;
       },
-      countProjectiles: (kind: 'spiky' | 'bunny', px: number, py: number, radius: number) => {
-        let n = 0;
-        for (const e of this.entities.projectiles) {
-          if (e instanceof TrapShot && e.kind === kind && Math.hypot(e.x - px, e.y - py) < radius) n++;
-        }
-        return n;
-      },
+      countProjectiles: (kind: 'spiky' | 'bunny', px: number, py: number, radius: number) =>
+        this.countTrapProjectiles(kind, px, py, radius),
       spikyBudgetPenalty: (px: number, py: number) => {
         // Wiring.cs 1456 :1952-1966:每个场上 185 按距离扣预算
         // (<50→50 <100→15 <200→10 <300→8 <400→6 <500→5 <700→4 <900→3 <1200→2 其余 1)
@@ -45259,8 +45381,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    // 178 彩带弹（ConfettiGun 1000 弹,:76060 区段）：85×d139-142 彩带尘
-    //（初速=速度继承+三重随机扰动,scale1.2）
+    // 178 彩带弹（ConfettiGun 1000 弹,:76062-76092）：85×d139-142 彩带尘
+    //（初速=速度继承+三重随机扰动 [+=×0.01/×=1+0.01/+=×0.05],scale1.2×(1±0.01)）
+    //  + 40×gore 276-282 彩带碎片（速度继承+四重扰动,scale×(1±0.0095~)）
+    //  ★BJ704-G21 R8-F4（G14 载体接线完备性三缺清偿）：旧支缺第三重扰动 +=Next
+    //  (−50,51)×0.05/scale 抖/40×gore 整环（注释自称三重实二重;掷序=原版逐位——
+    //  尘侧 scale 抖殿后,gore 侧 scale 抖（±20,尘是 ±30）在第三重扰动【前】）。
     if (projId === 178) {
       for (let i = 0; i < 85; i++) {
         const t178 = 139 + Math.floor(Math.random() * 4);   // Next(139,143)
@@ -45270,6 +45396,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           d.vy += nrand(50) * 0.01;
           d.vx *= 1 + nrand(50) * 0.01;
           d.vy *= 1 + nrand(50) * 0.01;
+          d.vx += nrand(50) * 0.05;                         // :76070-71 第三重扰动
+          d.vy += nrand(50) * 0.05;
+          d.scale *= 1 + nrand(30) * 0.01;                  // :76074 scale 抖（殿后）
+        }
+      }
+      for (let i = 0; i < 40; i++) {                        // :76075-76092 gore 整环
+        const g = GorePiece.newGore(276 + Math.floor(Math.random() * 7),   // Next(276,283)
+          x, y, oldVx, oldVy);
+        if (g) {
+          g.vx += nrand(50) * 0.01; g.vy += nrand(50) * 0.01;
+          g.vx *= 1 + nrand(50) * 0.01; g.vy *= 1 + nrand(50) * 0.01;
+          g.scale *= 1 + nrand(20) * 0.01;                  // :76087 gore 抖幅 ±20（尘 ±30）
+          g.vx += nrand(50) * 0.05; g.vy += nrand(50) * 0.05;
         }
       }
       return;
@@ -45289,10 +45428,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       for (let i = 0; i < 5; i++) {
         const g = GorePiece.newGore(276 + Math.floor(Math.random() * 7),   // Next(276,283)
-          x + w / 2, y + h / 2, -oldVx * 0.3, -oldVy * 0.3);
+          x, y, -oldVx * 0.3, -oldVy * 0.3);                // ★G21 R8-F4 连带：NewGore position=弹盒左上（:77602,旧中心位=半盒偏移）
         if (g) {
           g.vx += nrand(50) * 0.01; g.vy += nrand(50) * 0.01;
           g.vx *= 1 + nrand(50) * 0.01; g.vy *= 1 + nrand(50) * 0.01;
+          g.scale *= 1 + nrand(20) * 0.01;                  // ★G21 R8-F4 连带：:77599-77600 gore scale 抖（±20）旧漏
           g.vx += nrand(50) * 0.05; g.vy += nrand(50) * 0.05;
         }
       }
@@ -48215,6 +48355,100 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return e;
   }
 
+  /** ★BJ704-G11（件2①,抽方法 G14 导线/手工两路共用）：BunnyCannonCanFire 计数面
+   *  （WorldGen.cs:51150-51191）——弹 kind 计数（半径门）+bunny 桶并入 NPC614
+   *  （前 100 槽全量,无距离门）;NPC 槽位空位门（num2 空槽计数）系 vanilla 100 槽
+   *  数据结构面,仓内无槽位模型不入（G11 判语维持）。消费：wiring ctx
+   *  countProjectiles（devices 209 band1）+ 手工火把点火 tryTorchFireCannon。 */
+  countTrapProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number {
+    let n = 0;
+    for (const e of this.entities.projectiles) {
+      if (e instanceof TrapShot && e.kind === kind && Math.hypot(e.x - px, e.y - py) < radius) n++;
+    }
+    if (kind === 'bunny') {
+      for (const c of this.entities.critters) {
+        if ((c as unknown as { vanillaId?: number }).vanillaId === 614
+          && !(c as unknown as { dead?: boolean }).dead) n++;
+      }
+    }
+    return n;
+  }
+
+  /** ★BJ704-G14（件2② [g11-trapshot-idstatic 三残项之 CanReleaseNPCs]）：
+   *  NPC.CanReleaseNPCs（NPC.cs:80887-80921）单机面——num=0.7+0.05（netMode!=1）
+   *  → 阈值 200×0.75=150：场上活 NPC（enemies∪critters∪npcs 三桶,原版 Main.npc
+   *  单数组全域）<150 且本人已释放（releaseOwner==who ≡ 单机 releasedFromItem）
+   *  <150 才放行。消费：①ItemCheck_TryStartUse 门（Player.cs:52755-52758——超限
+   *  整个使用不启动,不消耗不动画）②ReleaseNPC 内门（NPC.cs:80930,经
+   *  spawnNpcByVanilla 释放域）。maxNPCs=200 槽容量本仓无整槽模型——本门只取
+   *  两计数面（crowding/每人预算）,与 BunnyCannonCanFire 空槽门同判例分界。 */
+  canReleaseNpcs(): boolean {
+    let active = 0, released = 0;
+    for (const bucket of [this.entities.enemies, this.entities.critters, this.entities.npcs]) {
+      for (const npcEnt of bucket) {
+        const n = npcEnt as unknown as { dead?: boolean; releasedFromItem?: boolean };
+        if (n.dead) continue;
+        active++;
+        if (n.releasedFromItem) released++;
+      }
+    }
+    return active < 150 && released < 150;
+  }
+
+  /** ★BJ704-G14（件1 [g11-cannon-torch-fire] 清偿）：PlaceThing_CannonBall
+   *  （Player.cs:42115-42127）→ Player.ShootFromCannon（:42347-42391）→
+   *  WorldGen.ShootFromCannon（:51033-51148,fromWire=false 手工档）。
+   *  门序（原文）：火把族（ItemID.Sets.Torches=TORCH_ITEMS）∧ Simple 射程（TB=
+   *  tileBoost+blockRange）→ 目标格 active∧type 209∧frameX/72<3（band 0 大炮/
+   *  1 兔兔炮/2 彩带炮;3/4 传送门炮右键链,band<3 门排它）→ cannonCooldown≤0 →
+   *  兔兔炮 BunnyCannonCanFire（num==2 门 :42357）→ 发射门
+   *  `ItemTimeIsZero && itemAnimation>0 && controlUseItem`（=useTime 0 ∧ swing
+   *  在途 ∧ mouseDown——★G21 R8-N1 勘误:原版【使用启动拍即发射】——ItemCheck 序
+   *  =启动块 :43074-43116 ApplyItemAnimation 置 15 →递减→ OwnerOnlyCode :43185
+   *  →PlaceThing,itemTime 因放置失败从未置（放置件只在成功拍,:41184）⇒ 首拍三门
+   *  全过;旧注「PlaceThing 在使用启动拍不跑=首拍不发射」系伪锚。仓内由 cannon
+   *  块 useSwing 前置承载（挥动先建,同拍序））→ 置 20t 冷却 +
+   *  WorldGen.ShootFromCannon（锚点回算/初速表/出膛 (ax+2)*16/(ay+2)*16/速度 14/
+   *  kb 8）。返回 true=已发射（调用侧不 return——原版 PlaceThing 火把放置链
+   *  照跑,炮格被占放置自然落空=同拍序）;cursorItemIconEnabled 面（:42361）已由
+   *  ToolCursorIcon isTorch×sheet209×band<3 支承载（红蓝 C-F4 先落）。 */
+  private tryTorchFireCannon(tx: number, ty: number, heldVid: number): boolean {
+    if (this.cannonTorchCooldown > 0) return false;                 // :42349-42352
+    const shCT = this.wiring?.sheetOf(tx, ty) ?? -1;
+    const stCT = this.world.store;
+    if (shCT !== 209 || !stCT.hasTile(tx, ty)) return false;
+    const iCT = stCT.idx(tx, ty);
+    const band = Math.floor(stCT.frameX[iCT] / 72);                 // num2（:42354）
+    if (band >= 3) return false;                                    // :42122（传送门炮 3/4 不入）
+    const ammo = band + 1;                                          // num（:42356）
+    // :42357 兔兔炮容量门（num==2 && !BunnyCannonCanFire）——WorldGen.ShootFromCannon
+    //  :51125 二查同值,单查等价（均在生成前）
+    if (ammo === 2 && this.countTrapProjectiles('bunny', 0, 0, Infinity) >= 4) return false;
+    // 发射门（:42362）——ItemTimeIsZero ∧ itemAnimation>0（swing 在途——R8-N1 后
+    //  首拍 cannon 块已前置 useSwing,启动拍即过）∧ controlUseItem（调用侧已 mouseDown 门）
+    if (this.player.useTime !== 0) return false;
+    if (!this.swing || this.swing.t <= 0) return false;
+    const col = Math.floor((stCT.frameX[iCT] % 72) / 18);           // num3（:42364-42372）
+    const ax = tx - col;
+    const row = Math.floor((stCT.frameY[iCT] % 54) / 18);           // num6（:42374-42378）
+    const ay = ty - row;
+    const elev = Math.floor(stCT.frameY[iCT] / 54);                 // num5=仰角档 0..8
+    const damage = ammo === 1 ? 300 : ammo === 2 ? 350 : 0;         // :42380-42388
+    this.cannonTorchCooldown = 20;                                  // :42379
+    // WorldGen.ShootFromCannon :51033-51148（速度 14/初速方向表 :51067-51111/
+    //  出膛 (ax+2)*16,(ay+2)*16 :51112;ammo4/5 的 +5 偏移不适用 band<3）
+    const ANGLE_V: Array<readonly [number, number]> = [
+      [10, 0], [7.5, -2.5], [5, -5], [2.75, -6], [0, -10],
+      [-2.75, -6], [-5, -5], [-7.5, -2.5], [-10, 0],
+    ];
+    const [bxCT, byCT] = ANGLE_V[elev] ?? [0, -10];
+    const lenCT = Math.hypot(bxCT, byCT);
+    const kindCT: TrapShotKind = ammo === 1 ? 'cannonball' : ammo === 2 ? 'bunny' : 'confetti';
+    this.entities.add(new TrapShot((ax + 2) * 16, (ay + 2) * 16,
+      (bxCT * 14) / lenCT, (byCT * 14) / lenCT, damage, kindCT, 0), 'projectiles');
+    return true;
+  }
+
   /** 按原版 NPC id 出生（小动物入微光 NPC.GetShimmered→Transform、WorldItem 放生
    *  ※1457 微光产物所有权变更登记(NPC.GetShimmered :92687-92689→WorldItem.SpawnShimmeredItem):
    *    playerIndexTheItemIsReservedFor=Main.myPlayer 消失(→NewItemOwnership.None,微光产物
@@ -48223,6 +48457,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
   spawnNpcByVanilla(id: number, x: number, y: number, style?: number, released = false): Enemy | null {
     if (this.net && !this.net.policy.isHost) return null;
+    // ★BJ704-G14（件2②）：ReleaseNPC 内门（NPC.cs:80930 `(npcCatchable[Type] ||
+    //  who == Main.myPlayer) && CanReleaseNPCs(who)`——单机 who==myPlayer 恒真,
+    //  npcCatchable 面并入）——释放域调用（released ∨ style 携带,即走 ReleaseNPC
+    //  语义的入口）超限返 null（=原版 ReleaseNPC -1 无生成）。NewNPC 域（微光
+    //  Transform/AnyNPCs 等 released=false 无 style）不入门。
+    if ((released || style !== undefined) && !this.canReleaseNpcs()) return null;
     // 城镇史莱姆族（670/678-684 townNPC=true）→ TownNPC 落 npcs 桶（WorldItem 681 微光链等）
     const townKey = Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0];
     if (townKey && id >= 670 && id <= 684) {
@@ -53599,7 +53839,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const g = new Arrow(p.cx, p.cy, (vx0 / l) * 12, (vy0 / l) * 12 - 1.3,
       65, 7, VOLATILE_GEL_PROJ);
     g.idStaticGroup = VOLATILE_GEL_PROJ;                                      // :8910-8911 IDStatic 10t 组键 937
-    g.idStaticCdMs = 167;
+    g.idStaticCdTicks = 10;   // ★BJ704-G10 随迁残写：旧 idStaticCdMs=167 系 10t 的 ms 编码（167≈10×16.7）
     this.entities.add(g, 'projectiles');
   }
 

@@ -398,10 +398,14 @@ describe('三模物理接管（Player.fixedUpdate 挂钩）', () => {
     for (let i = 0; i < 90; i++) { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); minY = Math.min(minY, p.y); }
     expect(minY).toBe(groundY);                   // 始终贴地
     // 按住跳不松手：autoJump 免 releaseJump 落地即重跳 → 持续弹跳
+    // ★BJ701 窗口重校 180→400：史莱姆族双竖向碰撞趟（Player.cs:28409-28414,垂直
+    //   位移×2=hyper jump）落地后,本 120 格测试世界的太空低重力带（y/16<60+10n5,
+    //   深度重力斜率 IIIII224 :24861-24883 → grav×0.25）被弹跳弧顶探入 → 单次弹跳
+    //   ~150 拍（旧单趟 ~35 拍）,180 拍只容 1 次落地。语义锁（免松键连跳）不变。
     p.inputX = 0; p.vx = 0; p.inputJump = true;
     minY = p.y;
     let landings = 0; let wasAir = false;
-    for (let i = 0; i < 180; i++) {
+    for (let i = 0; i < 400; i++) {
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
       minY = Math.min(minY, p.y);
       if (!p.onGround) wasAir = true;
@@ -443,7 +447,7 @@ describe('三模物理接管（Player.fixedUpdate 挂钩）', () => {
     expect(m.flyTime).toBe(160);
   });
 
-  it('游泳族：海龟浸水走干燥分支（ignoreWater）+ 免淹', () => {
+  it('游泳族：海龟浸水碰撞/位移豁免（ignoreWater 积分层）+ 免淹（★BJ704-G12 债3：重力已改走湿支液体档）', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     tick(p, w, 8);
@@ -656,16 +660,23 @@ describe('悬停坐骑贴地/起落门（Mount.cs Hover :3437-3457 尾段 + Play
     expect(v.y).toBeCloseTo(y0 + 0.001);   // position.Y -= -0.001 抵消上漂
   });
 
-  it('tryStartHover 边沿用 jumpEdgePrev（tick 尾快照）——上 tick 已按不触发（:26939 releaseUp）', () => {
+  it('tryStartHover 边沿用 upEdgePrev（↑ 键上升沿,:26939 controlUp∧releaseUp——★G15 通道翻正）', () => {
     const m = new MountInstance();
     m.setMount(8, view());
-    const held = view({ inputUp: true, jumpEdgePrev: true });
+    // ↑ 键上 tick 已按 → 非 releaseUp 边沿,不触发
+    const held = view({ inputUp: true, jumpEdgePrev: true, upEdgePrev: true });
     m.tryStartHover(held);
-    expect(held.vy).toBe(0);         // 上 tick 跳键已按 = 非 releaseUp 边沿
-    const fresh = view({ inputUp: true, jumpEdgePrev: false });
+    expect(held.vy).toBe(0);
+    // ↑ 键新按（上 tick 未按）→ 边沿触发
+    const fresh = view({ inputUp: true, jumpEdgePrev: false, upEdgePrev: false });
     m.tryStartHover(fresh);
     expect(fresh.vy).toBeLessThan(0); // -(acceleration+gravity+0.001)
     expect(fresh.vy).toBeCloseTo(-(0.16 + 0.4 + 0.001));
+    // ★G15 判别面:持 Space（合成跳键上拍已真）中按 W——vanilla 触发（controlUp 独立键面）,
+    // 旧读 jumpEdgePrev=不触发
+    const spaceHeldWFresh = view({ inputUp: true, jumpEdgePrev: true, upEdgePrev: false });
+    m.tryStartHover(spaceHeldWFresh);
+    expect(spaceHeldWFresh.vy).toBeLessThan(0);
   });
 });
 

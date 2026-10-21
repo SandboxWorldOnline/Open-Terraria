@@ -754,8 +754,14 @@ export class Sfx {
     // ★组3.2 核后并入（逐变体门=逐文件槽同构）:case 30 稀有支 Zombie_12（:1110-1114
     // rare 槽忙检;常规 10/11 无门不入）/case 32 逐变体(:1137-1140)/case 33(:1205-1208)/
     // case 67/68/69 逐变体(:1149-1152/:1161-1164/:1173-1176)。case 46(:1075-1082 先查
-    // 110+111 任一在播即整支 null)/case 65(:1391-1401)/case 66(:1185-1195)是【整体
-    // 忙检】≠逐文件槽,不入集=登记近似（BJ291 残留;case44 Seagull 原文本就无门）。
+    // 110+111 任一在播即整支 null)/case 65(:1391-1401)仍是【整体忙检】≠逐文件槽,
+    // 不入集=登记近似（BJ291 残留;case44 Seagull 原文本就无门）。
+    // ★BJ704-G10（R2-F9,2026-10-21）case 66 三重整体忙检（:1185-1195 Zombie_121/
+    // 122/123 任一在播即整支 null）落模清偿——入 SINGLE_INSTANCE（占槽注册,自身
+    // 在播跳过）+ GROUP_BUSY 群门（组内任一在播跳过,见 siblingBlocked）;
+    // ±0.15 音调=PITCH_CASE[case66] 表档（:342,0c186b4c 起在位,R2-F9「pitch 未传」
+    // 前提勘误——playSfxFiles pitch 参是显式直传通道,表档才是随机抖动正道）。
+    'Zombie_121', 'Zombie_122', 'Zombie_123',
     ...Array.from({ length: 81 }, (_, k) => `Zombie_${k + 24}`),
     'Zombie_6', 'Zombie_8', 'Zombie_9', 'Zombie_20', 'Zombie_105', 'Zombie_124', 'Zombie_125',
     'Zombie_109',   // ★BJ291（U1 漏修⑤）：case 45 Dolphin 在播跳过（音量档 FILE_CASE_VOL:244 已在）
@@ -859,11 +865,22 @@ export class Sfx {
   }
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
-  /** ★BJ289 case 19 兄弟互斥门：本文件的兄弟槽在播 = 本次无声（skip 同语义,
-   *  结局码同 'skip';即时路径与 deferPlay 补播两处消费） */
+  /** ★BJ704-G10（R2-F9）case 66 三重整体忙检群（LSP :1185-1195）——组内【任一】
+   *  在播即整支 return null（互斥群≠逐文件槽≠兄弟对;三文件共一组,组员须在
+   *  SINGLE_INSTANCE 占槽注册本门才可观测）。现役组员=Zombie_121/122/123
+   *  （75 HappyBomb case66 小丑笑声,唯一消费面 DART_STYLE 75 sfx）。 */
+  private static readonly GROUP_BUSY: Readonly<Record<string, readonly string[]>> = {
+    Zombie_121: ['Zombie_121', 'Zombie_122', 'Zombie_123'],
+    Zombie_122: ['Zombie_121', 'Zombie_122', 'Zombie_123'],
+    Zombie_123: ['Zombie_121', 'Zombie_122', 'Zombie_123'],
+  };
+  /** ★BJ289 case 19 兄弟互斥门 + ★G10 case 66 群门：本文件的兄弟槽/互斥群任一
+   *  在播 = 本次无声（skip 同语义,结局码同 'skip';即时路径与 deferPlay 补播两处消费） */
   private siblingBlocked(file: string): boolean {
     const sib = Sfx.SPLASH_SIBLING[file];
-    return sib !== undefined && this.singlePlaying.has(sib);
+    if (sib !== undefined && this.singlePlaying.has(sib)) return true;
+    const grp = Sfx.GROUP_BUSY[file];
+    return grp !== undefined && grp.some((f) => this.singlePlaying.has(f));
   }
   /** 最近一次同步触发链的结局码（play() 合成回退判据专用）：playWavFile 在
    *  playWavFileCore 返回处单点落值,play() 先清后读——同同步块内无重入窗口;
@@ -1181,10 +1198,15 @@ export class Sfx {
   /** 播放任意 wav 文件列表（随机选 + 音高扰动）；供怪物专属声效用。
    *  pitch = 显式 XNA pitchOffset（arcSurgeFx :1268 变调消费,经 playWavFile 直入
    *  pitchRateFor explicitPitch 档 2^pitch——传入即跳过该文件 PITCH_CASE 抖动表,原版
-   *  Style.PitchVariance=0 时 GetRandomPitch 恒 0 同语义） */
+   *  Style.PitchVariance=0 时 GetRandomPitch 恒 0 同语义）。
+   *  ★BJ704-G10（R2-F9）：单实例/互斥群在播跳过（'skip'）返回【true】——「本次
+   *  触发已按原版语义处置（=有意静默）」,抑制 Game.playSfxFiles 的 'hit' 合成
+   *  兜底（BJ289 play() 同判据:在播跳过=原版 return null 无声,勿补近似音;
+   *  唯一活体=75 HappyBomb case66 群门,Item_53/55/159 skip 档同受益）。 */
   playFiles(files: string[], vol = 1, x?: number, y?: number, pitch?: number): boolean {
     if (!files.length) return false;
-    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y, pitch);
+    const ok = this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y, pitch);
+    return ok || this.lastTriggerOutcome === 'skip';
   }
 
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound 语义，AI_016 :44276 引信嘶声）:

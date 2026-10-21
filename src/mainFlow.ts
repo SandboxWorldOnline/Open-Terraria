@@ -337,6 +337,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     return { ok: true, held: { release: releaseAll } };
   }
   let currentWorld: WorldMeta | null = null;
+  /** ★BJ704-G7 件1：联机建房会话的世界槽位绑定（建房选世界 onPlay 拍记,进房
+   *  onJoinRoom 时重置——原版客户端 msg7 收服务器 WorldId 进 ActiveWorldFileData
+   *  （MessageBuffer.cs:488）,MapFileName=WorldId → 与本机同源档地图路径重合
+   *  （WorldMap.TryGetMapPath :234-252）=联机玩自家世界亦建地图档;本仓消费面=
+   *  doSave 的 recordPlayedWorld 绑定（slotMeta 空时回退）。码入房（非建房链）
+   *  =undefined → null 不记（房间世界非本机槽位的可靠绑定,判语边界见 doSave 注）。 */
+  let joinRoomWorldId: number | null = null;
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
   // ★BJ605（2026-10-10 线上事故·态B）：index 元数据写失败告警（WorldStore.saveIndex
@@ -470,7 +477,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   // 隐藏文件输入（DOM 能力，VUI 按钮触发）
   // E2E/控制台调试:直接加载存档 JSON 文本(菜单阶段可用,绕过设置面板 file input)
-  (window as unknown as { __swLoadJson?: (t: string) => Promise<void> }).__swLoadJson = (t: string) => loadFromJson(t);
+  (window as unknown as { __swLoadJson?: (t: string) => Promise<boolean> }).__swLoadJson = (t: string) => loadFromJson(t);   // ★BJ704-G7 件1:返程成败(探针忽略不受影响)
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = '.json';
@@ -1045,6 +1052,9 @@ function makeGame(): Game {
   async function loadFromKey(key: string, opts?: { backToList?: boolean }) {
     if (loadFlowBusy) return;
     loadFlowBusy = true;
+    // ★BJ704-G7 件1：单人读档（槽位/quicksave）即新会话——联机建房绑定作废
+    //  （防 MP 会话后 quickLoad 携陈旧绑定误记/误写槽位）。
+    joinRoomWorldId = null;
     // ★BJ617 件1：载入会话锁（世界锁 world-lock.<id>+角色锁 char-lock.<id>）——
     //  他 tab 会话在途=拒载+toast;quicksave 键无槽位 id 可反解 → 只走角色锁
     //  （quickload 会话 slotMeta=null 不写世界槽位,无世界互踩面）;unsupported=
@@ -1058,6 +1068,7 @@ function makeGame(): Game {
     const lockTake = await acquireLoadSessionLocks(key);
     if (!lockTake.ok) {
       loadFlowBusy = false;
+      currentWorld = null;   // ★BJ704-G7 件1：会话未开始（同会话锁释放语义）——绑定清零防后续 quickLoad 会话误写该槽
       ui.toast(Lang.text(lockTake.which === 'world'
         ? 'Mods.SandboxWorld.Toast.WorldLockedByOtherTab'
         : 'Mods.SandboxWorld.Toast.CharLockedByOtherTab'));
@@ -1093,7 +1104,10 @@ function makeGame(): Game {
             ? worldStore.list().find((m) => m.id === Number(keyMeta[1]))
             : undefined;
           const { world, player, save } = await client.loadSave({ key }, {
-            onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
+            // ★BJ702 件5（旁获缺陷）:onEvent 以 4 参回调 (phase,label,p,local)（Game
+            //  generate 侧 Game.ts 同款 4 参解构）——旧 lambda (phase,p) 把 label
+            //  绑给 p,Number.isFinite(字符串)=false → 进度条全程钉 0%+文案钉死。
+            onProgress: (phase, _label, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
             ...(meta ? { timeoutMs: worldGenTimeoutMs(meta.w, meta.h) } : {}),
           });
           const g = makeGame();
@@ -1153,17 +1167,18 @@ function makeGame(): Game {
         //  恢复档诚实标注「可能落后于最后状态」）;prompt 态不强弹（resolveLoadText
         //  仅在真缺 restoreFromBackup 咨询,prompt 随 missing 分支补提示）。
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.FsBackupRestored', resolved.file));   // 文件名进 {0} 槽（onRestoreMiss 恢复链 :338 同款）
-        await loadFromJson(resolved.text);
+        if (!(await loadFromJson(resolved.text))) currentWorld = null;   // ★BJ704-G7 件1：内吞失败同清绑定
         return;
       }
       if (resolved.source === 'ls-fallback') {
         if (backupTargetOfKey(key)) ui.toast(Lang.text('Mods.SandboxWorld.Toast.LoadStaleLocalCopy'));
-        await loadFromJson(resolved.text);
+        if (!(await loadFromJson(resolved.text))) currentWorld = null;   // ★BJ704-G7 件1：同上
         return;
       }
       if (resolved.source === 'missing') {
         heldSessionLocks?.release();   // ★BJ617 件1：载入失败=会话未开始,会话锁即释
         heldSessionLocks = null;
+        currentWorld = null;   // ★BJ704-G7 件1：同上——绑定清零
         // ★BJ655：prompt 已在手势链内尝试过 requestPermission（授予则不会落此支）,
         //  此处零 toast——授权状态提示面=设置页「待重新授权」+按钮（常驻,不强弹）。
         // ★BJ605：IDB+FS+LS 三处皆无——IDB 态诊断物证留 console（用户自查/
@@ -1175,10 +1190,11 @@ function makeGame(): Game {
         backToList();   // ★2026-10-13 UX:同锁拒绝——回世界列表防裸背景死态
         return;
       }
-      await loadFromJson(resolved.text);   // 'idb'：健康直读
+      if (!(await loadFromJson(resolved.text))) currentWorld = null;   // 'idb'：健康直读;★BJ704-G7 件1：内吞失败同清绑定
     } catch (e) {
       heldSessionLocks?.release();   // ★BJ617 件1：载入失败（alert 面）=会话未开始,会话锁即释
       heldSessionLocks = null;
+      currentWorld = null;   // ★BJ704-G7 件1：同上——绑定清零
       console.error(e);
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
@@ -1194,7 +1210,10 @@ function makeGame(): Game {
     }
   }
 
-  async function loadFromJson(text: string) {
+  /** 返回=成功进世界 true / 失败（内部 alert 已发）false——★BJ704-G7 件1：
+   *  loadFromKey 据此在失败时清 currentWorld 会话绑定（loadFromJson 自吞 catch,
+   *  调用方此前不可见成败=陈旧绑定面）。 */
+  async function loadFromJson(text: string): Promise<boolean> {
     // ★IIIII229（④ 218 章遗留）：读档路 lockBG（Main.cs:20056-20065 isGeneratingOrLoadingWorld
     //   含读档;独立入口（quickLoad/import 兜底）自锁自解,经 loadFromKey 调入时双层
     //   锁/解幂等无害）。
@@ -1220,7 +1239,7 @@ function makeGame(): Game {
           //  失败回退 180s 缺省。
           const dims = peekSaveDims(text);
           const { world, player, save } = await client.loadSave({ json: text }, {
-            onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
+            onProgress: (phase, _label, p) => loadState.setProgress(loadProgressLabel(phase, p), p),   // ★BJ702 件5:同 loadFromKey(4 参契约,旧双参把 label 绑给 p=进度条钉 0%)
             ...(dims ? { timeoutMs: worldGenTimeoutMs(dims.w, dims.h) } : {}),
           });
           __m('load.roundtrip.end');
@@ -1243,7 +1262,7 @@ function makeGame(): Game {
             for (let i2 = 1; i2 < e.length; i2++)
               console.log(`[load] ${e[i2].name.slice(5)} +${Math.round((e[i2].startTime - e[i2 - 1].startTime))}ms`);
           } catch { /* 只读诊断 */ }
-          return;
+          return true;
         } catch (e) {
           if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
           // worker 失败 → 主线程 fallback
@@ -1263,6 +1282,7 @@ function makeGame(): Game {
       absorbLoadedPlayMs(data);   // SW-BJ5 2026-09-07：主线程回退路径同 worker 路径（data=全量 SaveData,含 header.playTimeMs）
       await applyPlayerWithCharacter(g, player);
       g.eventsApplySave(data.events);
+      return true;
     } catch (e) {
       console.error(e);
       ui.hideProgress();
@@ -1272,6 +1292,7 @@ function makeGame(): Game {
       alert(isOomLoadError(String((e as Error)?.message ?? e))
         ? Lang.text('Mods.SandboxWorld.Toast.LoadOom')
         : Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+      return false;   // ★BJ704-G7 件1：内吞失败上抛给调用方（loadFromKey 清绑定用）
     } finally {
       menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（成败同途）
     }
@@ -1514,9 +1535,12 @@ function makeGame(): Game {
     let panelRoot: HTMLElement | null = null;
     const closePanel = () => { panelRoot?.remove(); panelRoot = null; };
     const panel = new MultiplayerSelect({
-      // v3 房间制：onJoinRoom(url, hostToken)——url 含 /<房间码>[?token=]
-      onJoinRoom: (url, hostToken) => {
+      // v3 房间制：onJoinRoom(url, hostToken[, worldId])——url 含 /<房间码>[?token=];
+      // worldId=建房链传入的本机世界槽位 id（★BJ704-G7 件1:联机玩自家世界的
+      // playedWorlds 绑定;码入房不传=无绑定不记,见 doSave 注边界声明）
+      onJoinRoom: (url, hostToken, worldId) => {
         closePanel();
+        joinRoomWorldId = worldId ?? null;   // ★BJ704-G7 件1：每次进房重置（码入房=null）
         ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
         const g = makeGame();
         // 连接前应用选中角色：Hello 的玩家名（加入公告"X已加入。"）需要早于世界数据。
@@ -1532,6 +1556,7 @@ function makeGame(): Game {
         }, hostToken).then(() => {
           // loadWorld 内部已 onWorldReady（enterGame 由 makeGame 回调完成）
         }, (e) => {
+          joinRoomWorldId = null;   // ★BJ704-G7 件1：进房失败=未游玩,绑定作废
           ui.hideProgress();
           ui.toast(`联机失败：${(e as Error).message}`);
           showTitle();
@@ -1552,7 +1577,7 @@ function makeGame(): Game {
             onPlay: (meta) => {
               void worldStore.load(meta).then((json) => {
                 closeFlow();
-                then(json ?? '', meta.name);
+                then(json ?? '', meta.name, meta.id);   // ★BJ704-G7 件1：槽位 id 随链下传（进房 onJoinRoom → playedWorlds 绑定）
               });
             },
             onImport: (file) => importWorldFile(file),   // 导入入本地列表(建房选世界同面)
@@ -1678,11 +1703,14 @@ function makeGame(): Game {
    *  + 结构化克隆双开销；fallback 时 worldStore.load 取回全文走 loadFromJson） */
   async function loadWorldFlow(meta: WorldMeta) {
     currentWorld = meta;
-    // ★BJ694：角色×世界游玩史写入（原版地图档创建等价——进世界即记;幂等零写）
-    {
-      const cid = charContextId();
-      if (cid != null) void charStore.recordPlayedWorld(cid, meta.id);
-    }
+    // ★BJ694→★BJ704-G7 件1（R5 登记债①清偿,2026-10-21）：角色×世界游玩史写入位
+    //  【迁出】本函数——旧位在 loadFromKey 之前=「尝试即记」（锁拒/存档缺失/OOM
+    //  等失败也记;原版失败路径 playWorldCallBack loadFailed→menuMode 200/201
+    //  不存不记,WorldGen.cs:6703-6738 亲读）。新位=doSave 玩家保存链（原版地图档
+    //  唯写时点 Player.InternalSaveMap :55691←InternalSavePlayer :55355——玩家保存
+    //  才建图,「成功进世界∧至少一次保存」;读档失败=永不达保存链=零记）。
+    //  绑定=currentWorld(本函数置)/失败路 loadFromKey 三出口+loadFromJson 假返程
+    //  清零。
     // 旧档（无 header.difficulty）以槽位 meta 回填世界难度；finally 清防泄漏到
     // 后续 quickLoad/文件导入路径（那些场景 fallback=null 不生效）
     difficultyFallback = meta.difficulty;
@@ -1799,8 +1827,8 @@ function makeGame(): Game {
     {
       const cid = charContextId();
       rememberCharId(cid);
-      // ★BJ694：新世界游玩史写入（与 loadWorldFlow 同面;幂等）
-      if (cid != null) void charStore.recordPlayedWorld(cid, meta.id);
+      // ★BJ704-G7 件1：游玩史写入位迁 doSave（与 loadWorldFlow 同改;下方 doSave
+      //  首存即记——创建流恒达保存链,行为等价零差）
       const cs = cid != null ? await charStore.getState(cid) : null;
       if (cs) {
         const sx = g.player.x, sy = g.player.y;
@@ -2055,6 +2083,7 @@ function makeGame(): Game {
       // 由 closeAll→detachGame 摘
       (window as unknown as { __swGame?: Game | null }).__swGame = null;
       currentWorld = null;
+      joinRoomWorldId = null;   // ★BJ704-G7 件1：会话终了——联机建房绑定同清（doSave 已在上文落定）
       // ★BJ617 件1：会话锁随退出释放（此点 doSave 全链已落定——先落盘再放锁,
       //  他 tab 的拒载窗覆盖到我们的最终写入为止;tab 关闭另有浏览器自动释放面。
       //  ★R13-F3：charState 写已并入 doSave 全链 Promise.all——本释放位次在 .plr
@@ -2189,6 +2218,19 @@ function makeGame(): Game {
       {
         const cid = charContextId();   // quickLoad 等无选角上下文会话也回写上次角色
         if (cid != null) {
+          // ★BJ704-G7 件1（R5 登记债①清偿,2026-10-21）：角色×世界游玩史记录位=
+          //  玩家保存链（原版 1:1 锚：Player.SavePlayer→InternalSavePlayer
+          //  :55355 首行 InternalSaveMap :55691——地图档=HasWorldBeenPlayedByActivePlayer
+          //  的原版载体（UIWorldSelect.cs:184-188 TryGetMapPath 地图档存在）,唯写
+          //  时点即玩家保存;顺序亦同=先图后 .plr）。绑定=slotMeta（单人槽位会话,
+          //  调用帧快照）∨ joinRoomWorldId（联机建房会话——原版客户端 msg7 收服务器
+          //  WorldId（MessageBuffer.cs:488）,MapFileName=WorldId 与本机同源档重合
+          //  =联机玩自家世界亦建图）。quickLoad 会话两绑定皆空=不记（判语销案:
+          //  quicksave 无槽位 id 可反解+会话槽位分离设计 lastPlayed/playTimeMs
+          //  同不回写,一致面;码入房非建房链=无可靠绑定不记,边界声明）。
+          //  旧位=loadWorldFlow 进 loadFromKey 之前（尝试即记:失败也记）已迁出。
+          const playedWorldId = slotMeta?.id ?? joinRoomWorldId;
+          if (playedWorldId != null) void charStore.recordPlayedWorld(cid, playedWorldId);
           // ★BJ618 件2：setState 写败抛 CharacterSaveWriteError—— rejection 面收进
           //  .catch（旧 try/catch 只能接同步抛）,用户提示由 onWriteFailData 导出兜底发
           charWrite = charStore.setState(cid, player).catch((e) => { console.warn('charState sync failed', e); });

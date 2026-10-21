@@ -200,7 +200,7 @@ describe('① 源码锚（四件双侧亲读锚）', () => {
 
   it('repo 落刀位：×0.5 消费/冲刺尘门/864 辉光支/残影接线/爆炸弹生成', () => {
     const src = readFileSync(join(GAME, 'src', 'entities', 'MinionProj.ts'), 'utf8');
-    expect(src).toContain('const dmg533 = this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0;');
+    expect(src).toContain('this.contact(game, this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0);');   // ★BJ696 重锚：×0.5 乘区移入 contact533 唯一伤害出口
     expect(src).toContain('game.hitTilesFx?.(this.x, this.y, this.w, this.h, lvx, lvy)');
     expect(src).toContain('if (this.projId === 864) {\n      const sheet864 = projSprite(864);');
     expect(src).toContain('.entities.add(new ExplosiveTrapBlastProj(ecx, ecy, boomProj as 694 | 695 | 696), \'projectiles\')');
@@ -420,9 +420,11 @@ describe('④ 件3：533 冲刺档反弹 HitTiles 砖屑', () => {
   it('冲刺档（dA0=6）落地反弹 → hitTilesFx(position, lastVelocity) 一次', () => {
     const { hooks, player } = makeHooks([]);
     const calls = fxSpy(hooks);
-    // 盒底贴地面（h=20:cy=1589 → 底 1599,地面行 100 顶 1600）——冲刺支先于 hover
-    // 阻尼（分支早退）→ 撞前速=预置 vy=5
-    const m = minion(player, hooks, 533, 60 * 16, 100 * 16 - 11);
+    // 盒底贴地面——★BJ697 债②起冲刺物理盒 26×26（dA0≥6 中心锚两侧+3）:碰撞底=
+    // cy+10+3 → cy=1586 时底=1599（地面行 100 顶 1600）;旧 20 盒校准位 1589 在
+    // 26 盒下预嵌 2px=碰撞解析路径漂移。冲刺支先于 hover 阻尼（分支早退）→
+    // 撞前速=预置 vy=5
+    const m = minion(player, hooks, 533, 60 * 16, 100 * 16 - 14);
     (m as unknown as { dA0: number }).dA0 = 6;
     m.vx = 0; m.vy = 5;
     m.fixedUpdate(1 / 60, hooks);
@@ -430,8 +432,9 @@ describe('④ 件3：533 冲刺档反弹 HitTiles 砖屑', () => {
     expect(calls[0][4]).toBe(0);                     // velocity.X=撞前值
     expect(calls[0][5]).toBe(5);                     // velocity.Y=撞前速（lastVelocity）
     expect(calls[0][2]).toBe(m.w); expect(calls[0][3]).toBe(m.h);
-    // position=撞位（盒底 1600 贴地面——反弹后子步 2 上移,终位非撞位）
-    expect(calls[0][1] + calls[0][3]).toBe(100 * 16);
+    // position=撞位——★BJ697 债②起 26 物理盒贴地（碰撞底 1600）→ 裸 20 盒底=
+    // 1600−3=1597（原版 TileCollision 以 Center 锚 26 盒解析,raw position 同相）
+    expect(calls[0][1] + calls[0][3]).toBe(100 * 16 - 3);
     expect(fld(m, 'dLai2')).toBe(30);                // 反弹 +30（:18314）
     expect(m.vy).toBeLessThan(0);                    // 出膛上行（÷num20=−1.25）
   });
@@ -678,8 +681,9 @@ describe.skipIf(process.env.SW_BJ650_MUT)('⑥ 变异自证（六发恰红+逐�
 
   it('M3 件2 ×0.5 摘除 → 减半断言红', () => {
     mutate(MP,
-      'const dmg533 = this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0;',
-      'const dmg533 = dmg0; // ★BJ650 M3 变异:14618 乘区摘除',
+      // ★BJ696 重锚：×0.5 乘区现居 contact533（projPet 门内唯一伤害出口）,消费表达式同源
+      'this.contact(game, this.dLai2 >= 40 ? Math.trunc(dmg0 * 0.5) : dmg0);',
+      'this.contact(game, dmg0); // ★BJ650 M3 变异:14618 乘区摘除',
       'dLai2≥40 → 受击伤害减半截断');
   });
 

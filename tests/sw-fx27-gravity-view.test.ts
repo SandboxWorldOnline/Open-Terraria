@@ -159,9 +159,19 @@ describe('结构锁（源文本锚——防静默回退/整文件覆写）', () 
     expect(src).toContain('Main.cs:62944');            // 金标行号锚
     expect(src).toContain('CaptureCamera');            // capture 不翻的锚注
   });
-  it('Game：双点同步 cam.flipY = player.gravDir === -1（update 后 + 渲染帧头）', () => {
+  it('Game：单点同步 cam.flipY = player.gravDir === -1（玩家 update 后;渲染帧头点被 interp 波合法收敛）', () => {
+    // ★BJ704 裁决（2026-10-21,sw-fx27 伪红翻案）：33a65b85（interp 渲染插值,2026-10-14）
+    //  移除了渲染帧头第二次 `cam.flipY = ...` 同步。定谳=合法收敛而非回归：gravDir
+    //  全部写位（fixedUpdateBody :6072/bordersMovement :11313/buff 域 :13189-13224/
+    //  入睡 :30537）都在玩家 update 链内、先于 fixedUpdate 尾的单点同步（:10574）;
+    //  渲染期纯读零 gravDir 写位（interp 块只 lerp 位置 x/y,渲染后还原,不触 flipY）
+    //  → 帧头二次同步本就冗余（belt-and-braces 镜像原版 Main.cs:62944 Draw 头读,
+    //  interp 块接管帧头后合并）。锁随迁=恰 1 点 + interp 块零 flipY 写。
     const src = SRC('core/Game.ts');
-    expect(src.match(/flipY = (?:this\.)?player\.gravDir === -1;/g)?.length).toBe(2);
+    expect(src.match(/flipY = (?:this\.)?player\.gravDir === -1;/g)?.length).toBe(1);
+    // interp 临时写块不触 flipY（位置 lerp 专属——flipY 翻转非连续量不可 lerp）
+    const iBlk = src.slice(src.indexOf('const iA = Game.interp'), src.indexOf('this.renderer.render('));
+    expect(iBlk).not.toMatch(/flipY/);
     expect(src).toContain('rawMouseYWorldScale: inp.mouseY / this.camera.zoom');
     expect(src).not.toContain('gravDir: 1,                              // 反重力未实装');   // 旧钉值退役
     expect(src).toContain('gravDir: p.gravDir');

@@ -33,7 +33,8 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { projSprite } from './Arrow';
+import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
+import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
@@ -153,14 +154,74 @@ export class Celeb2Muzzle extends Entity {
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || !ctx) return;
     const fh = img.height / 7;
+    // ---- ★BJ704-G14（件3 [g11-family-body-stealth-dim]）：本体 stealth 减光
+    //      （Main.cs:32623-32640 八型族——615 VortexBeater/714 Celeb2 手持件均
+    //      ranged=true 门可达,owner=Main.player[proj.owner] :28334）。615 走默认
+    //      GetAlpha（RGB×tint、A=255n → ga=n）;714 走 GetAlpha :80888-80894 专属档
+    //      （Lerp(newColor,White,0.8)+A 保留再整色 ×a2/255）。
+    //      ★BJ704-G19（G14 登记 [g14-714-getalpha-whitening] 暗光基面清偿,G16 评估
+    //      两遍制坐标落地）：vanilla 逐通道 =(0.2·L·n+204)·a2f/255、ga=a2f²（n=族
+    //      减光 rgb,a2=(int)(255n),L=光照）——白化抬升项 +204(→0.8) 不吃光。
+    //      旧实现把 204 烘进 tintedTex 随实体层 compositeLight 乘光=暗处 muzzle
+    //      ~黑（vs vanilla 0.2L+204≥80% 白;无 stealth 暗处亦然——G14 实报域）。
+    //      两遍制（BJ668 lerp lift 同构算子,Arrow :3596-3603 先例）：
+    //      基座 pass=tintedTex 烘 0.2·n_ch·a2f（ga=a2f²,受屏幕光;flatten=false
+    //      保形——BJ371/BJ700-C 纪律）;抬升 pass=projFullbrightQueue 'lighter'
+    //      光照后 globalAlpha=0.8·a2f³（不受光）;和=tex·a2f³·(0.2·n·L̂+0.8) ≙
+    //      vanilla 逐位（含 vortex 逐通道 n）。无 stealth（dimCeleb=null）恒等档:
+    //      n=1/a2f=1 → 0.2·L̂+0.8=80% 白底（修暗光面）,满光 0.2+0.8=1.0 恒等
+    //      （旧满光带零漂移）。615 默认档维持 G14 原样（无抬升面）。 ----
+    const dimCeleb = familyBodyStealthDim(this.owner);
+    let srcCeleb: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img;
+    let gaCeleb = 1;
+    let liftCeleb = -1;                         // ≥0 = 714 抬升 pass 的 globalAlpha
+    if (this.projId === 714) {
+      const a2f = dimCeleb ? Math.trunc(255 * dimCeleb.ga) / 255 : 1;   // a2=(int)(255n) 通道截断
+      const nCh: [number, number, number] = dimCeleb
+        ? [dimCeleb.rgb[0], dimCeleb.rgb[1], dimCeleb.rgb[2]] : [1, 1, 1];
+      srcCeleb = tintedTex(img, [
+        Math.trunc(255 * 0.2 * nCh[0] * a2f),
+        Math.trunc(255 * 0.2 * nCh[1] * a2f),
+        Math.trunc(255 * 0.2 * nCh[2] * a2f),
+      ] as [number, number, number], false) ?? img;
+      gaCeleb = a2f * a2f;                      // A=a2×a2/255 → /255=a2f²
+      liftCeleb = 0.8 * a2f * a2f * a2f;        // 抬升 0.8·a2f³（'lighter' 加算）
+    } else if (dimCeleb) {
+      srcCeleb = tintedTex(img, [
+        Math.trunc(255 * dimCeleb.rgb[0]), Math.trunc(255 * dimCeleb.rgb[1]), Math.trunc(255 * dimCeleb.rgb[2]),
+      ] as [number, number, number], false) ?? img;
+      gaCeleb = dimCeleb.ga;
+    }
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(Math.atan2(this.vy, this.vx) + Math.PI / 2 + (this.owner.facing === -1 ? Math.PI : 0));
     if (this.owner.facing === -1) ctx.scale(1, -1);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, this.frame * fh, img.width, fh,
+    if (dimCeleb || this.projId === 714) ctx.globalAlpha = gaCeleb;
+    ctx.drawImage(srcCeleb as CanvasImageSource, 0, this.frame * fh, img.width, fh,
       -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
+    // 714 抬升 pass：光照后 'lighter' 加算（世界系闭包,projFullbrightQueue 冲刷
+    // 同式相机变换;测试桩无队列时缺省跳过=只丢抬升面不炸）。
+    if (liftCeleb >= 0) {
+      const lift = liftCeleb, imgL = img, fhL = fh, frameL = this.frame;
+      const rotL = Math.atan2(this.vy, this.vx) + Math.PI / 2 + (this.owner.facing === -1 ? Math.PI : 0);
+      const flipL = this.owner.facing === -1;
+      const cxL = this.cx, cyL = this.cy;
+      (r as unknown as { projFullbrightQueue?: Array<(c: CanvasRenderingContext2D) => void> })
+        .projFullbrightQueue?.push((c2) => {
+          c2.save();
+          c2.globalCompositeOperation = 'lighter';
+          c2.translate(cxL, cyL);
+          c2.rotate(rotL);
+          if (flipL) c2.scale(1, -1);
+          c2.imageSmoothingEnabled = false;
+          c2.globalAlpha = lift;
+          c2.drawImage(imgL as CanvasImageSource, 0, frameL * fhL, imgL.width, fhL,
+            -imgL.width / 2, -fhL / 2, imgL.width, fhL);
+          c2.restore();
+        });
+    }
   }
 }
 

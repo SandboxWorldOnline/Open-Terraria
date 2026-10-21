@@ -35,9 +35,14 @@ import { Entity } from './Entity';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
-import { projSprite } from './Arrow';
+import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
+import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { rollVanillaHitCrit } from './proj1457';
+// ★BJ704-G2（2026-10-21,债① 706 员）：残影环接线——706 TrailingMode=0/CacheLen 10
+//  （ProjectileID.cs:385/:387）,通用表 P(9,0,-2,0.5)（Main.cs:31055-31061）+B,G,A/=i
+//  色支（:31273-31278;GetAlpha :80830-80833 afade 面已随本刀入 GHOST_TINT[706]）。
+import { ProjGhostRing, drawProjGhosts } from './projGhostTrail';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
@@ -46,6 +51,7 @@ import { TILE } from '../core/constants';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { wetCollision } from './npcLiquid';
 import { projectileData } from '../data/vanillaProjectiles';
+import { PROJ_ALPHA_MOD } from '../data/vanillaProjAlpha';   // ★G21 R7-P2-3：706 afade 档（本体 A 面）
 import type { TileStore } from '../world/TileStore';
 
 /** 玩家侧挂点（RotatedRelativePoint(MountedCenter) ≈ 中心；SkyDragonFury.DragonOwner 同口径）
@@ -247,6 +253,19 @@ export class PhoenixChannel extends Entity {
     const img = projSprite(705);
     const ctx = r.ctx;
     if (!img || img.width <= 0 || !ctx) return;
+    // ---- ★BJ704-G14（件3 [g11-family-body-stealth-dim]）：705 DD2PhoenixBow 本体
+    //      stealth 减光（Main.cs:32623-32640 八型族;3854 手持件 ranged=true 门可达,
+    //      705 默认 GetAlpha → RGB×tint + A=255n → ga=n,族面求值器 familyBodyStealthDim
+    //      单源——Arrow 630/Celeb2Muzzle 615·714 同源）----
+    let src705: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img;
+    let ga705 = 1;
+    const dim705 = familyBodyStealthDim(this.owner);
+    if (dim705) {
+      src705 = tintedTex(img, [
+        Math.trunc(255 * dim705.rgb[0]), Math.trunc(255 * dim705.rgb[1]), Math.trunc(255 * dim705.rgb[2]),
+      ] as [number, number, number], false) ?? img;
+      ga705 = dim705.ga;
+    }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
@@ -254,7 +273,8 @@ export class PhoenixChannel extends Entity {
     // :68402-68403）+ FlipHorizontally（spriteDirection 门）——rotate(θ+π)+scale(-1,1)
     ctx.rotate(Math.atan2(this.vy, this.vx));
     if (this.owner.facing < 0) { ctx.rotate(Math.PI); ctx.scale(-1, 1); }
-    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    if (dim705) ctx.globalAlpha = ga705;
+    ctx.drawImage(src705 as CanvasImageSource, -img.width / 2, -img.height / 2);
     ctx.restore();
   }
 }
@@ -314,6 +334,13 @@ export class PhoenixBolt extends Entity {
   wetCount = 0;
   /** 出生预置已做（一次;NewProjectile :10886-10892 等价） */
   presetDone = false;
+
+  // ---- ★BJ704-G2（债① 706 员）：oldPos 残影环（mode0;706 无 extraUpdates →
+  //      每拍一记,UpdateTrails :17198 位移后位序;MinionProj 755 接线式同构）。 ----
+  private ghostRing = new ProjGhostRing(706);
+  private recordGhostTrail(): void {
+    this.ghostRing.record(this.x, this.y, 0, 1, true);   // mode0 只记 oldPos
+  }
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
     super();
@@ -395,6 +422,8 @@ export class PhoenixBolt extends Entity {
       }
     }
     if (this.dead) return;   // !active 早退（:17157）——尾段/寿命/命中不跑（原版同构）
+    // ★BJ704-G2：UpdateTrails 位序（:17198 位移后一记;命中环在记录后=位置无涉等价）
+    this.recordGhostTrail();
 
     // ---- alpha<=0 段尾迹（:56779-56824）：2 粒烟|火（1/4 缺席）+ 羽尘双生 ----
     if (this.alphaI <= 0) {
@@ -497,17 +526,54 @@ export class PhoenixBolt extends Entity {
     const img = projSprite(706);
     const ctx = r.ctx;
     if (!img || img.width <= 0 || !ctx) return;
-    const a = (255 - this.alphaI) / 255;
-    if (a <= 0.02) return;
+    // ★BJ704-G21 R7-P2-3（本体 A 面清偿,G2 只修了 ghost 面）：GetAlpha :80830-80833
+    //  `673||706 → (255−α,255−α,255−α,180−⌊α/2⌋−⌊α/4⌋)`——A 通道=180−¾α（负值
+    //  byte 钳 0,GHOST_TINT[706] 同式）,稳态 α=0 本体 70.6% 背景衰减;旧 ga=
+    //  (255−α)/255 只折 RGB 面=衰减 100%（本体比原版实 ~30%,全程非仅淡入）。
+    //  消费 vanillaProjAlpha[706] afade 档（rgba.a=180/slope=0.75/inv=1——旧为
+    //  死条目:afade 消费者=Arrow.drawTableAlpha,自绘类不查表）×inv 折面=RGB
+    //  (255−α)/255 与 A 双重衰减（表约定「RGB 乘子统一折进 globalAlpha」）。
+    //  charm 分流（aiStyle1 ∧ PhoenixQuivered :80605-80611 White×Opacity）对 706
+    //  不可达——HarpyCharmEffect 只选中 arrow 弹（Player.cs:28683 projectile.arrow）,
+    //  706 SetDefaults 无 arrow 行（:7464-7475）。
+    const op = (255 - this.alphaI) / 255;                // RGB 面 (255−α)/255（ghost opacity 同源）
+    if (op <= 0.02) return;
+    const mod706 = PROJ_ALPHA_MOD[706]!;
+    const gaBody = Math.max(0, ((mod706.rgba?.[3] ?? 255) - this.alphaI * (mod706.slope ?? 1)) / 255) * op;
     const frames = 8;                                   // Main.projFrames[706]=8（Main.cs:8595）
     const fh = img.height / frames;
+    // ---- ★BJ704-G2（债① 706 员）：通用残影（P(9,0,-2,0.5),先于本体）。色=
+    //      GHOST_TINT[706]（GetAlpha aface (255−α,·,·,180−¾α)+B,G,A/=i 全式）;
+    //      bodyW/H=SetDefaults 盒 66（绘制盒与命中盒 10×10 解耦,ghost 锚=Size/2）;
+    //      帧锚=当前帧行（8 帧循环）。 ----
+    if (this.ghostRing.filled > 0) {
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: 706,
+        tex: img,
+        frames,
+        frame: this.frame,
+        bodyW: PhoenixBolt.DRAW_SIZE, bodyH: PhoenixBolt.DRAW_SIZE,
+        bodyRot: Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0),
+        bodyScale: 1,
+        bodyAlpha: 1,          // GetAlpha 面全式在 GHOST_TINT[706]（opacity 消费）
+        ai0: 0, ai1: 0,
+        timeLeft: this.life,
+        opacity: op,
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+        mirror: this.vx < 0,
+      });
+    }
     ctx.save();
-    ctx.globalAlpha = a;
+    ctx.globalAlpha = gaBody;   // R7-P2-3：afade 折面（A=180−¾α × inv (255−α)/255）
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
-    // 旋转组 270|585|601|706|837：rotation = atan2(±vy,±vx)（direction 门 :58600-58612，
-    // 无 π/2 偏移=贴图水平朝向）；spriteDirection 门镜像
-    ctx.rotate(Math.atan2(this.vy, this.vx));
+    // 旋转组 270|585|601|706|837（:58579-58589）：spriteDirection=direction;
+    //  rotation = direction<0 ? atan2(−vy,−vx) : atan2(vy,vx) ≡ 速度角+（vx<0?π:0）
+    //  +spriteDirection 镜像。★BJ704-G2 勘误：旧式缺左飞 +π（镜像后 180° 横转=
+    //  倒置凤凰,706 贴图 78-92% 非对称 D2 普查可见）。
+    ctx.rotate(Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0));
     if ((Math.sign(this.vx) || 1) < 0) ctx.scale(-1, 1);
     ctx.drawImage(img, 0, this.frame * fh, img.width, fh,
       -img.width / 2, -fh / 2, img.width, fh);

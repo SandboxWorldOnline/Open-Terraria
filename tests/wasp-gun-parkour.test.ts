@@ -51,8 +51,9 @@
 //          已改 `pierceInit>=0 && idStaticGroup===null && hitSet.has(e.id)`;写侧已在
 //          e.hurt() 主结算点后补 `hurtOk && idStaticGroup!==null → e.iframes=0`（与
 //          GC1 桥双域同相：桥管近战域 registry,此处清弹幕域读面）。行为级三跳断言
-//          见下方「F4 落地」describe（节拍用 tick 墙钟驱动 idStaticCheck 的
-//          Date.now 节流,16.67ms/tick 恒速推进,与原版 GameUpdateCount 计数同构）。
+//          见下方「F4 落地」describe（节拍驱动=★G10 后 GTW tick 钉钟
+//          pinGameTimeTicks——idStaticCheck 已墙钟→tick 钟,与原版 GameUpdateCount
+//          计数同构;旧 Date.now 16.67ms/tick 推钟版随 G1 债②退役）。
 import { describe, it, expect, vi } from 'vitest';
 import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { readFileSync } from 'node:fs';
@@ -61,6 +62,7 @@ import { Player, refreshMechanicalAccsFromItemType } from '../src/entities/Playe
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { Arrow, AI_STYLE36_TRACK_PARAMS } from '../src/entities/Arrow';
+import { pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ704-G10（G1 债②）：idStaticCheck 墙钟→GTW tick 钟,驱动面随迁钉钟
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { projClassOfProjId } from '../src/entities/projTargets';
 import { itemCombat, combatWeapon } from '../src/data/vanillaItemCombat';
@@ -199,7 +201,8 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
     const { hooks } = makeHooks();
     const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0 });
     expect(wasp.idStaticGroup).toBe(189);
-    expect(wasp.idStaticCdMs).toBe(167);
+    // ★G10（G1 债②）：字段随迁 idStaticCdTicks=10（原 167ms 墙钟基数退役）
+    expect(wasp.idStaticCdTicks).toBe(10);
     // 181/566 共用组键 181（UseGroupStaticImmunity(181)）不与 189 互斥
     const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, { grav: 0 });
     expect(bee.idStaticGroup).toBe(181);
@@ -215,13 +218,22 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
 //   同式,不豁免）拦。三跳判别器链：无刀① → 恒 1 跳（hitSet 越权）;无刀② → 敌侧
 //   iframes=10 不衰减（桩不走 Enemy.fixedUpdate）→ 恒 1 跳（读门拦）。
 describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清帧）', () => {
-  /** tick 墙钟：idStaticCheck 以 Date.now 节流——每 step 前恒速推 1000/60ms,
-   *  令组表 167ms(=10t) 窗在 tick 刻度上过期（与原版 GameUpdateCount 计数同构;
-   *  不推钟则窗恒新,三跳节拍不可观测） */
+  /** tick 钟：idStaticCheck 以 gameTickCount()（GTW 钟源=Main.GameUpdateCount 等价）
+   *  节流——★BJ704-G10（G1 债②）墙钟 Date.now 版退役,驱动面随迁：clock.t 仍按
+   *  ms 计步（1000/60=1t 恒速,调用体零改）,每写换算 tick 钉 pinGameTimeTicks
+   *  （基值 60_000 偏移防与其它测试 0 档撞窗;bj209/bj274 钉钟判例）——组表 10t
+   *  窗在 tick 刻度上过期,三跳节拍可观测（与原版 GameUpdateCount 计数同构）。 */
   function withTickClock(fn: (clock: { t: number }) => void): void {
-    const clock = { t: 1_000_000 };
-    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.t);
-    try { fn(clock); } finally { spy.mockRestore(); }
+    let ms = 1_000_000;
+    const clock = {
+      get t() { return ms; },
+      set t(v: number) {
+        ms = v;
+        pinGameTimeTicks(60_000 + Math.round((v - 1_000_000) / (1000 / 60)));
+      },
+    };
+    clock.t = 1_000_000;   // 初始钉
+    try { fn(clock); } finally { pinGameTimeTicks(60_000 + Math.round((ms - 1_000_000) / (1000 / 60))); }
   }
   /** 真结算敌：hurt 置 10t iframes（=Enemy.hurt 通用档 :13152,pierce>1 支）——
    *  写侧刀②清帧的可观测载体（mkEnemy 桩不置帧,清帧面无从断言） */

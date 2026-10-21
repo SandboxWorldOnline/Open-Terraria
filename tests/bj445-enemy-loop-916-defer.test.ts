@@ -289,7 +289,7 @@ describe('BJ445-§C：694 爆炸弹/644 爆裂弹城镇臂（usesLocal 30 清窗
   it('C3 643 彩虹水晶 644 volley 城镇臂：guide 掉血+iframes=0（零写还原,旧 10 必红）', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5);   // 落点散布 (0.5−0.5)×2k=0 → px=tgt 心
     const list: Enemy[] = [], towns: TownNPC[] = [];
-    const { hooks, player } = makeGame(list, towns);
+    const { hooks, player, added } = makeGame(list, towns);
     voodooOn(player);
     const e = Enemy.fromVanilla(15, 481, 581)!;      // fromVanilla=中心锚 → 心 (481,581)
     e.id = 1; e.maxHp = 500000; e.hp = 500000;
@@ -297,7 +297,18 @@ describe('BJ445-§C：694 爆炸弹/644 爆裂弹城镇臂（usesLocal 30 清窗
     // TownNPC ctor=（左,底）锚 → guide 盒心=(481,581)=volley 落点（14px 半宽 AoE 带内）
     const g = guide(hooks, towns, 481 - 9, 581);
     const m = new MinionProj(384, 584, 643, 50, 2, true, 0, false, () => player);
-    for (let i = 0; i < 120 && g.hp === 5000; i++) m.fixedUpdate(1, hooks);
+    // ★BJ703-F 夹具勘误（2026-10-21,存量红分诊=夹具病）：BJ639 批1②（2026-10-11）
+    //  volley 实体化后 644=独立 RainbowCrystalBurst 实体（t=30 自爆 60×60 双臂），
+    //  旧只驱 643 本体 = 爆弹永不引爆 → 城镇臂恒 0（BJ646/BJ650 登记红根因,同
+    //  bj452 N3e/N3f 的 BJ662 tickUntilAll 修法）。本刀补全弹驱动。
+    for (let i = 0; i < 120 && g.hp === 5000; i++) {
+      m.fixedUpdate(1, hooks);
+      const reg = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
+      for (const p of [...reg]) {
+        (p as { fixedUpdate?: (dt: number, g: GameHooks) => void }).fixedUpdate?.(1, hooks);
+      }
+    }
+    expect(added.length).toBeGreaterThanOrEqual(3);  // volley ≥1 轮 ×3 爆弹（通道在位）
     expect(5000 - g.hp).toBeGreaterThan(0);   // ★通道在位（Y2 已落）
     expect(g.iframes).toBe(0);                // ★主判别:零写还原清窗（旧通用档 10 必红）
   });
@@ -314,7 +325,15 @@ describe('BJ445-§C：694 爆炸弹/644 爆裂弹城镇臂（usesLocal 30 清窗
     g.iframes = 10;
     const hurtSpy = vi.spyOn(g, 'hurt');      // 门拒=hurt 整段不达（同 C2 判别位）
     const m = new MinionProj(384, 584, 643, 50, 2, true, 0, false, () => player);
-    for (let i = 0; i < 120; i++) m.fixedUpdate(1, hooks);
+    // ★BJ703-F 夹具勘误（同 C3）：全弹驱动到引爆拍——负断言须有真弹爆炸做威胁
+    //  才有判别力（旧只驱本体=恒零调用=守卫失明,「夹具喂幻影」判例）。
+    for (let i = 0; i < 120; i++) {
+      m.fixedUpdate(1, hooks);
+      const reg = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
+      for (const p of [...reg]) {
+        (p as { fixedUpdate?: (dt: number, g: GameHooks) => void }).fixedUpdate?.(1, hooks);
+      }
+    }
     expect(g.hp).toBe(5000);
     expect(hurtSpy).not.toHaveBeenCalled();   // ★主判别:共门在 skip 位整跳（旧无门必红）
   });

@@ -181,10 +181,11 @@ describe('BJ375 爆炸烈焰塔弹 664/666/668（AI_131）', () => {
         expect(c.a[3]).toBe(14);      // sw
         expect(c.a[4]).toBe(28);      // sh（整图高——非 14）
       }
-      // ---- 旋转：全部 rotate ≡ ang+π/2 = π/2（本体 1 + 残影 4；旧残影 0 档不落在场）----
+      // ---- 旋转：全部 rotate ≡ ang+1.57（本体 1 + 残影 4;ang=0 → 1.57=原版字面 1.57f
+      //      :58733,★G10/R2-F13 字面纪律——旧 π/2 断言随迁,残影 0 档不落在场）----
       const rotVals = calls.filter((c) => c.m === 'rotate').map((c) => c.a[0] as number);
       expect(rotVals.length).toBeGreaterThanOrEqual(5);
-      for (const v of rotVals) expect(v).toBeCloseTo(Math.PI / 2, 6);
+      for (const v of rotVals) expect(v).toBe(1.57);
       expect(rotVals).not.toContain(0);               // 旧 bodyRot=ang 变异判别
       // ---- 残影 α：ghostA×fade（ghostA=(255−5)/255；fade=(8−i)/15）----
       let gaCur = 1; let gcCur = 'source-over';

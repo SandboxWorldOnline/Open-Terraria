@@ -522,7 +522,7 @@ describe.skipIf(EXT_MISSING)('BJ614 H组：接线结构锚+l10n 双语言', () =
     expect(s).toContain('resolved = await resolveLoadText(key, () => lsGetSafe(key));');
     expect(s).not.toContain('fsBackupAuthHintFire');
     expect(s).not.toContain('FsBackupNeedAuth');
-    expect(s).toContain('await loadFromJson(resolved.text);');
+    expect(s).toContain('if (!(await loadFromJson(resolved.text))) currentWorld = null;');   // ★BJ704-G7 2026-10-21 形随刀更新:恢复文本仍续跑 loadFromJson 零旁路（语义不变）,外包成败判定=失败清会话绑定;改判史=初锁裸 await
     // 幽灵扫描联动（BJ611 锚线不得动——扫描外尝试恢复,门内补提示）
     expect(s).toContain('const rec = await fsBackupRestoreEvicted(scan.evicted);');
     expect(s).toContain("Lang.text('Mods.SandboxWorld.Toast.StorageEvictedNotice', scan.evicted.length)");

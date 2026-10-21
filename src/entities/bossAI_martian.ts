@@ -1145,7 +1145,7 @@ export class MartianDeathray extends Entity {
       //  :36666 num1195=80），曾裸传=经典半伤/专家四分之一伤
       game.damagePlayer(
         hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)
+        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 447 });   // ★R-B-F10(第4=knockback 位,opts 第5)
     }
   }
 

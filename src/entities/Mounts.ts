@@ -141,9 +141,25 @@ export const MOUNT_PLAYER_SIZE: Record<number, [number, number]> = {
   61: [8, 14],    // PixiePlayerSize（DelegateMethods.cs:171-175）——附魔精灵尘 5662
 };
 
-/** 坐骑 buff 授予的水下自由语义（Player.cs UpdateBuffs :9592-9608：
- *  131 海龟 / 168 猪鲨崽 → ignoreWater+accFlipper；265 熔岩鲨 → canFloatInWater+accFlipper） */
-const BUFF_SWIM_FREE = new Set([131, 168, 265, 279, 305]); // +305 熔岩鲨（Player.cs:9602-9608：ignoreWater+accFlipper+lavaImmune+lavaVision+fireWalk）
+/** ★BJ704-G13（G12 登记债2）：MountID.Sets.DontDismountWhenCCed（MountID.cs:29
+ *  Factory.CreateBoolSet(55,56,61)）——CCed（frozen/webbed/stoned）中拒下坐的
+ *  变身骑族（CanDismountWithResult :6686-6690 首闸,FailedCCed）。 */
+const DONT_DISMOUNT_WHEN_CCED = new Set([55, 56, 61]);
+
+/** 坐骑 buff 授予的 ignoreWater（Player.cs UpdateBuffs :9972-9999 MountType 支：
+ *  131 海龟 / 168 猪鲨崽 / 279 海盗船 / 305 熔岩鲨（305 另授 lavaImmune+lavaVision+
+ *  fireWalk）——只辖碰撞选档（:28398/:28402 DryCollision）与位移因子（num110
+ *  :28309=1）;重力/maxFall/jumpSpeed 走液体档（G12 债3 湿门）。
+ *  ★BJ704-G13（G12 登记债1 勘正）：265 火烈鸟【非】ignoreWater——:9982-9986 只授
+ *  canFloatInWater+accFlipper（湿路由 WetCollision+liqFactor 0.5+TryFloatingInFluid
+ *  液面漂,仓内 canFloatInWater 链既有承载）,旧表误含 265=干路由+免浮液,移出。 */
+const BUFF_SWIM_FREE = new Set([131, 168, 279, 305]);
+/** 授 accFlipper 的坐骑 buff（:9974-9998 ignoreWater 族四件并授 accFlipper ∪
+ *  265 火烈鸟 :9982-9986——湿跳门 flag2=wet∧accFlipper :20795 消费：
+ *  液中悬空泳跃（Player.flipperOn 的骑乘臂,BJ704-G13 债3）。
+ *  注意 :13115 `wet∧ShouldFloatInWater → accFlipper` 只覆盖浮液面（!inputDown）,
+ *  buff 授予无条件（按↓下潜仍有脚蹼）——故火烈鸟须入本表而非仅靠浮液臂。 */
+const BUFF_FLIPPER = new Set([131, 168, 265, 279, 305]);
 
 /** MountInstance 消费的玩家视图（结构性接口，避免与 Player 循环依赖） */
 export interface MountedPlayerView {
@@ -155,12 +171,55 @@ export interface MountedPlayerView {
   inputX: number; inputJump: boolean; inputUp: boolean; inputDown: boolean;
   /** 上一 tick 是否按下跳跃（releaseJump 语义：松开后才可重触发飞行/起跳） */
   prevInputJump: boolean;
-  /** 上一 tick 尾快照的跳跃键（Player.jumpEdgePrev——tryStartHover 的 releaseUp
-   *  边沿门 :26939 消费；prevInputJump 在 tick 头快照且输入已更新=恒等不可用）。
+  /** 上一 tick 尾快照的跳跃键（Player.jumpEdgePrev——水中起跳 releaseJump :20409 等
+   *  消费；prevInputJump 在 tick 头快照且输入已更新=恒等不可用）。
    *  可选：合成视图（单测桩）缺省 = 上一 tick 未按（边沿成立） */
   jumpEdgePrev?: boolean;
+  /** ★BJ704-G15（G13 登记债④）上一 tick 尾快照的 ↑ 键电平（Player.upEdgePrev ≙
+   *  原版 releaseUp——UpdateControlHolds :29319-29327 移动段后刷新,次拍 :26939
+   *  tryStartHover 读 = ↑ 键上升沿配对位）。★与 jumpEdgePrev（Space∪Up 合成键）
+   *  分立：原版 controlUp=W 独立键面（PlayerInput.cs:2072/2076 默认绑定 + TriggersSet
+   *  CopyInto :786/:790 分立拷贝,Space 只入 Jump 不入 Up）——悬浮起飞边沿须读 ↑
+   *  专属沿（持 Space 中按 W 亦触发=vanilla 语义,旧读合成跳键沿=漏触发）。
+   *  缺省 false（合成视图旧义 = 边沿成立） */
+  upEdgePrev?: boolean;
   /** 盾冲滑行态（Player.dashDelay：<0 = 滑行中；62-65 冲刺帧门 Mount.cs:4541-4545） */
   dashDelay?: number;
+  /** ★BJ704-G13（债2）Player.CCed（:3361-3372 frozen∨webbed∨stoned;仓承载含
+   *  shimmering=buff353 置 frozen 的等价腿）——canDismount 的 DontDismountWhenCCed
+   *  {55,56,61} 豁免门（Mount.cs:6686）消费。缺省 false（合成视图旧义）。 */
+  cced?: boolean;
+  /** ★BJ704-G13（债4）Player.sliding（贴墙滑——仓承载位 wallCling）——UpdateFrame
+   *  帧计数复位抑制的 55 臂 `state==2 && sliding`（Mount.cs:3633）消费。缺省 false。 */
+  sliding?: boolean;
+  /** ★BJ704-G13（债4）Player.dash 字段（仓镜像 dashLatched）——UpdateFrame 56 臂
+   *  冲刺沿复位 `dash>0 ∧ dashDelay<0`（Mount.cs:3615）消费。缺省 0。 */
+  dash?: number;
+  /** ★BJ704-G5（G4-③）任意液体湿位（Collision.cs:1608 wet=水∪蜜∪岩浆∪微光）——
+   *  帧态分派 :36485 `else if (wet)` 判据（熔岩鲨骑岩浆/蜜中帧态 4）。缺省回退
+   *  inWater（合成视图旧义）。 */
+  wet?: boolean;
+  /** ★BJ704-G5（G4-③/R4-P2③）剩余跳预算（原版 jump 字段）——分派飞行帧门
+   *  :36446 `jump == 0`（起跳上升段误选扇翼帧=54 装翼新达面）。缺省 0=门开（旧义）。 */
+  jumpHold?: number;
+  /** ★BJ704-G5（G4-②）当拍重力场（Player.gravity 字段等价 :24884 终值）——Hover
+   *  疲劳率 num2=gravity/defaultGravity（:3378-3386）/非飞行帧臂 :3502/tryStartHover
+   *  起飞冲量 :26941 消费。缺省 DEFAULT_GRAVITY。 */
+  gravityField?: number;
+  /** ★BJ704-G13（债5）无符号新鲜重力场——原版 :26941 读【当拍 Update 头 :24559-:24884
+   *  链值】（每拍从头重算,不掺 :27228/:27232 慢Fall 尾部签名改写）;仓内等价=干/湿支
+   *  终值并行快照（Player.gFieldUnsigned）,tryStartHover 跨拍读此通道。缺省回退
+   *  gravityField（合成视图旧义）。 */
+  gravityFieldFresh?: number;
+  /** ★BJ704-G5（G4-②）slowFall 并集（Hover num2 ÷3 档 :3379-3381）。缺省 false。 */
+  slowFall?: boolean;
+  /** ★BJ703-D1 Player.wingTimeMax 等价（GetWingStats().FlyTime :15568——装备功能翼的
+   *  最大飞行时量,无翼 0）。坐骑 54 resetFlightTime/updateAfterEquips 消费;
+   *  合成视图缺省 = 0（无翼）。 */
+  wingTimeMax?: number;
+  /** ★BJ703-D1 grappling[0] >= 0（钩爪挂中）——迅猛龙帧态门存活性（见 updateFrame
+   *  case 54 注;54 在 MountID.Sets.CanUseHooks 表内=骑乘可挂钩）。缺省 false。 */
+  grapplingHooked?: boolean;
   gravDir: number;
   /** 缓存世界（fixedUpdate 每帧刷新；Hover/TryBeginningFlight 的 tile 探针用） */
   store: {
@@ -169,6 +228,22 @@ export interface MountedPlayerView {
     flags: Uint8Array | number[];
     isSolid(tx: number, ty: number): boolean;
   } | null;
+}
+
+/** ★BJ704-G18（G17 登记债2/3）：DoSpawnDust/DoFailedDismountDust 的 game 视图——
+ *  spawnDust = typed 尘直入（Dust.NewDust 同构,返回入池尘供原版式后置字段覆写）;
+ *  cloneDust = 52/62-65 特殊支的 1/3 白化克隆回声（Dust.CloneDust）;缺席环境
+ *  （测试桩）回退 spawnParticles 程序化圆近似（SantankShellProj.explode 的
+ *  pool-else-fallback 同款惯例）。GameHooks/Game 结构性满足本视图。 */
+export interface MountDustGame {
+  spawnDust?(x: number, y: number, w: number, h: number, type: number,
+    speedX?: number, speedY?: number, alpha?: number,
+    color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
+    noGravity?: boolean): import('../fx/VanillaDust').VDust | null;
+  cloneDust?(d: import('../fx/VanillaDust').VDust): import('../fx/VanillaDust').VDust | null;
+  spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
+  /** 62-65 上骑叫（SetMount :6349-6352 PalChillet）——setMount 既有消费面并入本视图 */
+  playSfxFiles?(files: string[], vol?: number, x?: number, y?: number): void;
 }
 
 /** 帧状态（Mount.cs FrameStanding..FrameDashing 常量） */
@@ -978,6 +1053,9 @@ export function groundBelowProbe(p: MountedPlayerView): boolean {
  *    （origin = 玩家底心 :3520——渲染层绕底部锚点旋转）
  *  其余坐骑 0（55 爬墙族走 UpdateAfterEquips :2967-2997，未实装登记） */
 export function bodyRotationFor(type: number, vx: number, vy: number, facing: number, dashSpeed: number): number {
+  // ★BJ704-G5（G4-③）熔岩鲨 49（UpdateFrame case 49 :3741-3744）：
+  // num5 = vy×0.05,朝向左取反（velocity.Length() 伴生行为无副作用,略）
+  if (type === 49) return vy * 0.05 * (facing < 0 ? -1 : 1);
   if (type !== 7 && type !== 8 && type !== 23) return 0;
   const d = dashSpeed > 0 ? dashSpeed : 1;
   if (type === 7 || type === 8) {
@@ -1000,7 +1078,9 @@ export function bodyRotationFor(type: number, vx: number, vy: number, facing: nu
  *    （Minecart.ts:446-455）,cart.h = 42+heightBoost = 原版 mounted 盒高）;
  *  ②坐骑 Hover 机身倾斜（Mount.cs:3519-3568,1456 :3468-3521——UFO 7/钻头 8/扫帚 23;
  *    origin = SetMount 7/8 (w/2,h/2)（:6346）或扫帚 Hover 每帧 (w/2,h)（:3568））。
- *  43 pogo 旋（:3748-3761）/49 熔岩鲨 vy 倾斜（:3732-3745）/55 爬墙旋（:3015-3018）
+ *  ③熔岩鲨 49 vy 倾斜（UpdateFrame case 49 :3741-3745,origin=(w/2,h/2) 盒心——
+ *    ★BJ704-G20 消费门扩员转正,见下方 playerFullRotationOf 体内注）。
+ *  43 pogo 旋（:3748-3761）/55 爬墙旋（:3015-3018）
  *  写面本仓未建模 → 恒 0（登记建模边界,不发明近似）。本仓玩家盒恒 42 高,mounted
  *  盒中心按 42+heightBoost 换算（渲染层同式）;矿车支 pivotY = p.y+cart.h（玩家位被
  *  锁车盒顶 Minecart.ts:530-531 → vanilla position+(w/2,h) 直形）。cart = Player.cart
@@ -1020,7 +1100,12 @@ export function playerFullRotationOf(
   if (m.active && MOUNT_SETS.IsRollerSkates?.[m.type] && m.fullRotation !== 0) {
     return { angle: m.fullRotation, pivotX: p.x + p.w / 2, pivotY: p.y + p.h };
   }
-  if (!m.active || m.fullRotation === 0 || (m.type !== 7 && m.type !== 8 && m.type !== 23)) return null;
+  // ★BJ704-G20（R10-P2 case49-tilt 消费面扩员）：门 {7,8,23} 补 49——熔岩鲨
+  //   fullRotation 写面早经 bodyRotationFor（G5 :1058 vy×0.05×朝向,UpdateFrame
+  //   case 49 :3741-3744）逐拍维护,消费门漏员=死写（G5 半截）。origin 同 7/8
+  //   =(width/2,height/2)（:3745）=mounted 盒心支（非 23 底锚支）。
+  if (!m.active || m.fullRotation === 0
+    || (m.type !== 7 && m.type !== 8 && m.type !== 23 && m.type !== 49)) return null;
   const mh = 42 + (m.heightBoost || 0);
   return {
     angle: m.fullRotation,
@@ -1163,6 +1248,12 @@ export class MountInstance {
   frameState = FRAME_STANDING;
   /** 飞行剩余 tick（flightTimeMax；ResetFlightTime 重置） */
   flyTime = 0;
+  /** ★BJ703-D1 迅猛龙 54 选择性飞行闩（Mount.cs SelectiveFlyingMountData.allowedToFly
+   *  :74/:76——UpdateAfterEquips :3001-3004 每拍以【坐骑清翼(:26834)前】的 wingsLogic
+   *  置位,CanFly :2871 直读。同结构 showFlyingFrames(:72)全反编译树零消费=原版死字段,
+   *  不建模（登记）。SetMount :6360-6363 每次上骑 new SelectiveFlyingMountData =
+   *  闩随 reset 清零承载。 */
+  allowedToFly = false;
   /** 飞行疲劳（hover 族用尽 flyTime 后累积，疲劳越高爬升越弱） */
   fatigue = 0;
   /** 疲劳池上限（Mount._fatigueMax；公开供测试与 runSpeed 的疲劳比直读） */
@@ -1231,8 +1322,12 @@ export class MountInstance {
   get autoJump(): boolean { return !!this.data?.constantJump; }
   get fallDamageFactor(): number { return this.data?.fallDamage ?? 1; }
   get extraFall(): number { return this.data?.extraFall ?? 0; }
-  /** 游泳族门：坐骑 buff 在水下自由集内（Player.cs:9592-9608 的 ignoreWater 等价） */
+  /** 游泳族门：坐骑 buff 在 ignoreWater 集内（Player.cs :9972-9999——131/168/279/305;
+   *  ★G13：265 火烈鸟移出（canFloatInWater 非 ignoreWater,见 BUFF_SWIM_FREE 注）） */
   get swimFree(): boolean { return this.active && BUFF_SWIM_FREE.has(this.buff); }
+  /** ★BJ704-G13（债3）：骑乘期授 accFlipper 的坐骑 buff（:9974-9998 ∪ 265 :9982-86）
+   *  ——湿跳门 flag2 :20795 的骑乘臂（液中悬空泳跃） */
+  get flipperMount(): boolean { return this.active && BUFF_FLIPPER.has(this.buff); }
 
   // ---- Mount.cs RunSpeed getter :451-486（每坐骑特例 1:1） ----
   runSpeed(): number {
@@ -1361,9 +1456,13 @@ export class MountInstance {
     return n;
   }
 
-  // ---- Mount.cs CanFly/CanHover :2817-2859 ----
+  // ---- Mount.cs CanFly/CanHover :2865-2881 ----
   canFly(p: MountedPlayerView): boolean {
     if (!this.active) return false;
+    // ★BJ703-D1 迅猛龙选择性飞行门（:2871 `if (_type == 54 && ((SelectiveFlyingMountData)
+    //   _mountSpecificData).allowedToFly) return true`——在 flightTimeMax==0 拒绝【前】,
+    //   无翼 54 沿 0 恒假原路返回（与 48 同走 false 面）。
+    if (this.type === 54 && this.allowedToFly) return true;
     const d = this.data;
     if (!d) return false;
     if ((d.flightTimeMax ?? 0) === 0) return false;
@@ -1718,18 +1817,49 @@ export class MountInstance {
     this.flyTime = this.active ? d?.flightTimeMax ?? 0 : 0;
     // 驯鹿：落地瞬间按水平速度续飞（:5267 flyTime += |vx|*20）
     if (this.type === 0) this.flyTime += Math.trunc(Math.abs(p.vx) * 20);
+    // ★BJ703-D1 迅猛龙（ResetFlightTime :5328-5331）：_flyTime = 玩家 wingTimeMax
+    //  （读 live 字段——无翼 0 → 地面回充亦 0 = 永不飞,闩 allowedToFly 亦假）。
+    if (this.type === 54) this.flyTime = p.wingTimeMax ?? 0;
+  }
+
+  /** ★BJ703-D1 Mount.UpdateAfterEquips（:2995-3009）的 54 臂 1:1（55 爬墙族臂未实装
+   *  =既有登记债,见「55 爬墙族走 UpdateAfterEquips 未实装」注）。调用位=
+   *  Player.UpdateEquips 尾（:13198）→ 本仓挂 Player.fixedUpdate 坐骑维护段 upkeep
+   *  前（同拍先于 resetFlightTime/帧态机）。
+   *  · allowedToFly = wingsLogic>0——原版读的是【坐骑清翼（Player.cs:26834 骑
+   *    !CanUseWings 族清零,54 属之）之前】的 wingsLogic,故第一参传功能翼槽原值
+   *    （本仓 eq.wing.logic,勿传清零后的飞行链局部量）;
+   *  · 翱翔徽章 4989（empressBrooch）∧ 闩真 → flyTime 回满 wingTimeMax（:3006-3008
+   *    ——空中每拍回满 = 无限飞,与翼链 :22419-22422 回满同源语义）。 */
+  updateAfterEquips(wingsLogic: number, wingTimeMax: number, empressBrooch: boolean): void {
+    if (!this.active || this.type !== 54) return;
+    this.allowedToFly = wingsLogic > 0;
+    if (this.allowedToFly && empressBrooch) this.flyTime = wingTimeMax;
   }
 
   // ---- 悬停物理（Mount.cs Hover :3310-3466 主体 1:1） ----
-  hover(p: MountedPlayerView): boolean {
+  /** ★BJ704-G5（G4-②）gravityField=当拍重力场（Player.gravity :24884 终值）：疲劳
+   *  累积率 num2=gravity/defaultGravity（:3378-3386,slowFall ÷3/下钳 0.25）、非飞行
+   *  帧态臂 :3502 `vy += gravity*gravDir` 消费——旧常数 1/DEFAULT_GRAVITY 干湿同盲
+   *  （湿 0.2 档疲劳率应为 0.5、太空带下钳 0.25）。调用位（Player 干/湿坐骑链）传
+   *  当拍 fresh 值；缺省 DEFAULT_GRAVITY（合成视图=地表干档,旧行为）。 */
+  hover(p: MountedPlayerView, gravityField = DEFAULT_GRAVITY): boolean {
     const d = this.data;
     if (!d) return false;
     const noFatigue = this.hoverIgnoresFatigue();
     // 悬停生效帧态（:3313-3332）：默认空中/游泳；熔岩鲨限游泳；56/61 蝙蝠/精灵族含飞行
     let flyingState = this.frameState === FRAME_IN_AIR || this.frameState === FRAME_SWIMMING;
     if (this.type === 49) flyingState = this.frameState === FRAME_SWIMMING;
-    if (this.type === 56 || this.type === 61) {
+    if (this.type === 56) {
+      // 蝙蝠仅空中/飞行帧态（:3366-3369 `_type == 56 → 2||3`——游泳 4 不入;56 湿拍
+      // 即下坐,水下臂本就一拍性）
       flyingState = this.frameState === FRAME_IN_AIR || this.frameState === FRAME_FLYING;
+    } else if (this.type === 61) {
+      // ★BJ704-G4（BJ703-D2b 清偿）：仙灵武库 61 【含游泳帧态 4】（Hover :3370-3373
+      //   `_type == 61 → flag2 = state==2||3||4`——与 56 分立,旧 56∨61 合写漏 4 →
+      //   水下帧态=SWIMMING 不入悬停面,坐骑湿支 vy 链（Player.ts 湿段）形同虚设）
+      flyingState = this.frameState === FRAME_IN_AIR || this.frameState === FRAME_FLYING
+        || this.frameState === FRAME_SWIMMING;
     }
     if (flyingState) {
       let canLift = true;
@@ -1737,20 +1867,43 @@ export class MountInstance {
       // 猪鲨崽非增益态减半（:3354 `if (_type == 12 && !mountedPlayer.MountFishronSpecial) num = 0.5f`）——
       // 增益态 = 湿身/半血以下/雨中露天（见 fishronSpecial），湿身是【全额】而非减半
       if (this.type === 12 && !this.fishronBoost) mult = 0.5;
+      // ★BJ704-G5（G4-②）疲劳累积率 num2（:3377-3386）：gravity/defaultGravity，
+      //   slowFall ÷3（:3379-3381——vy 链的重力 /3 尚未跑,Hover 内显式折算）、下钳
+      //   0.25（:3383-3385）。旧常数 1=干档地表值,湿 0.2/太空带 0.25/蜜 0.1 档全偏。
+      let fatigueRate = gravityField / DEFAULT_GRAVITY;
+      if (p.slowFall) fatigueRate /= 3;
+      if (fatigueRate < 0.25) fatigueRate = 0.25;
       const fatigueRatio = noFatigue ? 0 : this.fatigueMax > 0 ? this.fatigue / this.fatigueMax : 0;
       // 能量池：先吃 flyTime，尽后累积疲劳，疲劳满则失去升力（:3322-3342）
       if (!noFatigue) {
         if (this.flyTime > 0) this.flyTime--;
-        else if (this.fatigue < this.fatigueMax) this.fatigue += 1;
+        else if (this.fatigue < this.fatigueMax) this.fatigue += fatigueRate;
         else canLift = false;
       }
       let vMin = 4 * fatigueRatio;
       let vMax = 4 * fatigueRatio;
+      // ★BJ704-G12（G5 登记债6）：48 黑魔书特例臂（:3411-3431）——vanilla 48
+      //   fatigueMax=0（mounts[48] 无赋值）⇒ num3=_fatigue/_fatigueMax=0/0=NaN,
+      //   48 臂显式归零 num4/num5 再走下方 -0.001 替换;flag4=false（升力输入门
+      //   输入无关禁用——(controlUp||controlJump) 臂 48 恒不可达,仓旧 canLift 门
+      //   反向=能量窗 320t 内 inputUp/inputJump 可爬升,vanilla 恒静置带）;
+      //   耗尽拍（!flag3=canLift 假）flag5=true → 重力驱动臂（else-if 链第三支
+      //   :3463-3468 `vy += gravity×gravDir; num5=4`——48 fatigueMax 0=首个空中拍
+      //   即耗尽（flyTime 320 尽后 canLift 恒假）,重力 0.4>acceleration 0.2 净
+      //   +0.2/t 无界加速坠落,vanilla 同构）;controlDown → num5=8（特例臂内置,
+      //   与 else-if 降臂同值双写）。
+      let gravFall = false;   // flag5（仅 48 置位）
+      if (this.type === 48) {
+        vMin = 0;
+        vMax = 0;
+        if (!canLift) gravFall = true;
+        if (p.inputDown) vMax = 8;
+      }
       if (vMin === 0) vMin = -0.001;
       if (vMax === 0) vMax = -0.001;
       let vy = p.vy;
-      // 升降输入（:3396-3424）
-      if ((p.inputUp || p.inputJump) && canLift) {
+      // 升降输入（:3396-3424——48 flag4=false：升力臂恒不可达,仅 ↓/重力臂可达）
+      if (this.type !== 48 && (p.inputUp || p.inputJump) && canLift) {
         vMin = -2 - 6 * (1 - fatigueRatio);
         if (this.type === 56 || this.type === 61) vMin = -d.dashSpeed!;
         vy -= d.acceleration * mult;
@@ -1758,6 +1911,11 @@ export class MountInstance {
         vMax = 8;
         if (this.type === 56 || this.type === 61) vMax = d.dashSpeed!;
         vy += d.acceleration * mult;
+      } else if (gravFall) {
+        // :3463-3468 48 耗尽重力臂（vy += gravity×gravDir + 带 4）——重力场感知
+        // 同 G4-②（当拍 gravityField 参,湿/太空带档同步）。
+        vy += gravityField * p.gravDir;
+        vMax = 4;
       }
       // 钳位带（:3426-3436：超带按 acceleration 回拉）
       if (vy < vMin) {
@@ -1776,8 +1934,9 @@ export class MountInstance {
       // slopeCollide 常规贴合承担（登记）
       if (vMin === -0.001 && vMax === -0.001 && vy === -0.001) p.y += 0.001;
     } else if (!noFatigue) {
-      // 非悬停帧态：正常重力（:3437-3439）
-      p.vy += DEFAULT_GRAVITY * p.gravDir;
+      // 非悬停帧态：正常重力（:3502 `vy += gravity * gravDir`——★BJ704-G5（G4-②）
+      //   重力场感知：旧 DEFAULT_GRAVITY 常数,湿/太空带档偏重 2-4×）
+      p.vy += gravityField * p.gravDir;
     } else if (p.vy === 0) {
       // 免疲劳档贴地段（:3440-3451，UFO 7/钻头 8/猪鲨崽 12 等静置在地面时）：
       // TileCollision(UnitY×gravDir) 探针残量≠0 = 下方悬空（或按下）→ vy=0.001
@@ -1792,12 +1951,31 @@ export class MountInstance {
   }
 
   /** 起跳瞬间向上的 hover 触发（Player.cs:26939：vy==0 且 CanHover 且 controlUp
-   *  且 releaseUp 边沿）。★边沿用 jumpEdgePrev（tick 尾快照）——prevInputJump 在
-   *  Player.fixedUpdate 头部快照（Player.ts fixedUpdate 首行）且 Game 输入写入在前,
-   *  同 tick 恒等 → `!prevInputJump` 恒假 = 本触发曾是死代码（W 起飞无响应） */
+   *  且 releaseUp 边沿）。★BJ704-G15（G13 登记债④,本刀修）：边沿通道换 ↑ 键
+   *  专属沿（upEdgePrev）——原版 releaseUp 由 UpdateControlHolds :29319-29327
+   *  （`controlUp ? false : true`,移动段【后】刷新）承载,:26939 读的是上拍尾值
+   *  ⇒ 语义 = ↑ 键（W）上升沿。旧读 `!jumpEdgePrev`（Space∪Up 合成跳键的上拍
+   *  电平——仓内 inputJump=Space∪Up,Game.ts 输入合成）：持 Space 中按 W 时合成
+   *  键上拍已真=不触发（vanilla 触发）——键面分叉面。CCed 清输入 (:25432-42 →
+   *  仓 :6107) 在尾快照【前】=冻结拍 upEdgePrev=false,解冻持 W 即沿（vanilla
+   *  同相:冻结拍 controlUp 清零 → releaseUp 刷新真）。
+   *  ★BJ704-G5（G4-②）冲量 :26941 `-(Acceleration + gravity + 0.001)` 读 gravity
+   *  字段（原版 Update 头已算,本拍 fresh）——本调用位（upkeep,物理相前）仓内字段
+   *  尚未写,p.gravityField=上拍链尾值;旧 DEFAULT_GRAVITY 常数同族偏重。
+   *  ★BJ704-G12（G5 登记债8 复核=销案）：「跨 num6 带迁移拍一拍滞后」结构性
+   *  不可达——触发门 vy==0 ⇒ 上拍末碰撞清零=y 稳定 ⇒ num6 带不变 ⇒ 上拍 gField
+   *  ≙ 当拍 fresh 值（G5 判语成立,不修）。
+   *  ★BJ704-G13（G12 残余窄面定谳=真债,前刀修）：慢Fall 签名改写（干支尾部
+   *  gField/3|/10×gravDir,vanilla :27228/:27232 在 :26941【之后】跑=原版读不到）
+   *  的复合边例【可达】——Game.fixedUpdate 序=player.fixedUpdate(:10541) 先于
+   *  updateUse(:11181):上拍未骑乘∧slowFall∧干支贴地（改写落 gField=/3×gd）→
+   *  同拍 updateUse 召唤悬停坐骑 → 次拍 upkeep 本触发（canHover 无帧态门,新召唤
+   *  即真）读带符号 /3 陈值（冲量差 0.4×num6×2/3 px/t）。修=无符号并行快照
+   *  gravityFieldFresh（Player.gFieldUnsigned,干/湿支终值同拍写,不掺尾部改写）
+   *  ——≙ 原版次拍 :24559 头部重算链值。 */
   tryStartHover(p: MountedPlayerView): void {
-    if (p.vy === 0 && this.canHover(p) && p.inputUp && !p.jumpEdgePrev) {
-      p.vy = -(this.acceleration + DEFAULT_GRAVITY + 0.001);
+    if (p.vy === 0 && this.canHover(p) && p.inputUp && !p.upEdgePrev) {
+      p.vy = -(this.acceleration + (p.gravityFieldFresh ?? p.gravityField ?? DEFAULT_GRAVITY) + 0.001);
     }
   }
 
@@ -1843,9 +2021,27 @@ export class MountInstance {
   updateFrame(p: MountedPlayerView, state: number, vx: number, vy: number): void {
     const d = this.data;
     if (!d) return;
+    // ★BJ704-G13（G12 登记债4）：帧态切换的计数复位策略 1:1（Mount.cs:3613-3640）——
+    //   ① 56 蝙蝠冲刺沿复位（:3615-3618）：进出 dash 态（frameState==5 与
+    //   `dash>0∧dashDelay<0` 真值不一致）时清 _frameCounter;
+    //   ② 复位抑制（:3620-3640）：48 暗黑魔法书入 1/2、56 入 1/4/2、61 入 1/4/2、
+    //   55 入 1/5/4（∧state==2 须 sliding）不清 _frameCounter=地面↔空中切换动画
+    //   相位连续（旧无条件清零=变身骑族态切换动画跳回组首帧）。判据读【分派态】
+    //   （:3613 先于 :3667 switch(_type) 的组覆写——48 的 state=1 强改在抑制判定后）。
     if (this.frameState !== state) {
+      const dashing56 = (p.dash ?? 0) > 0 && (p.dashDelay ?? 0) < 0;
+      if (this.type === 56 && ((this.frameState === FRAME_DASHING && !dashing56)
+        || (this.frameState !== FRAME_DASHING && dashing56))) {
+        this.frameCounter = 0;                          // :3615-3618
+      }
       this.frameState = state;
-      this.frameCounter = 0;
+      let resetCounter = true;
+      if (this.type === 48 && (state === FRAME_RUNNING || state === FRAME_IN_AIR)) resetCounter = false;
+      if (this.type === 56 && (state === FRAME_RUNNING || state === FRAME_SWIMMING || state === FRAME_IN_AIR)) resetCounter = false;
+      if (this.type === 61 && (state === FRAME_RUNNING || state === FRAME_SWIMMING || state === FRAME_IN_AIR)) resetCounter = false;
+      if (this.type === 55 && (state === FRAME_RUNNING || state === FRAME_DASHING || state === FRAME_SWIMMING
+        || (state === FRAME_IN_AIR && (p.sliding ?? false)))) resetCounter = false;
+      if (resetCounter) this.frameCounter = 0;          // :3637-3640
     }
     if (state !== FRAME_STANDING) this.idleTime = 0;
     // 离地行走宽限（:3599-3607）
@@ -1858,6 +2054,68 @@ export class MountInstance {
       case 7:
         // UFO 帧组恒取空中组（:3688 case 7: state = 2）——frameState 本身不变
         state = FRAME_IN_AIR;
+        break;
+      case 48:
+        // ★BJ704-G13（G12 登记债4）：暗黑魔法书（:4073-4075 case 48: `state = 1`）
+        //  ——动画组【恒走跑动组】（分派态 0/2/4 一律覆写为 1,纯动画面:帧态字段
+        //  不受扰（vanilla 只改局部 state）,canHover 飞行门 :3361 消费 frameState
+        //  照旧;与 case 7 同款「组覆写不改 frameState」形状）。跑动组速率 48 特例
+        //  Max(0.5,|v|×0.125)（下方 FRAME_RUNNING 臂既有,:4310-4312）——静止也以
+        //  0.5/t 半速循环（原版同构,书页翻动动画）。
+        state = FRAME_RUNNING;
+        break;
+      case 49: {
+        // ★BJ704-G5（G4-③）熔岩鲨（UpdateFrame case 49 :3732-3746）：wet（任意液体,
+        //   含岩浆/蜜/微光）时无论分派态强切游泳帧 4——贴地/起跳拍也悬停（canHover
+        //   49=帧态==4）;倾转 fullRotation=vy×0.05×朝向（:3742-3744,updateBodyRotation
+        //   bodyRotationFor 承接）。vanilla `_frameState = (state = 4)` 直赋不重置帧计数。
+        if (state !== FRAME_SWIMMING && (p.wet ?? p.inWater)) {
+          state = FRAME_SWIMMING;
+          this.frameState = FRAME_SWIMMING;
+        }
+        break;
+      }
+      case 61:
+        // ★BJ704-G15（G13 登记债⑤）：仙灵武库帧态强切臂（Mount.cs:3669-3678 case 61——
+        //   61 的 AddLight :3670-3673 已在 mountLights case 61 承载,此处仅帧态面）：
+        //   分派态 4（游泳）→ frameState/state=2（空中）。★写 frameState 字段（非 case
+        //   7/48 的纯组覆写）——但 61 悬停门 2/3/4 全域内=悬停零行为差,纯帧态归一
+        //   （消费面=tryBeginningFlight/tryLanding 的 FLYING/IN_AIR 判据从「4 不匹配」
+        //   归位「2 匹配」）。61 帧 0-3 全组同段（swim/inAir 同 start/delay）=动画零差,
+        //   与 G13 落地的「61 入 4 不清计数」抑制协同（次拍分派 4 再入,抑制照常不清）。
+        if (state === FRAME_SWIMMING) { this.frameState = FRAME_IN_AIR; state = FRAME_IN_AIR; }
+        break;
+      case 55:
+        // ★BJ704-G15（G13 登记债⑤）：老鼠坐骑帧态强切臂（Mount.cs:3680-3697）：
+        //   ①sliding（=wallCling 爬墙中,view 承载）→ 1 跑动组（爬墙显跑动帧）;
+        //   ②分派 4（游泳）→ 2;③分派 1/5 且 |vx|>4 → 5 冲刺组（分派域无 5=case 5
+        //   死支同形保留,1 支即全效）。写 frameState 字段——55 非 usesHover,消费面
+        //   仅动画组选择+复位抑制判定。p.sliding 读上拍值（upkeep 先于移动相,与 G13
+        //   抑制臂同承载=1 tick 滞后等价登记）。
+        if (p.sliding) { this.frameState = FRAME_RUNNING; state = FRAME_RUNNING; break; }
+        if (state === FRAME_SWIMMING) { this.frameState = FRAME_IN_AIR; state = FRAME_IN_AIR; }
+        else if ((state === FRAME_RUNNING || state === FRAME_DASHING) && Math.abs(vx) > 4) {
+          this.frameState = FRAME_DASHING; state = FRAME_DASHING;
+        }
+        break;
+      case 56:
+        // ★BJ704-G15（G13 登记债⑤）：蝙蝠坐骑帧态强切臂（Mount.cs:3698-3706）：
+        //   dash>0∧dashDelay<0 → 5（冲刺帧组 9-14）;其余分派非 0/1（2/3/4）→ 2。
+        //   悬停门 56 臂 2/3——3→2 域内迁移零行为差;56 帧 1-8 全组同段=动画零差,
+        //   归一面=tryBeginningFlight/tryLanding 判据（同 61 注）。与 G13 的 56 冲刺沿
+        //   复位（:3615-3618 抑制块）协同：dash 沿进出 5 清计数,本臂归一不清。
+        if ((p.dash ?? 0) > 0 && (p.dashDelay ?? 0) < 0) { this.frameState = FRAME_DASHING; state = FRAME_DASHING; }
+        else if (state !== FRAME_STANDING && state !== FRAME_RUNNING) { this.frameState = FRAME_IN_AIR; state = FRAME_IN_AIR; }
+        break;
+      case 52:
+        // ★BJ704-G16（G15 登记债②）：狼坐骑局部态改写（Mount.cs:3710-3712 case 52
+        //   `if (state == 4) state = 2`——纯组覆写,不写 _frameState,与 case 7/48 同形）。
+        //   分派态 4（湿/游泳,Player.cs:36487）→ 帧组取空中组。狼的 swim/inAir 组
+        //   同段（vanilla-mounts.json 52: start 12/count 3/delay 12 全等）=帧域零差,
+        //   唯一行为面=推进速率:游泳组 trunc((|vx|+|vy|)/2)（慢速泳姿冻结）vs 空中组
+        //   恒 1/tick——液体中狼显空中组推进节律。frameState 留 4（原版字面;狼非
+        //   usesHover/无 runSpeed 游泳特例=无行为消费面）。
+        if (state === FRAME_SWIMMING) state = FRAME_IN_AIR;
         break;
       case 9:
         // Scutlix 眼部待机动画（:3715-3730）：非瞄准时 0-5 帧 @12 循环；瞄准中由
@@ -1938,6 +2196,27 @@ export class MountInstance {
         else this.basiliskCharge = Math.min(1, this.basiliskCharge + 1 / 180);
         this.dashing = fast;
         this.dashBurst = fast && vy === 0;
+        break;
+      }
+      case 54: {
+        // ★BJ703-D1 UpdateFrame_Velociraptor（Mount.cs:4549-4564 1:1）——选择性飞行
+        //  帧态：state4(游泳) → allowedToFly ? 3 : 2;空中(2/3) 且 allowedToFly 且
+        //  无钩爪 → 3（扇翼帧 16-20）,否则 3 → 2。原式三条件在【骑乘域内】恒定消解:
+        //  ① `velocity.Y != 0f`——分派门（Player.cs:36444）保证 UpdateFrame 只在
+        //    vy≠0 时收到 2/3/4,恒真;
+        //  ② `(!wet || !ShouldFloatInWater)`——ShouldFloatInWater（:3856-3868）骑乘
+        //    中 `mount.Type == 37` 之外恒假 → 析取恒真;
+        //  ③ `num2 = wings>0 ? wings : wingsLogic`——骑 !CanUseWings 族（54 属之）
+        //    两字段被 :26833-26835 每拍清零 → num2 恒 0 → 首析取项恒假。
+        //  唯一存活项 = `grappling[0] <= -1`（54 在 CanUseHooks 表 MountID.cs:9,
+        //  骑乘可挂钩 = 挂钩中不显扇翼帧）。
+        if (state === FRAME_SWIMMING) state = this.allowedToFly ? FRAME_FLYING : FRAME_IN_AIR;
+        if ((state === FRAME_IN_AIR || state === FRAME_FLYING) && this.allowedToFly
+          && !p.grapplingHooked) {
+          state = FRAME_FLYING;
+        } else if (state === FRAME_FLYING) {
+          state = FRAME_IN_AIR;
+        }
         break;
       }
       case 17: {
@@ -2055,9 +2334,15 @@ export class MountInstance {
         break;
       }
       case FRAME_FLYING: {
+        // ★BJ703-D1 迅猛龙燃料期扇翼加速（UpdateFrame case 3 :4361-4364
+        //  `if (Type == 54 && _flyTime > 0) num33 -= 2`——54 帧延迟 6-2=4;
+        //  56/61 的速度倍乘器 num32 在原版分派域不可达（usesHover=true 恒走
+        //  CanHover 短路,同 BJ701 对 Flight 支 /1.5 的死码判谳）,不建模）。
+        let flyDelay = d.flyingFrameDelay ?? 12;
+        if (this.type === 54 && this.flyTime > 0) flyDelay -= 2;
         this.frameCounter += 1;
-        if (this.frameCounter > (d.flyingFrameDelay ?? 12)) {
-          this.frameCounter -= d.flyingFrameDelay ?? 12;
+        if (this.frameCounter > flyDelay) {
+          this.frameCounter -= flyDelay;
           this.frame++;
         }
         if (this.frame < (d.flyingFrameStart ?? 0)
@@ -2149,15 +2434,19 @@ export class MountInstance {
     }
   }
 
-  /** 每帧帧态调度（Player.cs:35745-35790 的 mount.UpdateFrame 分派 1:1）。
-   *  飞行帧态门 = FlyTime>0 && jump==0 && controlJump && !CanHover（:35734） */
+  /** 每帧帧态调度（Player.cs:36430-36499 的 mount.UpdateFrame 分派 1:1）。
+   *  飞行帧态门 = FlyTime>0 && jump==0 && controlJump && !CanHover（:36446）。
+   *  ★BJ704-G5（G4-③）：①飞行门补 `jump == 0`（:36446——起跳上升段（jumpHold>0
+   *  平台钉期）不得选扇翼帧 3,54 装翼后新达面;原版序=钉期帧 2）;②游泳臂判据
+   *  inWater → wet（:36485 `else if (wet)`——任意液体含岩浆/蜜/微光：熔岩鲨 49
+   *  骑岩浆帧态=4 → canHover 成立=岩浆中悬停;旧 inWater 只水）。 */
   updateFrameDispatch(p: MountedPlayerView): void {
     if (p.vy !== 0 && this.walkingGraceTime <= 0) {
-      if (this.flyTime > 0 && p.inputJump && !this.canHover(p)) {
+      if (this.flyTime > 0 && (p.jumpHold ?? 0) === 0 && p.inputJump && !this.canHover(p)) {
         this.tryBeginningFlight(p, FRAME_FLYING);
         this.updateFrame(p, FRAME_FLYING, p.vx, p.vy);
         this.tryLanding(p);
-      } else if (p.inWater) {
+      } else if (p.wet ?? p.inWater) {
         this.updateFrame(p, FRAME_SWIMMING, p.vx, p.vy);
       } else {
         this.tryBeginningFlight(p, FRAME_IN_AIR);
@@ -2182,10 +2471,7 @@ export class MountInstance {
    *  UI 坐骑通道按 mount.active 派生渲染（无时长字 Main.cs:9345-9352 全 MountType
    *  buffNoTimeDisplay+buffNoSave;★P4 锚勘误:旧引 :9342-9349 漂移），右键图标 =
    *  下马（TryRemovingBuff 坐骑支 :44100-44103）*/
-  setMount(m: number, p: MountedPlayerView & { buffs?: { remove(t: unknown): void } }, game?: {
-    spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
-    playSfxFiles?(files: string[], vol?: number, x?: number, y?: number): void;
-  }): boolean {
+  setMount(m: number, p: MountedPlayerView & { buffs?: { remove(t: unknown): void }; stoolInUse?: boolean }, game?: MountDustGame): boolean {
     if (this.type === m || m < 0 || m >= _mountCountMax) return false;
     if (m === 5 && p.inWater) return false;              // 蜜蜂座骑浸水不可上（:6190）
     // ★BJ357 蝙蝠诅咒 56 湿身拒上（CanMount :6662 `m == 56 && (wet || dripping ||
@@ -2210,17 +2496,48 @@ export class MountInstance {
     //  位次=出生尘（:6363 DoSpawnDust 在缩盒后——尘以新盒中心为锚）之前。
     //  非委派坐骑（表外）零改盒（原版委派 null 同相）。
     const psz = MOUNT_PLAYER_SIZE[m];
+    // ★BJ704-G20（R10-P2 setMount-box-restore）：折叠凳位不随骑继承——先清
+    //   stoolInUse（vanilla IsInUse 跨骑粘滞经 ResizeHitbox 逐拍常态化,HeightOffsetBoost
+    //   mount 分支先行=无效果;本仓偏移凳模型（fixedUpdate 头 :6019 y+=26/h-=26 出口）
+    //   无逐拍回盒,凳位残留 + 缩盒 → 出口双扣 h=-12（鼠 14−26）/h=16（普通 42−26）
+    //   =盒腐化【直调/换骑通道实报面】）。
+    // ★BJ704-G22（g20-stool-memory-quirk ★销案,防再登记）：vanilla 凳位跨骑「记忆」
+    //   经亲读定谳=自中和零净效怪癖——①HeightOffsetBoost（Player.cs:3265-3279）
+    //   mount.Active 分支【优先于】stool 分支 → 粘滞 IsInUse 对骑乘盒无贡献;
+    //   ②SetMount else 支（Mount.cs:6331-6337）底锚回放 position.Y±height,坐凳
+    //   （顶上移 26）与上坐重锚相消 → 盒位与正常上坐逐位相同;③次拍 ResetEffects
+    //   :18899 IsInUse 逐拍清。本仓清位 ≙ vanilla 净效等价（G20 判语「无效果」
+    //   补齐三重源锚）。勿再按「vanilla 凳位记忆 SW 未复刻」登记。
+    if (p.stoolInUse === true) p.stoolInUse = false;
     if (psz) {
       const bx = p.x + p.w / 2, by = p.y + p.h;
       p.w = psz[0];
       p.h = psz[1];
       p.x = bx - p.w / 2;
       p.y = by - p.h;
+    } else {
+      // ★BJ704-G20（R10-P2 setMount-box-restore-latent 窄修）：vanilla SetMount
+      //   else 支（Mount.cs:6329-6342）非委派坐骑上坐即回放 height=42+heightBoost
+      //   （底锚;width 不动,次拍 ResizeHitbox :29439-29451 复 20——HeightOffsetBoost
+      //   mount 分支=mount.HeightBoost,逐拍持保）。本仓玩家盒架构恒 42（mounted
+      //   42+boost=全仓预先存在近似,R10 邻面注:驯鹿 0 boost20 → vanilla 盒 20×62/
+      //   仓恒 20×42）——窄修=直调 setMount 换骑（mod/未来通道;当前玩法不可达,
+      //   DontHoldItems{55,56,61} 拦物品换骑=R10 N1c 证）时回 SW 稳态 20×42,
+      //   堵变身骑残余盒（R10 探针 N1:骑鼠 14×14 直调 setMount(3) 后盒残留）。
+      //   正常物品通道上坐=已是 20×42,零位差;凳位（h=68）随上方清位一并缩回
+      //   （底锚等价 :6019 出口净效）。
+      if (p.w !== 20 || p.h !== 42) {
+        const bx = p.x + p.w / 2, by = p.y + p.h;
+        p.w = 20;
+        p.h = 42;
+        p.x = bx - p.w / 2;
+        p.y = by - p.h;
+      }
     }
-    // 出生尘（DoSpawnDust :6363：spawnDust 族；本仓粒子为程序化圆，数量 10）
-    if (game?.spawnParticles && d?.spawnDust) {
-      game.spawnParticles(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', 10, 1.5);
-    }
+    // 出生尘（DoSpawnDust :6363→:6366 isDismounting:false——★BJ704-G18（G17 债3
+    //  同函数双面）随本刀转正 typed 尘;旧 10 粒程序化圆近似退役为 spawnDust 缺席
+    //  环境的回退档（位序=缩盒后,尘以新盒为锚——原版 :6366 在 PlayerSize 之后）
+    this.doSpawnDust(p, game, false);
     // 62-65 上骑叫（SetMount :6349-6352 `(uint)(type - 62) <= 3u` → PalChillet
     // 0.35，SoundID.cs:1080——疾旋鼬/疾旋火鼬及其 Trusty 版四坐骑同支）
     if (game?.playSfxFiles && m >= 62 && m <= 65) {
@@ -2229,38 +2546,49 @@ export class MountInstance {
     return true;
   }
 
-  /** 下坐空间检查（★BJ357 重锚 Mount.cs CanDismountWithResult :6670-6681：
+  /** 下坐空间检查（★BJ357 重锚 Mount.cs CanDismountWithResult :6682-6696：
    *  `!TryChangingSizeFromBottomCenter(Hitbox,20,42)` → FailedNoSpace——与当前骑乘盒
    *  大小无关恒按 20×42 目标盒判。同尺寸盒（非变身坐骑 20×42）缩支零探针=恒可下
-   *  （原版同相,旧「头顶 42px 列扫」近似编码了更严语义,随本刀退役）;
-   *  变身盒（8×14/14×14/20×18）回长 20×42 才走探针。DontDismountWhenCCed 支本仓
-   *  CCed 未建模（登记） */
+   *  （原版同相,旧「头顶 42px 列扫」近似编码了更严语义,随 BJ357 退役）;
+   *  变身盒（8×14/14×14/20×18）回长 20×42 才走探针。
+   *  ★BJ704-G13（G12 登记债2）：补 DontDismountWhenCCed 首闸（:6686-6690
+   *  `MountID.Sets.DontDismountWhenCCed[Type] ∧ CCed` → FailedCCed——MountID.cs:29
+   *  CreateBoolSet(55,56,61)：老鼠/蝙蝠/仙灵 CCed 中拒下坐;CCed 判据序在空间探针
+   *  【前】=变身骑族 CCed 恒 FailedCCed 不落空间探针）。 */
   canDismount(p: MountedPlayerView): boolean {
+    return this.canDismountWithResult(p) === 'ok';
+  }
+
+  /** CanDismountWithResult :6682-6696 的分道变体（'ok' | 'cced' | 'nospace'）——
+   *  QuickMount 3 连失败链（Player.cs:6043 只对 FailedNoSpace 计数,FailedCCed
+   *  静默返回）须分道消费;Game.ts tryDismountMount 现按 boolean 合流（FailedCCed
+   *  误入 3 连强制链=域外登记债,Game.ts 禁触批另刀）。 */
+  canDismountWithResult(p: MountedPlayerView): 'ok' | 'cced' | 'nospace' {
+    if (DONT_DISMOUNT_WHEN_CCED.has(this.type) && (p.cced ?? false)) return 'cced';
     const st = p.store;
-    if (!st) return true;
+    if (!st) return 'ok';
     return tryChangingSizeFromBottomCenter(
       st as unknown as SolidTileView, p.x, p.y, p.w, p.h, 20, 42,
-    ) !== null;
+    ) !== null ? 'ok' : 'nospace';
   }
 
   /** @param game 透传 dismount 的出生尘回调（★BJ405-D1：右键下马
    *  Main.cs:44100-44103 TryDismount → Dismount :6234 DoSpawnDust(isDismounting)
    *  1:1——buff 栏右键路径带尘；既有调用方不传=零变化） */
-  tryDismount(p: MountedPlayerView, game?: {
-    spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
-  }): boolean {
+  tryDismount(p: MountedPlayerView, game?: MountDustGame): boolean {
     if (!this.canDismount(p)) return false;
     this.dismount(p, game);
     return true;
   }
 
-  dismount(p?: MountedPlayerView, game?: {
-    spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
-  }): void {
+  dismount(p?: MountedPlayerView, game?: MountDustGame): void {
     if (!this.active) return;
-    if (game?.spawnParticles && this.data?.spawnDust) {
-      game.spawnParticles((p?.x ?? 0) + (p?.w ?? 0) / 2, (p?.y ?? 0) + (p?.h ?? 0) / 2, '#C8C8C8', 10, 1.5);
-    }
+    // ★BJ704-G18（G17 登记债3）：Dismount :6232-6235 `!ignoreEffect → DoSpawnDust(
+    //  isDismounting:true)`——R 键成功拍/buff 栏右键/CCed 强制链全部经本口出生尘
+    //  （位序=Reset/回盒【前】,尘以骑乘盒为锚——原版同序）。三连败第 3 拍
+    //  ignoreEffect=true 调用方不传 game=免尘（Game.tryDismountMount 强制支）。
+    //  旧 10 粒程序化圆近似随本刀转正 typed 尘（DoSpawnDust :6440-6635 1:1）。
+    if (p) this.doSpawnDust(p, game, true);
     this.reset();
     // ★BJ357 回盒（Dismount :6240-6257 1:1）：TryChangingSizeFromBottomCenter(20×42)
     //  成功 → 贴 fit 位（TopLeft 平移,盒内 shadowPos 补偿原版 :6245-6253 本仓无该
@@ -2284,6 +2612,203 @@ export class MountInstance {
     }
   }
 
+  /** ★BJ704-G18（G17 登记债2）DoFailedDismountDust（Mount.cs:6386-6437）1:1：
+   *  下坐失败反馈尘——QuickMount :6052 `DoFailedDismountDust(this, FailedNoSpaceCount*20)`
+   *  唯一消费位（Game.tryDismountMount 失败 1/2 拍）。尘型 = _data.spawnDust
+   *  （vanilla-mounts.json 66/66 全量）;56=黑（Color.Black）、61=仙灵彩
+   *  （GetFairyQueenWeaponsColorFull(0.27,1,0.15,1,0.7) 通名支——dev 名分色表不建模,
+   *  同 mountLights/pixieTrail 登记）;盒 = Hitbox.Inflate(10,10)。typed 尘经
+   *  game.spawnDust（NewDust 同构 + 调用侧后置覆写——原版 DelegateMethods 式）;
+   *  缺席环境（测试桩）回退 spawnParticles 程序化圆（数量=尘公式,旧近似形态）。 */
+  doFailedDismountDust(p: MountedPlayerView, game: MountDustGame | undefined, dustAmount: number): void {
+    const pool = game?.spawnDust?.bind(game);
+    if (!pool) {
+      // 回退档（旧程序化圆近似;数量随公式订正 = count×20 非 10+count×20）
+      game?.spawnParticles?.(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', dustAmount, 1.2);
+      return;
+    }
+    const d = this.data;
+    if (!d?.spawnDust) return;
+    const t = this.type;
+    let color: { r: number; g: number; b: number; a: number } | null = null;   // Color.Transparent=NewDust 缺省
+    if (t === 56) color = { r: 0, g: 0, b: 0, a: 255 };                        // Color.Black（:6393-6395）
+    if (t === 61) color = fairyQueenDustColor();                               // 仙灵彩（:6397-6399）
+    const rx = p.x - 10, ry = p.y - 10, rw = p.w + 20, rh = p.h + 20;          // Inflate(10,10)（:6401-6402）
+    for (let i = 0; i < dustAmount; i++) {
+      const du = pool(rx, ry, rw, rh, d.spawnDust, 0, 0, 0, color, 1);         // :6408（scale1/α0）
+      if (!du) continue;                        // 池满/屏裁拒——原版 Main.dust[6000] 哨兵同相
+      du.scale += (Math.floor(Math.random() * 31) - 10) * 0.01;               // :6409 Next(-10,21)×0.01
+      if (t === 56) {                           // :6410-6415 蝙蝠：定值 0.7+重坠
+        du.scale = 0.7;
+        du.vx *= 0.4; du.vy *= 0.4;
+        du.vy += p.gravDir * 0.5;
+      }
+      if (t === 61) {                           // :6417-6421 仙灵：随机胀缩+速度掺玩家速度
+        du.scale *= 1 + 0.3 * Math.random();
+        const f = Math.random();                // 单次 NextFloat 缩整向量（:6421）
+        du.vx += p.vx * f; du.vy += p.vy * f;
+      }
+      if (d.spawnDustNoGravity) du.noGravity = true;                            // :6423-6425
+      else if (Math.random() < 0.5) { du.scale *= 1.3; du.noGravity = true; }   // :6427-6430（Next(2)==0）
+      else { du.vx *= 0.5; du.vy *= 0.5; }                                      // :6432-6434
+      du.vx += p.vx * 0.8; du.vy += p.vy * 0.8;                                 // :6436
+    }
+  }
+
+  /** ★BJ704-G18（G17 登记债3）DoSpawnDust（Mount.cs:6440-6635）1:1：上下坐出生尘。
+   *  消费位 = Dismount :6232-6235（!ignoreEffect → isDismounting:true）与 SetMount
+   *  :6366（isDismounting:false）——本仓由 dismount/setMount 内联;三连败第 3 拍
+   *  Dismount(ignoreEffect:true) 不经此面。特型支：52 狼（100×尘267 紫微光+1/3 白
+   *  克隆回声）/62-65 帕鲁（100×尘306 青光×2 同克隆）/矿车（只出 gore 每 10 拍 1 片）
+   *  /40-42 马（尘 16/31 混 α50 + 尾 5 gore）/23 扫帚（黄 + 尾 4 gore）/56/61 变身
+   *  骑（下坐=底锚 DefaultSize 盒,上坐=Hitbox,皆 Inflate10）/57-60 滚轴鞋（40 尘+
+   *  脚底带盒+专用减速）。typed 尘经 game.spawnDust;缺席回退 spawnParticles
+   *  （旧 10 粒圆近似形态,数量保持）。 */
+  doSpawnDust(p: MountedPlayerView, game: MountDustGame | undefined, isDismounting: boolean): void {
+    const pool = game?.spawnDust?.bind(game);
+    if (!pool) {
+      game?.spawnParticles?.(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', 10, 1.5);   // 回退档（旧近似）
+      return;
+    }
+    const d = this.data;
+    const t = this.type;
+    const clone = game?.cloneDust?.bind(game);
+    // ---- 特型支 52（:6446-6466）：100×尘 267 紫微光 + 1/3 白克隆回声 ----
+    if (t === 52) {
+      for (let i = 0; i < 100; i++) {
+        const du = pool(p.x - 20, p.y, p.w + 40, p.h, 267, 0, 0, 60, { r: 130, g: 60, b: 255, a: 70 }, 1);
+        if (!du) continue;
+        du.scale += (Math.floor(Math.random() * 31) - 10) * 0.01;
+        du.noGravity = true;
+        du.vx += p.vx * 0.8; du.vy += p.vy * 0.8;
+        const f = Math.random();                                   // velocity *= NextFloat（:6455）
+        du.vx *= f; du.vy *= f;
+        du.vy += 2 * (Math.random() * 2 - 1);                      // 2×NextFloatDirection（:6456）
+        du.noLight = true;
+        if (Math.random() < 1 / 3 && clone) {                      // Next(3)==0 → CloneDust 白化（:6458-6464）
+          const c2 = clone(du);
+          if (c2) { c2.color = { r: 255, g: 255, b: 255, a: 255 }; c2.scale *= 0.5; c2.alpha = 0; }
+        }
+      }
+      return;
+    }
+    // ---- 特型支 62-65（:6468-6488）：100×尘 306 青光 scale2 + 同款克隆回声 ----
+    if (t >= 62 && t <= 65) {
+      for (let i = 0; i < 100; i++) {
+        const du = pool(p.x - 20, p.y, p.w + 40, p.h, 306, 0, 0, 60, { r: 100, g: 227, b: 255, a: 127 }, 2);
+        if (!du) continue;
+        du.scale += (Math.floor(Math.random() * 31) - 10) * 0.01;
+        du.noGravity = true;
+        du.vx += p.vx * 0.8; du.vy += p.vy * 0.8;
+        const f = Math.random();
+        du.vx *= f; du.vy *= f;
+        du.vy += 4 * (Math.random() * 2 - 1);
+        du.noLight = true;
+        if (Math.random() < 1 / 3 && clone) {
+          const c2 = clone(du);
+          if (c2) { c2.color = { r: 255, g: 255, b: 255, a: 255 }; c2.scale *= 0.5; c2.alpha = 0; }
+        }
+      }
+      return;
+    }
+    // ---- 通用支（:6490-6635） ----
+    let color: { r: number; g: number; b: number; a: number } | null = null;
+    if (t === 23) color = { r: 255, g: 255, b: 0, a: 255 };         // :6491-6493 扫帚黄
+    if (t === 56) color = { r: 0, g: 0, b: 0, a: 255 };             // :6495-6497 蝙蝠黑
+    if (t === 61) color = fairyQueenDustColor();                    // :6499-6501 仙灵彩
+    const skates = t > 0 && !!MOUNT_SETS.IsRollerSkates?.[t];
+    const num = skates ? 40 : 100;                                  // :6503-6507
+    let rx = Math.trunc(p.x) - 20, ry = Math.trunc(p.y);            // :6508
+    let rw = p.w + 40, rh = p.h;
+    if (t === 56 || t === 61) {                                     // :6509-6521 变身骑族专用盒
+      if (isDismounting) {
+        const bx = p.x + p.w / 2, by = p.y + p.h;                   // Bottom（回 20×42 目标位锚）
+        rx = Math.trunc(bx) - 10; ry = Math.trunc(by) - 42; rw = 20; rh = 42;
+      } else {
+        rx = p.x; ry = p.y; rw = p.w; rh = p.h;                     // Hitbox
+      }
+      rx -= 10; ry -= 10; rw += 20; rh += 20;                       // Inflate(10,10)
+    }
+    if (skates) {                                                   // :6522-6528 滚轴鞋脚底带
+      const halfW = Math.trunc(p.w / 2);
+      rx = Math.trunc(p.x + p.w / 2) - halfW - 10;
+      ry = Math.trunc(p.y + p.h) - 10;
+      rw = Math.max(1, halfW + 20); rh = 10;
+    }
+    for (let k = 0; k < num; k++) {
+      if (MOUNT_SETS.Cart?.[t]) {                                   // :6531-6540 矿车：只出 gore
+        if (k % 10 === 0) {
+          const ang = Math.random() * Math.PI * 2;
+          const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), p.x - 20, p.y, 0, 0);
+          if (g) { g.alpha = 100; g.vx = Math.cos(ang); g.vy = Math.sin(ang); }
+        }
+        continue;
+      }
+      let type2 = d?.spawnDust ?? 16;
+      let scale = 1, alpha = 0;
+      if (t === 40 || t === 41 || t === 42) {                       // :6545-6557 马族：16/31 混
+        type2 = Math.floor(Math.random() * 2) !== 0 ? 16 : 31;
+        scale = 0.9; alpha = 50;
+        if (t === 42) type2 = 31;
+        if (t === 41) type2 = 16;
+      }
+      if (t === 61 && Math.floor(Math.random() * (isDismounting ? 2 : 5)) !== 0) {
+        continue;                                                    // :6559-6561 仙灵抽稀
+      }
+      const du = pool(rx, ry, rw, rh, type2, 0, 0, alpha, color, scale);   // :6563
+      if (!du) continue;
+      du.scale += (Math.floor(Math.random() * 31) - 10) * 0.01;     // :6564
+      if (skates) {                                                  // :6565-6573 滚轴鞋专用减速
+        du.vx *= 0.8; du.vy *= 0.8;
+        du.vy *= 0.75;
+        du.vy += p.gravDir * 0.25;
+        du.noLightEmittance = true;
+        du.noGravity = true;
+      }
+      if (t === 56) {                                                // :6574-6580
+        du.scale = 0.7;
+        du.vx *= 0.4; du.vy *= 0.4;
+        du.vy += p.gravDir * 0.5;
+      }
+      if (t === 61) {                                                // :6581-6592
+        du.scale *= 1 + 0.3 * Math.random();
+        if (!isDismounting) {
+          const cxr = rx + rw / 2, cyr = ry + rh / 2;                // r.Center 吸聚（:6587）
+          du.x += (cxr - du.x) * 0.7;
+          du.y += (cyr - du.y) * 0.7;
+          du.vx *= -2; du.vy *= -2;
+          du.vy -= 1;
+        }
+        const f = Math.random();
+        du.vx += p.vx * f; du.vy += p.vy * f;
+      }
+      if (d?.spawnDustNoGravity) du.noGravity = true;                // :6593-6595
+      else if (Math.random() < 0.5) { du.scale *= 1.3; du.noGravity = true; }   // :6597-6600
+      else { du.vx *= 0.5; du.vy *= 0.5; }                           // :6602-6604
+      du.vx += p.vx * 0.8; du.vy += p.vy * 0.8;                      // :6606
+      if (t === 40 || t === 41 || t === 42) {                        // :6607-6609
+        const f = Math.random();
+        du.vx *= f; du.vy *= f;
+      }
+    }
+    if (t === 40 || t === 41 || t === 42) {                          // :6612-6624 马族尾 5 gore
+      for (let l = 0; l < 5; l++) {
+        let type3 = 61 + Math.floor(Math.random() * 3);
+        if (t === 41 || (t === 40 && Math.random() < 0.5)) type3 = 11 + Math.floor(Math.random() * 3);
+        const ang = Math.random() * Math.PI * 2;
+        const g = GorePiece.newGore(type3, p.x + p.facing * 8, p.y + 20, 0, 0);
+        if (g) { g.alpha = 100; g.vx = Math.cos(ang) * 1.4; g.vy = Math.sin(ang) * 1.4; }
+      }
+    }
+    if (t === 23) {                                                  // :6626-6634 扫帚尾 4 gore
+      for (let m = 0; m < 4; m++) {
+        const ang = Math.random() * Math.PI * 2;
+        const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), p.x - 20, p.y, 0, 0);
+        if (g) { g.alpha = 100; g.vx = Math.cos(ang); g.vy = Math.sin(ang); }
+      }
+    }
+  }
+
   reset(): void {
     this.active = false;
     this.type = -1;
@@ -2293,6 +2818,7 @@ export class MountInstance {
     this.frameExtraCounter = 0;
     this.frameState = FRAME_STANDING;
     this.flyTime = 0;
+    this.allowedToFly = false;
     this.fatigue = 0;
     this.fatigueMax = 0;
     this.idleTime = 0;
@@ -2323,12 +2849,20 @@ export class MountInstance {
     this.wheelDust = false;
   }
 
-  /** 每 tick 维护（Player.fixedUpdate 挂点）：能量恢复 + 地面飞行时量回充 + 帧态机 */
+  /** 每 tick 维护（Player.fixedUpdate 挂点）：能量恢复 + 地面飞行时量回充 + 帧态机。
+   *  ★BJ704-G5（R4-P2④）54 面回充补 releaseJump 门：原版 :26978-26982
+   *  `((vy==0||sliding) && releaseJump) || (autoJump && justJumped)` →
+   *  ResetFlightTime（54 → flyTime=wingTimeMax）——持跳跨跳落地拍 releaseJump 假
+   *  ⇒ 不回充（每飞行周期须松跳;旧无门=持跳无限迅猛龙飞行,探针实证落地+1 拍回满
+   *  80）。releaseJump ≙ !inputJump（Player.ts 回满公共段 :7978 同承载）。★只辖 54
+   *  面：mount 0/2/50 族维持仓内既有回充语义（探针已验面=登记偏差,勿动——BJ701
+   *  判例"勿动 mount50 族语义"）;FatigueRecovery 门（:24955 vy==0 无 releaseJump）
+   *  亦不受本门连坐。 */
   upkeep(p: MountedPlayerView): void {
     if (!this.active || this.isCart) return;
     this.abilityRecovery();
     if (p.onGround || p.vy === 0) {
-      this.resetFlightTime(p);
+      if (this.type !== 54 || !p.inputJump) this.resetFlightTime(p);
       this.fatigueRecovery();
     }
     this.tryStartHover(p);
@@ -2418,6 +2952,23 @@ export function fairyQueenHslToRgb(hue: number): [number, number, number] {
     Math.round(hue2rgb(hue) * 255),
     Math.round(hue2rgb(hue - 1 / 3) * 255),
   ];
+}
+
+/** ★BJ704-G18（G17 登记债2/3）：DoSpawnDust/DoFailedDismountDust 的 56/61 尘色——
+ *  Projectile.GetFairyQueenWeaponsColorFull(whoAmI, Center, 0.27, 1, 0.15, 1, 0.7)
+ *  （Mount.cs:6399/:6501）通名支：hueRaw 0.27 → num=(0.27+0.5)%1=0.77,
+ *  hslToRgb(0.77,1,0.7)（sat=1 时 lum0.7 ≡ 基色 lerp 白 0.4,同 pixieTrail :1769 式）
+ *  → lerpToWhite 0.15 → A×1（Opacity 1/α乘 1 无改,恒 255）。dev 名分色表不建模
+ *  （同 mountLights/pixieTrailDust 登记）。 */
+function fairyQueenDustColor(): { r: number; g: number; b: number; a: number } {
+  const base = fairyQueenHslToRgb((0.27 + 0.5) % 1);
+  const lum07 = base.map((c) => c + (255 - c) * 0.4);            // luminance 0.7
+  return {
+    r: Math.round(lum07[0] + (255 - lum07[0]) * 0.15),           // lerpToWhite 0.15
+    g: Math.round(lum07[1] + (255 - lum07[1]) * 0.15),
+    b: Math.round(lum07[2] + (255 - lum07[2]) * 0.15),
+    a: 255,
+  };
 }
 export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLightCtx): MountLight[] {
   const out: MountLight[] = [];

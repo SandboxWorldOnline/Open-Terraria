@@ -15,6 +15,9 @@
 //   行为面已核：quickStackAllChests=600px 盒扫全部世界箱（QuickStacking.ts
 //   chestsInRangeOf,含逻辑开着的箱,原版 NearbyChests 同语义）→ 该态点钮无异常。
 // - Sort 钮（sortXY）不在用户明令分歧面,保原版裸门。
+// - ★BJ704-G7（2026-10-21,R5 登记债⑥清偿）：classic 簇门补原版 :42548 npcShop==0
+//   商店半边（(openChest∨npcShopOpen)∧¬craft 才藏）——这是**原版平价补齐**非新分歧;
+//   vinv 面 pos 闭包经 layoutVanilla ctx.chestOpen（openChest∨npcShopOpen）本就双半边。
 //
 // 变异证红面：摘 craftMenuOpen 形参/摘 pos 闭包第二参/摘 classic 簇门析取/回植旧裸门
 // 形状 → 本锁即红。
@@ -60,8 +63,8 @@ describe('BJ685b 接线锚（两布局单一分歧规则）', () => {
   it('vinv 钮 pos 闭包:quickStackXY(chestOpen, modernOpen ∨ PipsUseGrid)', () => {
     expect(uiSrc).toMatch(/pos\(b, \(\) => quickStackXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen, this\.vinvModernCraftOpen \|\| this\.vinvPipsUseGrid\)\)/);
   });
-  it('classic 簇门:openChest ∧ ¬(modernOpen ∨ PipsUseGrid) 才藏', () => {
-    expect(uiSrc).toMatch(/b\.style\.display = this\.openChest && !\(this\.vinvModernCraftOpen \|\| this\.vinvPipsUseGrid\) \? 'none' : '';/);
+  it('classic 簇门:(openChest ∨ npcShopOpen) ∧ ¬(modernOpen ∨ PipsUseGrid) 才藏（★BJ704-G7 2026-10-21 商店半边补齐:原版 :42548 npcShop==0 项此前代码未落,仅注释宣称;锁随刀更新,改判史=BJ685b 初锁只及 chest 半边）', () => {
+    expect(uiSrc).toMatch(/b\.style\.display = \(this\.openChest \|\| this\.game\.npcShopOpen\) && !\(this\.vinvModernCraftOpen \|\| this\.vinvPipsUseGrid\) \? 'none' : '';/);
   });
   it('重评触发前提:三态位均在 layoutVanilla 签名内（任一翻转必重排=pos 闭包重评）', () => {
     expect(uiSrc).toMatch(/\$\{chestOpen \? 1 : 0\}/);

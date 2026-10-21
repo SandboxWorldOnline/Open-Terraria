@@ -9,6 +9,7 @@ import { bannerReceivedMult, bannerOfNpc, bannerItemId } from '../world/Banners'
 import { projGlobalImmuneWriteTicks, PROJ_IMMUNE_SLOW_MAGIC_TIER } from '../data/vanillaProjImmuneTiers';
 import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
+import { NPC_CATCHABLE } from '../data/critters';   // ★BJ704-R9 P1-2:npcCatchable 集（Main.cs:9469+）——friendly 投影分档判据
 import statusPlayerJson from '../data/vanilla-statusplayer.json';
 import {
   getGlobalHurtBuckets, ImmunityCooldownID,
@@ -571,13 +572,27 @@ export function playerCanHitEnemy(
   game: GameHooks,
   projId = 0,
 ): boolean {
-  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean } } | null | undefined;
+  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean }; catchFriendly?: boolean } | null | undefined;
   // ★本函数只做【命中校验】（Damage_PVE_Inner :11892-11896 flag 门 + ApplyItemToNPC
   //  :43605 friendly 门同式）——原版 immortal/chaseable 剔除属 CanBeChasedBy（:91141）
   //  索敌门，仅目标选取使用；曾误入此处致训练假人被一切玩家攻击免伤
   //  （2026-08-25 用户报"假人无法被击中"）——索敌侧请用 canBeChasedBy()。
+  // ★BJ704-G3 D10（2026-10-21）：NPC.friendly 运行时窗位（Enemy.catchFriendly——
+  //   SubAI :91649-91670 对 npcCatchable 型每拍强写：自然出生首 90t true=玩家
+  //   免伤,释放/雕像出生首拍即 false=可打;静态 def.friendly 为城商/蚱蜢位）。
+  //   免伤窗与静态 friendly 同走下方豁免链（318 巫毒/杀向导/杀裁缝——critter
+  //   域不可达,零行为差）。
   const vid = t?.vanillaId;
-  if (!t?.def?.friendly) return true;
+  // ★BJ704-R9 P1-2：原版 SubAI（NPC.cs:91649-91670）对【全部】npcCatchable 型每拍
+  //   强写 friendly=(窗>0)——else 支显式 false,静态 def.friendly 被完全覆写 ⇒
+  //   真投影 = catchable ? 窗 : 静态。旧「静态 ∪ 窗」对静态 true 捕获型
+  //   （蚯蚓 357/448/484/485/486/487/606 等九型,aiStyle 66 无自清位）恒免伤
+  //   = 玩家永不可打（原版窗外可打:近战 :9630 双桶/弹幕 :32571/爆炸 critters 臂
+  //   全吃此门）。蚱蜢 377/446（AI_001 自清同构）与逃逸档/互殴面无观测差。
+  const friendlyEff = vid !== undefined && vid !== null && NPC_CATCHABLE.has(vid)
+    ? t?.catchFriendly === true
+    : !!t?.def?.friendly;
+  if (!friendlyEff) return true;
   if (projId === 318) return true;
   // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
   const eq = projScanEq(game);

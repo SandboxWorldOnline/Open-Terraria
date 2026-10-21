@@ -368,8 +368,13 @@ export class PrismProng extends Entity {
         // 曾 source-over(遮暗背景=显粗/色调闷)与白芯 ×127/255(亮度减半)皆误,均废
         ctx.globalCompositeOperation = 'lighter';
         ctx.imageSmoothingEnabled = false;
-        const hueTex = tintedTex(img, [rr, gg, bb], true);
-        const whiteTex = tintedTex(img, [255, 255, 255], true);
+        // ★BJ703-F（BJ700-C 同族 flatten 债清偿）：双 pass 烘焙改保形（flatten=false）
+        //  ——632 图 26×78 二值 α、43.4% 透明（帧 0/1/2 分别 43.4%/46.2%/29.4%）,
+        //  摊平把透明域填成不透明染色底 → 'lighter' 全幅加色 = 光束比原版锥形辉光
+        //  更宽更实（cosmetic 未实报,BJ700-C 登记债②）。保形后贡献=tex.rgb×tex.a×
+        //  C.rgb×ga 逐 texel 精确=XNA One 因子（透明域贡献 0）。
+        const hueTex = tintedTex(img, [rr, gg, bb], false);
+        const whiteTex = tintedTex(img, [255, 255, 255], false);
         if (hueTex) this.drawLaserTex(ctx, hueTex, sx, sy, rotAdj, len, this.prongScale * th, 0.75 * opacity);
         if (whiteTex) this.drawLaserTex(ctx, whiteTex, sx, sy, rotAdj, len, this.prongScale * 0.5 * th, 0.75 * opacity);
         ctx.restore();
@@ -926,9 +931,13 @@ export class ChargedBlaster extends Entity {
         // num35<1 ? damage : (int)(damage×2.5)。C# float 0.7f+0.3f 恰 = 1.0f（80t 起即
         // ×2.5）；JS 双精 0.7+0.3=0.9999999999999999 不可直接比，按 num20 判门；(int)=截断
         const num36 = stage === 0 ? this.damage : Math.trunc(this.damage * 2.5);
+        // ★BJ704-G10（件10）：num35（NewProjectile 尾参 ai[1] :67574）三档蓄压注入
+        //  ——Arrow 459 AI 块（scale=(int)(22×scale) 判定盒/ghost 环 end/尘 226/
+        //  ≥0.85 档 penetrate=−1/点光）随档消费,零档注入=旧「恒 1 档」债根因。
+        const num35 = 0.7 + stage * 0.3;
         const bolt = new Arrow(this.cx, this.cy, this.dirX * 10, this.dirY * 10,
           num36, this.knockback, 459,
-          { grav: 0, life: 600, pierce: 1 });
+          { grav: 0, life: 600, pierce: 1, ai1: num35 });
         bolt.critChance = this.critChance;
         bolt.armorPen = this.armorPen;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(bolt, 'projectiles');

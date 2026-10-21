@@ -51,12 +51,15 @@ const mkBody = (w: World, over: Partial<Body>): Body => ({
 
 // ═══ FX40-h1：StepUp 正挂速度门（Player.cs:28276）═══
 describe('SW-RB14d A：StepUp 正挂门=(∨毯展开)∧vy≥gravity 字段（:28276;旧消费者恒 vy>=0）', () => {
-  it('A1 源锁：消费者三态门 + 玩家侧两腿承载位', () => {
+  it('A1 源锁：消费者三态门 + 玩家侧两腿承载位（★BJ704-G12 债7：毯腿承载升级 carpetFlying 单一真源）', () => {
     const s = SRC('physics/TileCollision.ts');
     expect(s).toContain('b.stepUpCarpet === true || b.vy >= (b.stepUpVeloFloor ?? 0)');
     expect(s).not.toContain('} else if (b.vy >= 0) {');   // 旧恒 vy>=0 门退役
     const p = SRC('entities/Player.ts');
-    expect(p).toContain('this.stepUpCarpet = this.carpetTime > 0 && this.inputJump;');
+    // ★BJ704-G12（G5 登记债7）：carpetTime>0∧inputJump 近似（外门拒拍/余油末拍偏宽）
+    // → carpetFlying（≙ carpetFrame!=-1 本拍在展开,G5 R4-P2② 单一真源）
+    expect(p).toContain('this.stepUpCarpet = this.carpetFlying;');
+    expect(p).not.toContain('this.stepUpCarpet = this.carpetTime > 0 && this.inputJump;');
     expect(p).toContain('this.stepUpVeloFloor = this.gField;');
   });
   it('A2 [0,g) 窗不再上探：水行/悬停 vy=0 → 不踏（旧 vy>=0 门踏=变异红）', () => {

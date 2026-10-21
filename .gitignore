@@ -12,6 +12,9 @@
 /tmp
 /shots
 
+# ★BJ703-E D4:运行期 console 抓取误提交防复发(commit 05761037 曾误入 4MB src/console.log)
+console.log
+
 /public/assets-zip
 
 /tests/fixtures/worlds/*.wld.json.gz

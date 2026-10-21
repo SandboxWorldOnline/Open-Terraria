@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
 import { Arrow } from '../src/entities/Arrow';
+import { gameTickCount, pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ704-G10：idStatic GTW 钟钉拨（G1 债②统一）
 import { LIQUID_TYPE } from '../src/world/TileStore';
 
 function makeGame(w: World, enemies: unknown[] = [], bucket: unknown[] = []): GameHooks {
@@ -113,7 +114,9 @@ describe('idStaticGroup 组共享免疫：181/566 UseGroupStaticImmunity(181)（
     const bee2 = new Arrow(96, 96, 0, 0, 10, 0, 566);     // 强蜂与弱蜂同键
     expect(grpOf(bee1)).toBe(181);                        // immunityIdentity=Type 参数面
     expect(grpOf(bee2)).toBe(181);
-    expect((bee1 as unknown as { idStaticCdMs: number }).idStaticCdMs).toBe(167); // 10t≈167ms
+    // ★BJ704-G10（G1 债②）：idStaticCheck 墙钟→GTW tick 钟——字段随迁
+    //  idStaticCdTicks=10（原 idStaticCdMs=167ms 换算基数退役）
+    expect((bee1 as unknown as { idStaticCdTicks: number }).idStaticCdTicks).toBe(10); // 10t
 
     const w = emptyWorld();
     let hits = 0;
@@ -128,12 +131,12 @@ describe('idStaticGroup 组共享免疫：181/566 UseGroupStaticImmunity(181)（
     bee2.fixedUpdate(1 / 60, game);
     expect(hits).toBe(1);                                 // 表级共享窗内第二蜂不再结算
 
-    const spy = vi.spyOn(Date, 'now');
-    spy.mockReturnValue(Date.now() + 500);                // 推过 167ms 窗
-    try {
-      bee2.fixedUpdate(1 / 60, game);
-      expect(hits).toBe(2);                               // 到期后再结算（原语义）
-    } finally { spy.mockRestore(); }
+    // ★G10：GTW 钟钉拨（bj209/bj274 判例;原 Date.now+500ms 推钟退役）——
+    //  推过 10t 窗（写 t0+10 / 门读 ≤now 同拍恰过）
+    const t0 = gameTickCount();
+    pinGameTimeTicks(t0 + 10);
+    bee2.fixedUpdate(1 / 60, game);
+    expect(hits).toBe(2);                                 // 到期后再结算（原语义）
   });
 
   it('376/604 族不走字段通道：idStaticGroup 保持 null（硬编码支承载）', () => {

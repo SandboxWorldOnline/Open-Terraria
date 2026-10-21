@@ -433,10 +433,13 @@ describe('AI_120 星尘守护者', () => {
 
 // ============ 6 localNPCImmunity 节奏 + 闪电光环方形场 ============
 describe('localNPCImmunity（:15330/:11878/:13153）', () => {
-  it('cd=3 → 命中后恰好 3 tick 再命中（旧实现多 1t）', () => {
+  it('cd=3 → 命中后恰好 3 tick 再命中（★BJ697 起衰减=宿主 tick 驱动,读纯化——旧读位衰减形）', () => {
     const cd = new MinionHitCd();
     const seq: boolean[] = [];
-    for (let i = 0; i < 7; i++) seq.push(cd.ready(1, 3));
+    for (let i = 0; i < 7; i++) {
+      seq.push(cd.ready(1, 3));
+      cd.tick();   // BJ697：每 t 一 tick（fixedUpdate 头位=原版 :15330 DecrementLocalImmuneTimeCounters）
+    }
     expect(seq).toEqual([true, false, false, true, false, false, true]);
   });
 

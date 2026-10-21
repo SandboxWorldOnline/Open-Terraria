@@ -121,8 +121,11 @@ import { fadingParticles } from './FadingParticles';
 /** 测试/生成共用 rng 形参缺省 */
 type Rng = () => number;
 
-/** Main.hslToRgb(h,s,l)（Color.cs hsl 2 rgb 标准式）→ css `rgb()` 字符串 */
-export function orchestraHslCss(h: number, s: number, l: number): string {
+/** Main.hslToRgb(h,s,l,a=255)（Main.cs:48689 Color.cs hsl 2 rgb 标准式）→ rgb 三元组
+ *  ★BJ704-G2（2026-10-21）：三通道抽出单源——d267 源尘 newColor（ParticleOrchestrator
+ *  :3496/:3394/:3445 直入 NewDust 染色参,旧走 css 字符串 hexToRgbArr 绕路）与
+ *  css 串（spawnParticles 面）同数学。 */
+export function orchestraHsl255(h: number, s: number, l: number): [number, number, number] {
   const hue = ((h % 1) + 1) % 1;
   const sat = s < 0 ? 0 : s > 1 ? 1 : s;
   const lig = l < 0 ? 0 : l > 1 ? 1 : l;
@@ -135,9 +138,16 @@ export function orchestraHslCss(h: number, s: number, l: number): string {
     if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
     return p;
   };
-  const r = Math.round(ch(hue + 1 / 3) * 255);
-  const g = Math.round(ch(hue) * 255);
-  const b = Math.round(ch(hue - 1 / 3) * 255);
+  return [
+    Math.round(ch(hue + 1 / 3) * 255),
+    Math.round(ch(hue) * 255),
+    Math.round(ch(hue - 1 / 3) * 255),
+  ];
+}
+
+/** Main.hslToRgb → css `rgb()` 字符串（orchestraHsl255 包装） */
+export function orchestraHslCss(h: number, s: number, l: number): string {
+  const [r, g, b] = orchestraHsl255(h, s, l);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -185,22 +195,43 @@ export function rainbowRodHitFx(
   }
   // ---- 12 × d267 + CloneDust 白影（:3501-3511）----
   for (let i = 0; i < 12; i++) {
-    // ★F6 清偿：velocity=NextVector2Circular(1,1)（:3498）线性盘 + MovementVector×
-    //  NextFloatDirection×0.5（:3499,标量 xy 共享单掷）；CloneDust（Dust.cs:260,:
-    //  3511）=velocity/scale/alpha 逐字段复制白影——scale=源/2、fadeIn=源×0.75、零掷
-    //  （★MINOR 收尾：曾独立重掷 scale 源域+丢 fadeIn 复制）
-    const cv = circ(rng, 1);
-    const jd = (rng() * 2 - 1) * 0.5;
-    const scl = 0.6 + rng() * 0.9;                        // scale（:3506）
-    const fd = 0.7 + rng() * 0.8;                         // fadeIn（:3507）
-    const d = game.spawnDust?.(x, y, 1, 1, 267,
-      cv.x + moveX * jd, cv.y + moveY * jd,
-      0, null, scl, true);
-    if (d) d.fadeIn = fd;
-    const w = game.spawnDust?.(x, y, 1, 1, 267,           // CloneDust 白影（:3509-3512）
-      cv.x + moveX * jd, cv.y + moveY * jd, 0,
-      { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
-    if (w) w.fadeIn = fd * 0.75;
+    // ★BJ704-G2（2026-10-21,债② 清偿）：源尘双修——
+    //  ① 校色（:3496）：newColor = hslToRgb((num3+rand×0.12)%1, 1, 0.4+rand×0.25)
+    //   【2 掷先于一切】直入 NewDust 染色参（旧 color=null 丢色丢掷=掷序整段错位）。
+    //  ② 后置写（:3497-3502）：NewDust(…, 0f, 0f, 0, newColor) 速度/scale 形参走
+    //   缺省 0/1（池内 ±2 速抖/±2% 比例抖被覆写消解）,velocity=circular(1,1)+
+    //   MovementVector×NextFloatDirection×0.5、noGravity、scale=.6+.9r、fadeIn=.7+.8r
+    //   逐字段后置（旧走 spawn 形参=抖动叠加在终值上,±2 速抖 vs |v|≤~1.1 量级可见）。
+    //  掷序（fx 流;池流另账）：color 2 → [NewDust 池掷] → circular 2 → dir 1 →
+    //   scale 1 → fadeIn 1（原文 :3496-3502 逐位）。
+    //  CloneDust（:3505-3508）白影 BJ703-B D3 已接 cloneDust 钩（scale/2、
+    //  fadeIn×0.75、白）;钩随源尘后置写同步镜像精确值。
+    const [cr2, cg2, cb2] = orchestraHsl255((hueBase + rng() * 0.12) % 1, 1, 0.4 + rng() * 0.25);
+    const d = game.spawnDust?.(x, y, 1, 1, 267, 0, 0, 0,
+      { r: cr2, g: cg2, b: cb2, a: 255 }, 1);
+    const cv = circ(rng, 1);                              // :3498 NextVector2Circular(1,1)
+    const jd = (rng() * 2 - 1) * 0.5;                     // :3499 NextFloatDirection×0.5
+    const scl = 0.6 + rng() * 0.9;                        // :3501 scale
+    const fd = 0.7 + rng() * 0.8;                         // :3502 fadeIn
+    if (d) {
+      d.vx = cv.x + moveX * jd;                           // :3498-3499 后置写（精确值）
+      d.vy = cv.y + moveY * jd;
+      d.noGravity = true;                                 // :3500
+      d.scale = scl;                                      // :3501
+      d.fadeIn = fd;                                      // :3502
+    }
+    // ★BJ703-B D3（2026-10-21）：白影改走 cloneDust 全字段拷贝（:3505-3508 →
+    //  Dust.cs:265-288,BJ700-D/WhipProj 915 范式）——旧手工 spawnDust 重掷克隆,
+    //  速度 ±2/scale ±2%/帧变体三独立抖动近似（位置 w=h=1 同 +4 无偏）;钩=源尘
+    //  精确镜像,掷数同耗（clone 内部 spawn 7 掷=旧手搓同数,掷流零扰动）。
+    if (d) {
+      const w = game.cloneDust?.(d);
+      if (w) {
+        w.scale /= 2;                                  // :3506 dust.scale /= 2f
+        w.fadeIn *= 0.75;                              // :3507 dust.fadeIn *= 0.75f
+        w.color = { r: 255, g: 255, b: 255, a: 255 };  // :3508 new Color(255,255,255,255)
+      }
+    }
   }
 }
 
@@ -1014,14 +1045,29 @@ export function stardustPunchFx(
     const df = (0.5 + rng() * 0.5) * 1.4;
     const scl = 0.6 + rng() * 2;
     const pc = circ(rng, 16);
-    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267,
-      cv.x + moveX * df, cv.y + moveY * df, 0, hexToRgbArr(hueC), scl);
-    if (d) d.noGravity = true;
+    // ★BJ704-G2（债② ②族）：后置写（:3446-3451）——NewDust 形参速度/scale 缺省
+    //  0/1,velocity=circular(2,2)+move 因子、noGravity、scale=.6+2r、position+=
+    //  circ(16,16) 逐字段后置（旧 spawn 形参=池内 ±2 速抖/±2% 比例抖叠加终值）。
+    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, 0, 0, 0,
+      hexToRgbArr(hueC), 1);
+    if (d) {
+      d.vx = cv.x + moveX * df;                           // :3447-3448 后置写（精确值）
+      d.vy = cv.y + moveY * df;
+      d.noGravity = true;                                 // :3449
+      d.scale = scl;                                      // :3450
+    }
     // ★⑥清偿（2026-09-02）：CloneDust 白影整粒补（:3454-3458 与 princessWeapon :3404-3408
-    //  全同构：scale=源/2、fadeIn=源×0.75（源 fadeIn=0→0）、color 白、零掷）——曾缺
-    const w = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267,
-      cv.x + moveX * df, cv.y + moveY * df, 0, { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
-    if (w) w.noGravity = true;
+    //  全同构：scale=源/2、fadeIn=源×0.75（源 fadeIn=0→0）、color 白、零掷）——曾缺。
+    //  ★BJ703-B D3（2026-10-21）：改走 cloneDust 钩（真·CloneDust 全字段拷贝,源尘
+    //  精确镜像;旧手工 spawnDust 重掷=速度/scale/帧变体三独立抖动近似）。
+    if (d) {
+      const w = game.cloneDust?.(d);
+      if (w) {
+        w.scale /= 2;                                  // :3455 dust.scale /= 2f
+        w.fadeIn *= 0.75;                              // :3456 dust.fadeIn *= 0.75f
+        w.color = { r: 255, g: 255, b: 255, a: 255 };  // :3457 new Color(255,255,255,255)
+      }
+    }
   }
 }
 
@@ -1042,10 +1088,10 @@ export function princessWeaponFx(
   const pre = 0.6 + rng() * 0.35;                        // vector 因子（:3363，pre-0.66 量——Accel 消费此量）
   const mf = pre * 0.66;                                 // :3374 终值覆写
   const scale = rng() * 0.4 + 0.2;                        // vector2 ∈[0.2,0.6]（:3364）
-  const fAng = rng() * Math.PI * 2;                      // f（:3365=活值！Velocity 角向,曾误标死掷）
-  const amp = 0.1 * scale;                               // vector3=0.1×vector2（:3366）
-  const vxp = moveX * mf + Math.cos(fAng) * amp;
-  const vyp = moveY * mf + Math.sin(fAng) * amp;
+  const fAng = rng() * Math.PI * 2;                      // f（:3365 掷照常——★BJ704-R12 P2-3 勘正:Velocity 角向项被 :3374/:3385 终值覆写=死值,旧注「活值」系假信念;F-9 的死掷判定反而正确）
+  const amp = 0.1 * scale;                               // vector3=0.1×vector2（:3366,同被覆写=死值）
+  const vxp = moveX * mf;                                // :3374 终值=vector×0.66（角向不参与）
+  const vyp = moveY * mf;
   const off = circ(rng, 8);                               // ★C2：NextVector2Circular(8,8)（:3367）单掷共享
   const px = x + off.x * scale, py = y + off.y * scale;
   // ★accel 接线（2026-09-02 收尾）：原版 :3376 AccelerationPerFrame=−vector/60（pre-0.66 量）
@@ -1077,12 +1123,28 @@ export function princessWeaponFx(
     circ(rng, 2);                                        // ★F-9 死掷（原版 :3396 Circular(2,2) 速度被 :3401 覆写）
     rng();                                               // ★F-9 死掷（原版 :3397 move 因子 (0.5+0.5r)×1.4 同被 :3401 覆写）
     const pc = circ(rng, 16);
-    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, moveX, moveY, 0,
-      hexToRgbArr(hueC), 0.1);
-    if (d) { d.noGravity = true; d.fadeIn = 0; }
-    const w = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, moveX, moveY, 0,
-      { r: 255, g: 255, b: 255, a: 255 }, 0.1 / 2, true);
-    if (w) { w.noGravity = true; w.fadeIn = 0; }          // CloneDust 全字段复制（源 fadeIn=0）
+    // ★BJ704-G2（债② ②族）：后置写（:3395-3401）——NewDust 形参缺省,velocity
+    //  终值=MovementVector 覆写、scale=0.1 常量逐字段后置（旧 spawn 形参=池内
+    //  ±2 速抖/±2% 比例抖叠在终值上）。fadeIn NewDust 已置 0（旧显式写冗余摘除）。
+    const d = game.spawnDust?.(x + pc.x, y + pc.y, 1, 1, 267, 0, 0, 0,
+      hexToRgbArr(hueC), 1);
+    if (d) {
+      d.noGravity = true;                                // :3398
+      d.scale = 0.1;                                     // :3399（常量,非掷）
+      d.vx = moveX;                                      // :3401 终值覆写（精确值）
+      d.vy = moveY;
+    }
+    // ★BJ703-B D3（2026-10-21）：白影改走 cloneDust 钩（:3404-3407 → Dust.cs:265-288,
+    //  BJ700-D 范式）——旧手工 spawnDust 重掷克隆速度/scale/帧三独立抖动近似;
+    //  钩=源尘精确镜像（源 fadeIn=0 → ×0.75 仍 0,noGravity 随拷）。
+    if (d) {
+      const w = game.cloneDust?.(d);
+      if (w) {
+        w.scale /= 2;                                  // :3405 dust.scale /= 2f
+        w.fadeIn *= 0.75;                              // :3406 dust.fadeIn *= 0.75f（0×0.75=0）
+        w.color = { r: 255, g: 255, b: 255, a: 255 };  // :3407 new Color(255,255,255,255)
+      }
+    }
   }
 }
 
@@ -1859,10 +1921,27 @@ export function rainbowBoulderFx(
     const fd = 0.7 + rng() * 0.8;
     const d = game.spawnDust?.(x, y, 1, 1, 267,
       cv.x + moveX * jd, cv.y + moveY * jd, 0, hexToRgbArr(hueC), scl);
-    if (d) { d.noGravity = true; d.fadeIn = fd; d.noLight = true; d.noLightEmittance = true; }
-    const w = game.spawnDust?.(x, y, 1, 1, 267,          // CloneDust 白影（:1647-1652）
-      cv.x + moveX * jd, cv.y + moveY * jd, 0, { r: 255, g: 255, b: 255, a: 255 }, scl / 2, true);
-    if (w) { w.fadeIn = fd * 0.75; w.noLight = true; w.noLightEmittance = true; }
+    if (d) {
+      // ★BJ704-R12 P2-2：velocity/scale/fadeIn 逐字段后置写（vanilla :1633-1638 形,
+      //  G2 三站同款第 4 站——spawn 形参走池会叠 ±2 速抖/±2% 比例抖,后置=精确终值）
+      d.vx = cv.x + moveX * jd;
+      d.vy = cv.y + moveY * jd;
+      d.scale = scl;
+      d.noGravity = true; d.fadeIn = fd; d.noLight = true; d.noLightEmittance = true;
+    }
+    // ★BJ703-B D3（2026-10-21）：白影改走 cloneDust 钩（:1643-1648 → Dust.cs:265-288,
+    //  BJ700-D 范式,旧手工 spawnDust 重掷=速度/scale/帧三独立抖动近似）。
+    //  noLight 随源拷（:279）;noLightEmittance【不在】CloneDust 字段表（:273-286）
+    //  ——原文 :1648 克隆后显式重置,同相后置写。
+    if (d) {
+      const w = game.cloneDust?.(d);
+      if (w) {
+        w.scale /= 2;                                  // :1644 dust.scale /= 2f
+        w.fadeIn *= 0.75;                              // :1645 dust.fadeIn *= 0.75f
+        w.color = { r: 255, g: 255, b: 255, a: 255 };  // :1646 new Color(255,255,255,255)
+        w.noLight = true; w.noLightEmittance = true;   // :1647-1648（emittance 非拷贝字段,显式重置）
+      }
+    }
   }
 }
 

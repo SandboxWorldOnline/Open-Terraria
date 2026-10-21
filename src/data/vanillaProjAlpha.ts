@@ -195,7 +195,7 @@ export function projConstFullbright(id: number): boolean {
  *  精确——cR=1 时单笔 ga=cA ≡ XNA,勿双入队）/ 非 fixed·fixedfade·afade kind /
  *  off / 无 rgba。消费面 = Arrow.draw capture（recording-ctx）→ flush 双通道
  *  replay：erase 全流 comp 强制 destination-out（ga 取流内值=GetAlpha A 折面）+
- *  add 全流 comp 强制 lighter、img→tintedTex(flatten)、ga=addGa（fixed=1/
+ *  add 全流 comp 强制 lighter、img→tintedTex(flatten=false 保形,BJ700-C)、ga=addGa（fixed=1/
  *  fixedfade=(1−α/255)/afade=1——addGa 承 rgb 侧 fade,erase ga 承 A 侧,XNA
  *  One/InvSrcAlpha 两因子分离逐字节, BJ547 核心笔/dustPremulBake 判例域）。 */
 export function projConstTint(id: number): readonly [number, number, number, number] | null {

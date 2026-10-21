@@ -132,7 +132,7 @@ export class MeteorChunk extends Entity {
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;                              // penetrate -1:穿过不消亡
       // Damage_EVP：1078 生成值 50/40/35 是基础（WorldGen.cs:71798-71806），命中再过乘区×2
-      game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域旗(直调面进 modifyHitPlayerByProj 链;旧两链皆不进)
+      game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 1078 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
       p.buffs.apply(BuffType.OnFire, (300 + Math.floor(Math.random() * 301)) / 60);  // :11456
     }
     hitTownNpcs(this, game, dmg, Math.sign(this.vx) * 5);

@@ -163,7 +163,7 @@ async function _getZipManifest() {
   if (_zipManifest) return _zipManifest;
   const cache = await getCache();
   let r = await cache.match('assets-zip/manifest.json').catch(() => null);
-  if (!r) { r = await fetch('assets-zip/manifest.json'); if (r.ok) try { cache.put('assets-zip/manifest.json', r.clone()); } catch {} }
+  if (!r) { r = await fetchAsset('assets-zip/manifest.json'); if (r.ok) try { cache.put('assets-zip/manifest.json', r.clone()); } catch {} }
   if (!r || !r.ok) return null;
   _zipManifest = await r.json();
   return _zipManifest;
@@ -176,7 +176,7 @@ async function zipExtract(path) {
     if (!entries.includes(path)) continue;
     const zipUrl = 'assets-zip/' + part.file;
     if (_zipName !== part.file || !_zipBuf) {
-      const r = await fetch(zipUrl);
+      const r = await fetchAsset(zipUrl);
       if (!r.ok) return null;
       _zipBuf = await r.arrayBuffer(); _zipName = part.file;
     }
@@ -220,7 +220,7 @@ async function serveAsset(req, path) {
   const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
   if (hit) return hit;
   try {
-    const res = await fetch(req);
+    const res = await fetchAsset(req);
     // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
     // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
     if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
@@ -238,13 +238,54 @@ async function serveAsset(req, path) {
       }
       return (await silentWarmMiss(req, path)) || new Response('', { status: 404 });
     }
-    cache.put(req, res.clone());
+    // ★BJ702（2026-10-21 线上实报）:fire-and-forget put 必 .catch 吸收——弱网
+    //   body 流中断时 put 抛 NetworkError=Uncaught(in promise) 控制台噪声(实报
+    //   三连发),与 shell 支 2026-09-24 修同款;响应本体照常返回,put 失败仅丢
+    //   一次缓存机会(下次 miss 重试)。
+    cache.put(req, res.clone()).catch(() => {});
     return res;
   } catch (err) {
     // ★fetch 瞬态失败(离线/闪断):二次 match 回退——期间可能有并发 put 落地
     const hit2 = await cache.match(req, { ignoreVary: true }).catch(() => null);
     return hit2 || Response.error();
   }
+}
+
+// ★BJ703-E 件2a（2026-10-21 BJ702 登记债 2 + 用户正面诉求「瞬断不会重试吗」）:
+//   shell 支网络路径黑洞窗收口。BJ702 根因②:worker 脚本/新 hash chunk 经 SW
+//   cache-first miss（新版本部署=全量新名冷缓存）→ respondWith 内 fetch 挂死
+//   （无超时无重试，无 onerror）→ 调用方只能干等自身超时（worker=3s 握手窗）。
+//   本包装只加在 shell 支的 fetch 调用上,缓存策略结构零变化:
+//   · 8s AbortController 超时——仅约束到响应头（finally 即清 timer,不碰 body 流）;
+//   · 单次重试——仅网络层失败/超时才走 catch（throw 才重试;404 等明确应答不重试）;
+//   · 两连败落回原 504 offline 路径。瞬断窗内重试成功 → 响应照常回填缓存:即便
+//     调用方已死（如被握手超时 terminate 的 worker）,脚本落缓存 ⇒ 下次 spawn
+//     cache-first 秒开,BJ702「刷新即好」的恢复面不再依赖刷新。
+function fetchShell(req) {
+  const attempt = () => {
+    if (typeof AbortController === 'undefined') return fetch(req);   // 老内核退化=原行为
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    return fetch(req, { signal: ctl.signal }).finally(() => clearTimeout(t));
+  };
+  return attempt().catch(attempt);
+}
+
+// ★BJ704-G8 F2（2026-10-21 BJ704-R6 P2 精选债2,703E 件2a 边界收口）:SW 内裸 fetch
+//   全量分级收口。BJ703-E 只裹了 shell 支常态路,R6 点名残余 7 处+本刀普查补齐同族
+//   3 处（真首访直通:323/主资产 miss 路:403/warm 单文件:477——自带重试×3 但无超时,
+//   黑洞=单 lane 永挂+warm running 恒真堵重入）。域分级（导航 vs 资产）:
+//   · 导航类（doc 两处）=fetchShell 同款（8s 超时+单次重试）——整页加载挂死风险
+//     最高,重试代价一次性;
+//   · 资产类（其余全部）=本包装:8s 超时兜底【单发不重试】——消费方（Image
+//     onerror 退避链/warm 轮询重试）自有恢复面,SW 级重试会在黑洞窗把并发 N 图
+//     放大成 2N 发请求风暴;超时 throw 落各分支既有 catch（离线回退/404 兜底）,
+//     缓存策略结构零变化。超时锚 8000 与 fetchShell 双侧同步（改必同改）。
+function fetchAsset(req) {
+  if (typeof AbortController === 'undefined') return fetch(req);   // 老内核退化=原行为
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 8000);
+  return fetch(req, { signal: ctl.signal }).finally(() => clearTimeout(t));
 }
 
 self.addEventListener('fetch', (e) => {
@@ -273,7 +314,7 @@ self.addEventListener('fetch', (e) => {
         const hit = await modCache.match(req, { ignoreVary: true }).catch(() => null);
         if (hit) return hit;
       } catch { /* 存储不可用:直通 */ }
-      return fetch(req);
+      return fetchAsset(req);
     })());
     return;
   }
@@ -282,7 +323,7 @@ self.addEventListener('fetch', (e) => {
       const ver = await recoverVersion();
       const cache = ver ? await caches.open(CACHE_PREFIX + ver).catch(() => null) : null;
       try {
-        const res = await fetch(req);
+        const res = await fetchShell(req);   // ★BJ704-G8 F2:导航类=超时+单次重试(挂死整页→16s 有界+离线缓存回退)
         if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch (err) {
@@ -296,9 +337,9 @@ self.addEventListener('fetch', (e) => {
   if (assetish && !currentVersion) {
     e.respondWith((async () => {
       const ver = await recoverVersion();
-      if (!ver) return fetch(req);            // 无任何版本缓存(真首访)→ 网络
+      if (!ver) return fetchAsset(req);            // 无任何版本缓存(真首访)→ 网络(超时兜底)
       const res = await serveAsset(req, path);
-      return res ?? fetch(req);
+      return res;                                  // ★BJ704-G17:?? 双保险死支已删(serveAsset :218-252 全返回路径恒 Response,直读核验)
     })());
     return;
   }
@@ -309,25 +350,11 @@ self.addEventListener('fetch', (e) => {
   //       新版本经 index.html(文档仍网络优先)引用新哈希名自然更新,不存在
   //       "更新卡壳":2026-08-13 的顾虑基于当时未依赖纯哈希寻址,现 /assets/
   //       下全部为内容寻址名,旧条目随版本换代(gcOldCaches)自然清理。
-  //    b) 文档(index.html 等):网络优先+离线回退——版本发现入口,语义不变。
+  //    b) 文档(index.html 等):网络优先+离线回退——版本发现入口,语义不变
+  //       (唯一承载=上方 isDocPath 支;G17 前此处另有同式 isDoc 支,doc 提前后不可达已删)。
   const isShellJs = /^\/assets\/.+\.(js|css|woff2?)$/.test(path);
-  const isDoc = req.destination === 'document' || path === '/' || path.endsWith('.html');
-  if (isDoc) {
-    e.respondWith((async () => {
-      let cache = null;
-      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通(同 shell 支 2026-09-24 修) */ }
-      try {
-        const res = await fetch(req);
-        if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
-        return res;
-      } catch (err) {
-        const hit = cache ? await cache.match(req, { ignoreVary: true }).catch(() => null) : null;
-        if (hit) return hit;
-        throw err;
-      }
-    })());
-    return;
-  }
+  // ★BJ704-G17 删码面:旧 isDoc 支(≡ :321 isDocPath 同式判定)在 2026-09-29 doc
+  //  无条件提前后结构性不可达,整支移除——文档处理唯一权威=上方 isDocPath 支。
   if (isShellJs) {
     e.respondWith((async () => {
       // ★2026-09-24 修「部分机器新版本 504 offline 强刷无用」:①getCache 失败
@@ -342,7 +369,7 @@ self.addEventListener('fetch', (e) => {
         if (hit) return hit;
       }
       try {
-        const res = await fetch(req);
+        const res = await fetchShell(req);   // ★BJ703-E 件2a:超时+单次重试(见函数注)
         if (res && res.ok && mimeOk(path, res) && cache) cache.put(req, res.clone()).catch(() => {});
         if (res) return res;   // 非 ok(404 等)直通不缓存
       } catch (err) { /* 离线且无缓存 → 504 */ }
@@ -358,8 +385,9 @@ self.addEventListener('fetch', (e) => {
     e.respondWith((async () => {
       const cache = await getCache();
       try {
-        const res = await fetch(req);
-        if (res && res.ok && res.type === 'basic' && mimeOk(path, res)) cache.put(req, res.clone());
+        const res = await fetchAsset(req);   // ★BJ704-G8 F2:资产类=超时兜底(瞬断/挂死→离线缓存回退)
+        // ★BJ702:put NetworkError 必 .catch(同 shell 支 2026-09-24;l10n 回填非关键路径)
+        if (res && res.ok && res.type === 'basic' && mimeOk(path, res)) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch (err) {
         const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
@@ -375,7 +403,7 @@ self.addEventListener('fetch', (e) => {
     const hit = await cache.match(req, { ignoreVary: true });
     if (hit) return hit;
     try {
-      const res = await fetch(req);
+      const res = await fetchAsset(req);   // ★BJ704-G8 F2:资产类=超时兜底(挂死→8s→二次 match 回退/Response.error)
       // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
       // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
       if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
@@ -384,7 +412,8 @@ self.addEventListener('fetch', (e) => {
         }
         return (await silentWarmMiss(req, path)) || new Response('', { status: 404 });
       }
-      cache.put(req, res.clone());
+      // ★BJ702:put NetworkError 必 .catch(同 shell 支 2026-09-24;miss 重试语义不变)
+      cache.put(req, res.clone()).catch(() => {});
       return res;
     } catch (err) {
       // ★fetch 瞬态失败(离线/闪断):二次 match 回退——期间可能有并发 put 落地
@@ -448,7 +477,7 @@ async function warm(tag, urls, base) {
         for (let attempt = 0; attempt < 3 && !ok; attempt++) {
           if (warmAbort) return;
           try {
-            const res = await fetch(u);
+            const res = await fetchAsset(u);   // ★BJ704-G8 F2:超时兜底单发——挂死 8s→throw 落本循环既有重试/退避,不再单 lane 永挂堵死 warm 重入
             if (res && res.ok && mimeOk(u, res)) { await cache.put(u, res); ok = true; }
             else if (attempt === 2) failed++;
           } catch (err) {

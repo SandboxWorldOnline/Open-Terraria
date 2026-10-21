@@ -12,6 +12,8 @@ import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
+import { spawnNpcHitDust } from './NpcHitDust';   // ★BJ704-G10（R2-F5）：614 stuck 每 30t HitEffect(0,1.0) 血尘脉冲（type-only Enemy 依赖,无运行时环）
+import type { Enemy } from './Enemy';
 import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';   // ★BJ467⑦ flag3 usesIDStatic 排除面（SetDefaults 三旗提取表）
 import { resolveWhipTagHit, SUMMON_TAG_MUL, darkHarvestChain } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk, ghostHealProc } from './SpectreSoulProj';
@@ -25,13 +27,14 @@ import { LIQUID_TYPE } from '../world/TileStore';
 import { LCG32 } from '../fx/LightningGenerator';
 import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
+import { gameTickCount } from '../core/GameTime';   // ★BJ704-G10：idStaticCheck 墙钟→GTW tick 钟（G1 债②,MinionProj.IdStaticBucket 同源）
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { PROJ_ALPHA_MOD, projConstFullbright, projConstTint, projLerpLiftK, type ProjAlphaMod } from '../data/vanillaProjAlpha';
-import { tintedTex } from '../render/StringLine';   // ★BJ-C9 F4：tint 档 add 面烘焙（flatten=true）
+import { tintedTex } from '../render/StringLine';   // ★BJ-C9 F4：tint 档 add 面烘焙（flatten=false 保形,BJ700-C）
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
 // （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
-import { ProjGhostRing, drawProjGhosts, drawGreenBandTrail, projTrailingMode, notifyProjSpriteOverride } from './projGhostTrail';
+import { ProjGhostRing, drawProjGhosts, drawGreenBandTrail, projTrailingMode, notifyProjSpriteOverride, onProjSpriteOverride } from './projGhostTrail';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -152,8 +155,8 @@ import projFramesJson from '../data/vanilla-projframes.json';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ZAPPING_JELLYFISH, jellyZapProjectile } from '../player/SwingPathMath';
 import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vanillaGemStaff';
-import { projGravSpec } from '../data/vanillaItemCombat';
-import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { projGravSpec, itemCombat } from '../data/vanillaItemCombat';   // ★G11 件5a：itemCombat=630 stealth 档手持远程活查
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../data/items';   // ★G11 件5a：ITEM_DEFS=heldVid 解析（630 stealth 档）
 import { GorePiece } from './GorePiece';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面（BJ260/285 同款前置习语）
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
@@ -588,6 +591,21 @@ function whiteSpriteOf(
   return c;
 }
 
+// ★BJ704-G10（R2-F3,清偿 C2/R5-F2 半修遗留）：Arrow 侧三模块级烘焙缓存接
+//  setProjSpriteOverride 失效通知（MinionProj GLOW864_CACHE :11527 接线式同款——
+//  注册表习语零新边）——素材包热换后旧白模/旧染色永驻三病同根：
+//  · whiteSpriteCache（键 `projId|frame`,phoenixQuiver/seraph 白箭）——按 id 前缀
+//    精确失效;
+//  · flameTintCache（键 `projId|rgb`,85/1106 火舌双层调色）——同前缀式;
+//  · fqwTintCache（键=纯 rgb 无 projId,唯一消费面 932 彩虹乘色）——无法按 id
+//    选择性失效,任意覆盖即整体清（过清无害:确定性烘焙,下次按需重烘）。
+onProjSpriteOverride((projId) => {
+  const prefix = `${projId}|`;
+  for (const k of whiteSpriteCache.keys()) if (k.startsWith(prefix)) whiteSpriteCache.delete(k);
+  for (const k of flameTintCache.keys()) if (k.startsWith(prefix)) flameTintCache.delete(k);
+  fqwTintCache.clear();
+});
+
 export interface ArrowOpts {
   /** 重力/tick（aiStyle1/2 = 0.3；直飞魔法弹传 0）。默认 0.3 */
   grav?: number;
@@ -648,7 +666,10 @@ export interface ArrowOpts {
   ai0?: number;
   /** 496 暗影炎箭 ai[1]（aiStyle 91 摆动 Y 加速,NewProjectile 尾参 Projectile.cs:
    *  47989;Game 3053 施法支按原版掷序注入 ±Next(10,80)×0.001,精确发恒 0——
-   *  Arrow.ts 496 AI 支每子步 v+=ai1×1.5、ai1×1.05 消费） */
+   *  Arrow.ts 496 AI 支每子步 v+=ai1×1.5、ai1×1.05 消费）。
+   *  ★BJ704-G10（件10）双槽复用：459 充能爆破炮弹 ai[1] 蓄压档（NewProjectile
+   *  尾参 num35=0.7+num20×0.3 ∈{0.7,1.0,1.3} :67574——PrismProj ChargedBlaster
+   *  注入,subStepAI 459 支 Clamp(0.7,1.6) 消费;两消费面各在 projId 门内零互扰） */
   ai1?: number;
   /** X 轴空气阻力/tick（aiStyle 2 投掷族默认档 ×0.97，Projectile.cs:21969） */
   drag?: number;
@@ -773,15 +794,62 @@ interface PiranhaTarget {
  *    spriteDirection=sign(vx)——右向贴图镜像语义同族;旧缺省支 atan2+π/2=弹头恒偏 90°） */
 //  1001 无头骑士南瓜弹（★BJ643①：AI_194 :42055-42056 rotation=velocity.ToRotation()+
 //    spriteDirection=(!(vx<0))?1:-1——同族逐帧速度角+左飞镜像;旧 Dart 直飞桶无姿态面）
-const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485, 1026, 1001]);
+const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485, 1026, 1001, 408,
+  // ★BJ703-B D2（2026-10-21）435/682 入族——AI_001 尾分派 :58622-58627
+  //  `type==435||459||682||709 → rotation=ToRotation()+(direction==-1?π:0)`
+  //  + 专属块 spriteDirection=direction（435 :55886/682 :55922）→ 与 408 同式
+  //  朝右贴图+左飞水平镜像（贴图物证:34×16/帧 横向闪电锯齿带,61-90% 非对称）。
+  //  曾落缺省支 ang+π/2 = 恒 90° 横转且永不镜像。
+  //  ★BJ704-G2（2026-10-21,债① 459 员）：459 载体勘误——充能爆破炮小弹在仓内
+  //  即【Arrow 载体】（PrismProj.ts ChargedBlaster fire → new Arrow(...,459,...),
+  //  非「专属实体」）,ghost 环本就在记录/绘制面（不在 GHOST_RECORD_EXCLUDE）;
+  //  缺面=姿态——AI_001 459 专属块 :55621 同写 spriteDirection=direction +
+  //  尾分派 RIGHT 族 → 本体/ghost 双面随族（D2 同刀式）。★BJ704-G2 登记债已随
+  //  ★BJ704-G10（2026-10-21）清偿：AI_001 459 块余面落模（scale=ai[1] 三档蓄压
+  //  :55632-55635 + 判定盒 (int)(22×scale) + ghost 环 end=(int)(scale×8)/step
+  //  端 + 3 帧循环 :55622-55631（ghost 帧锚恒 0=登记② 维持）+ 尘 226/点光/
+  //  ≥0.85 档 penetrate=−1 :55640-55648——发射侧 PrismProj 注入 ai1 三档;
+  //  α−30 无视觉面（GetAlpha 恒 (255,255,255,200) 不读,保持 α=0——ghost
+  //  bodyAlpha=(255−α)/255 通道依赖 α≡0 勿建模）,见 subStepAI 459 支。
+  435, 682, 459]);
+/** ★BJ703-B D2：mode0 ghost 姿态随 RIGHT 族的成员集（bodyRot=ang+(vx<0?π:0)+
+ *  mirror=vx<0——ghost 调用位单点消费;mode2/3/4 成员不入:其 ghost 角走槽 rot、
+ *  翻转走 dir 基底互不掺混）。408 BJ700-A 首例,435/682 本刀扩员。
+ *  ★BJ704-G2：459 扩员（ghost 环既有,姿态随族点亮）。
+ *  ★BJ704-G10（2026-10-21,R2-F2）：1026 扩员——藤堡弹 mode0 ghost
+ *  （GHOST_PARAMS P(8,0,-2,0.5)）+ AI_028 :26943-26944 `spriteDirection=
+ *  sign(vx); rotation=ToRotation()+(spriteDirection==−1?−π:0)` 与 408/435/682
+ *  同式（BJ582② 已入 PROJ_ROT_RIGHT,本刀补 ghost 面）。★旧注「GHOST_PARAMS
+ *  全族∩特判旋转集=空（BJ375 普查）」自 BJ582②（1026）起即为假——交集即本集
+ *  {408,435,459,682,1026},随迁勘正（见 draw ghost 调用位同款注）。 */
+const PROJ_GHOST_MIRROR0 = new Set([408, 435, 682, 459, 1026]);
+export { PROJ_GHOST_MIRROR0 };
+// ★BJ700-A 2026-10-20「暴风雨法杖迷你鲨鱼龙贴图方向不对」：408 入族——
+//   AI_001 尾 rotation 分派 Projectile.cs:58616-58621 `ToRotation() +
+//   (direction == -1 ? π : 0)` + :55962-55967（408 专属块尾 spriteDirection =
+//   direction）；direction 由 Update :17122-17130（AutomaticallyChangesDirection
+//   :17387——aiStyle 1 不在排除表）每拍 `vx<0 ? -1 : 1` 维护 → 朝右贴图+左飞
+//   水平镜像（837/270 族 :58574-58581 同型;DrawProjDirect Main.cs:30530-30534
+//   FlipHorizontally+通用绘制 :30606 R(rotation)∘M）。曾落缺省支 ang+π/2
+//   恒不镜像 = 左飞上下颠倒/右飞横转 90°（用户实报）。
 
-/** aiStyle 27 剑气族（AI_027 尾部 :24858-24861：rotation = atan2(vy,vx) + 0.785
+/** aiStyle 27 剑气族（AI_027 尾部 :26909-26911：rotation = atan2(vy,vx) + 0.785f
  *  = 速度角 + 45°，斜向剑气贴图）——曾走默认 +π/2 恒偏 45°（用户报"附魔剑
  *  光束角度偏"）。成员：114 邪恶三叉戟弹(683)/115 敌侧/116 光束剑波(723)/
  *  132 泰拉刃波/156 光束/173 附魔剑波(989)。例外 157 夜波=direction×0.4 旋转体
- *  （1.4.5 已无武器射出，未移植登记） */
-const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173, 660, 451]);   // 451 涌流剑 rotation=vel+π/4（:31594/:31636）
-export { PROJ_ROT_DIAG };
+ *  （1.4.5 已无武器射出，未移植登记）。
+ * ★BJ704-G11（件4,G10 字面卫生登记债清偿）：原 PROJ_ROT_DIAG 混集按【原文字面】
+ *  拆二——本集字面 0.785f（f32 ≈0.78500003,对 π/4=0.78539816 残差 0.0004rad,
+ *  视觉无感但字面纪律逐位对齐;Dart 'a45' 同锚已 1:1）。 */
+const PROJ_ROT_DIAG_0P785 = new Set([114, 115, 116, 132, 156, 173]);
+/** +45° 族 π/4 字面支：660 天界碎裂 = AI_001 尾分派 :58632-58634
+ *  `ToRotation()+MathF.PI/4f`;451 涌流剑 = AI_081 :31582/:31633 同字面
+ *  （AI_081 族 aiStyle 81,锚=Projectile.cs 非 Main.cs——旧注 :31594/:31636 系
+ *  Main.cs 残号勘误）。660 残影拖尾同字面（draw 660 支 ang+π/4 直书,本表不消费）。 */
+const PROJ_ROT_DIAG_PI4 = new Set([660, 451]);
+/** 兼容并集（tests/proj-rotation 旧锚消费;新消费位一律用上方二集按字面分派） */
+const PROJ_ROT_DIAG = new Set([...PROJ_ROT_DIAG_0P785, ...PROJ_ROT_DIAG_PI4]);
+export { PROJ_ROT_DIAG, PROJ_ROT_DIAG_0P785, PROJ_ROT_DIAG_PI4 };
 
 /** 贴图【朝下】族（AI 尾显式 rotation = velocity.ToRotation() − π/2——减号对齐
  *  下向贴图；曾走默认 +π/2 = 整差 180°,左飞弹视觉朝右=用户实报"幻影弓影子箭
@@ -790,6 +858,29 @@ export { PROJ_ROT_DIAG };
  *  行覆盖 629/631 两型）但本仓 0 消费面且贴图空,登记不入集。 */
 const PROJ_ROT_DOWN = new Set([631]);
 export { PROJ_ROT_DOWN };
+
+/** ★BJ700-A 2026-10-20「撒旦军队标枪方向不对」：662/685 DD2 敌对标枪（T1/T3）——
+ *  AI_001 尾分派 Projectile.cs:58626-58629 `rotation = velocity.ToRotation() −
+ *  π − π/4`（662||685 同支；AI 全程无 spriteDirection 写=永不翻转——507/508/662/
+ *  680/685 家族块 :58453-58460 只做 ai[0]>60 后 vx×0.98+vy+0.3）。贴图固有朝向
+ *  225°（左上矛头,Projectile_662.png 像素物证：42×42 对角条,宽刃尖在 TL）→
+ *  绘出恒 = 速度向。曾落缺省支 ang+π/2 恒偏 45°（用户实报）。685=同支 T3 随刀。 */
+const PROJ_ROT_NW = new Set([662, 685]);
+export { PROJ_ROT_NW };
+
+/** ★BJ700-A：恒帧 0 族——projFrames>1 但 AI 全程无 frameCounter/frame 推进支
+ *  （原版 frame 恒 0,第二帧行闲置）。408：Main.projFrames[408]=2（Main.cs:8662）
+ *  而 AI_001 的 408 专属块 :55960-55967 只写 alpha/spriteDirection,帧推进支
+ *  （:55978-55988）属 275/276——通用 age/5 翻帧档对其=伪影（每 5t 在双鲨帧间
+ *  闪跳）。注意 ghost 面 frameRow 'n408'（projGhostTrail.ts,:30655-30657 行+1
+ *  专属）不读本帧号,与本钉互不影响。 */
+const PROJ_FRAME_STATIC0 = new Set([408,
+  // ★BJ704-G10（2026-10-21,R2-F4）614 扩员——星尘细胞弹 AI_113（TargetSticker
+  //  :41289-41518）全程无帧推进：帧支仅 type 1024（:41307-41318 frameCounter>3
+  //  推帧）;stuck 态（ai[0]==1）显式 frame=0（:41395）。Main.projFrames[614]=4
+  //  （Main.cs:8634）→ 通用 age/5 翻帧档=伪影（飞行期 4 帧闪跳,原版恒帧 0）。
+  614]);
+export { PROJ_FRAME_STATIC0 };
 
 /** ★BJ489 def-3（2026-10-04）通用环掷率路由集：Game.ts spawn 位 `X.critChance =
  *  critTotal` 冻结载体退役的 Arrow 载体（190 食人鱼枪/304 吸血鬼飞刀/424-426 异星
@@ -959,8 +1050,10 @@ function createRecBodyCtx(rec: RecOp[]): { proxy: CanvasRenderingContext2D; comm
  *     （drawTableAlpha 已把 GetAlpha A 通道折进 globalAlpha:fixed=cA/fixedfade=cA·fade/
  *     afade=A 值）→ dst×(1−tex.a·A/255) 精确;
  *   pass2（add 面）：逐 drawImage 前强制 comp='lighter'+ga=addGa、img 替换
- *     tintedTex(img, cRGB, flatten=true)（透明 texel=不透明黑 lighter 加 0 无害,
- *     StringLine 注既证）→ += tex.rgb·cR·tex.a·addGa 精确。
+ *     tintedTex(img, cRGB, flatten=false)（★BJ700-C 勘误：保 alpha 形状——flatten=true
+ *     的 multiply 摊平把透明域填成不透明【染色底】非黑（canvas multiply αb=0 域
+ *     Co=Cs,αo=1,BJ371 判例）,'lighter' 全幅加 cRGB=白底大方块;保形后透明域
+ *     贡献 0、不透明域 → += tex.rgb·cR·tex.a·addGa 精确）。
  *  addGa（rgb 侧衰减因子,与 A 侧分离）：fixed/afade=1（rgb 恒定）;fixedfade=
  *  (1−α/255)（518 n 双折/969 Opacity——rgb=A 同折,erase ga 已含,add 面补 rgb 侧）。
  *  两放共同变换：set:globalCompositeOperation/set:filter 流内写面剔除（comp 强制/
@@ -982,7 +1075,11 @@ export function replayTintedFullbright(
         if (mode === 'add') {
           let baked = addImg.get(args[0]);
           if (baked === undefined) {
-            baked = tintedTex(args[0] as Parameters<typeof tintedTex>[0], rgb, true);
+            // ★BJ700-C：flatten=false 保 alpha 形状（BJ371 判例同刀）——flatten=true 的
+            //  multiply 摊平把透明域填成【不透明染色底】（canvas multiply αb=0 域
+            //  Co=Cs,αo=1,非黑 rgb 即整幅染色）,'lighter' 全幅加 cRGB = 白底大方块
+            //  （329 焰镰用户实报;8 站全透明域精灵,二值 α 语义保形精确）
+            baked = tintedTex(args[0] as Parameters<typeof tintedTex>[0], rgb, false);
             addImg.set(args[0], baked);
           }
           if (!baked) continue;                 // node 无 DOM=烘焙缺,add 面跳笔
@@ -1522,18 +1619,93 @@ function angleLerp(cur: number, target: number, amount: number): number {
 /** usesIDStaticNPCImmunity 共享免疫表（全场同型一张表,非每弹一张）：
  *  376 小鬼火球 cooldown 6t（SetDefaults :4612-4615）/ 604 孢子云 cooldown 10t
  *  （:6081-6082）——蓝队 R7-24：376 曾走逐弹 hitSet（N 只同拍对同敌 N 连击）。
- *  墙钟实现（窗口 ≤10t=167ms 短,暂停/掉帧偏移可忽略;惰性过期,>512 项时清扫） */
-const ID_STATIC_TABLES = new Map<number, Map<number, number>>();   // projType → (enemyId → 到期 ms)
-function idStaticCheck(projId: number, enemyId: number, cooldownMs: number): boolean {
+ *  ★BJ704-G10（G1 债②清偿,2026-10-21）：墙钟 Date.now 版（暂停期墙钟照走=已
+ *  登记近似）统一到 MinionProj.IdStaticBucket 同款 GTW tick 钟——gameTickCount()
+ *  （core/GameTime,Main.GameUpdateCount 等价,BJ330）绝对到期：写 count+cd /
+ *  门 ≤count（原版 perIDStaticNPCImmunity :14035-14037/:606-608 逐位同式）,
+ *  零驱动惰性过期;cd 单位=tick（376=6/余=10,原 100/167ms 换算基数退役）;
+ *  >512 项惰性清扫（先例沿用）。 */
+const ID_STATIC_TABLES = new Map<number, Map<number, number>>();   // projType → (enemyId → 到期 tick)
+/** ★BJ704-G14（件2①导出）：281 全场共享桶消费面扩到 TrapShot（Dart.ts 直接命中
+ *  环 + blastKill）——与 Arrow 281 爆弹（:5493 aoeCd281）共用同一张表 = 原版
+ *  perIDStaticNPCImmunity[281] 单表跨载体同相。
+ *  ★BJ704-G21 R8-F5（S2 拆相纪律补齐,proj1457.HitCdImpl R1-C 同构）：原版两相
+ *  =外环 flag2 表读 :12596（IsNPCIndexImmuneToProjectileType,无副作用）+ 受里面
+ *  写梯 :14031-14037——aoeCd281 duck 桥旧 peek=idStaticCheck 融合形（读时写）会让
+ *  充能水母（外环 zap 豁免过、内层 :12687 return 前的拒收拍）白写 10t 窗。拆出
+ *  纯读 idStaticReady / 写位 idStaticWrite;idStaticCheck 保持融合形（直击环/
+ *  blastDamage 消费面过门即结算,写前置≡写后置,零变化）。 */
+export function idStaticReady(projId: number, enemyId: number): boolean {
+  const m = ID_STATIC_TABLES.get(projId);
+  if (!m) return true;
+  return (m.get(enemyId) ?? 0) <= gameTickCount();
+}
+
+/** 写梯（:14031-14037 usesIDStatic 支——命中受理尾,拒收路径零落账;>512 惰性清扫同守） */
+export function idStaticWrite(projId: number, enemyId: number, cooldownTicks: number): void {
   let m = ID_STATIC_TABLES.get(projId);
   if (!m) { m = new Map(); ID_STATIC_TABLES.set(projId, m); }
-  const now = Date.now();
-  if ((m.get(enemyId) ?? 0) > now) return false;
-  m.set(enemyId, now + cooldownMs);
+  const now = gameTickCount();
+  m.set(enemyId, now + cooldownTicks);
   if (m.size > 512) {
     for (const [k, v] of m) if (v <= now) m.delete(k);
   }
+}
+
+export function idStaticCheck(projId: number, enemyId: number, cooldownTicks: number): boolean {
+  if (!idStaticReady(projId, enemyId)) return false;
+  idStaticWrite(projId, enemyId, cooldownTicks);
   return true;
+}
+
+/** ★BJ704-G14（件3 [g11-family-body-stealth-dim]）：八型族本体绘色减光共享求值器
+ *  （Main.cs:32623-32640——439/460/600/615/630/633/705/714 八型族 DrawProj 专属块）。
+ *  门 = 拥有者套装（shroomiteStealth=ArmorSetBonuses.cs:374 置位/equipStats.shroomiteSet
+ *  ∥ setVortex/equipStats.vortexSet）∧ 手持 item.ranged（draw 期活查）。两支（非互斥,
+ *  原文顺序串联）：
+ *   · shroomite :32625-32630 → projectileColor *= num282（max(stealth,0.03) 全通道乘）
+ *   · vortex    :32631-32640 → MultiplyRGBA(Lerp(One,(0,0.12,0.16,0),1−num283))
+ *  返回 { rgb: RGB 乘子(0..1), ga: A 乘子 }——α=255 起经 ×n / MultiplyRGBA(A=n) →
+ *  A=255n,默认 GetAlpha（A=newColor.A−α,α=0 族）保 A 乘子=n（G11 件5a overlay 同源
+ *  判例:Color×float 双因子）。null=门关（无套装/手持非远程）恒等不画。
+ *  逐员定谳（亲读族表）:439/460（2795/2882 magic 武器,手持 ranged 恒假）/600（3384
+ *  PortalGun 无 ranged 旗 + 仓内无 600 载体）/633（Last Prism magic + GetAlpha :80834
+ *  常量白整弃 projectileColor RGB）四员门死=销案;615/630/705/714 四员 ranged 可达=
+ *  消费本求值器（Celeb2Muzzle/Arrow 630/PhoenixBowProj）。 */
+export interface FamilyStealthDim { rgb: [number, number, number]; ga: number }
+export function familyBodyStealthDim(
+  p: unknown,
+): FamilyStealthDim | null {
+  if (!p) return null;
+  const pp = p as {
+    stealth?: number;
+    equipStats?: { shroomiteSet?: boolean; vortexSet?: boolean };
+    inv?: { heldItem?: () => { id?: number } | null };
+  };
+  const shroom = pp.equipStats?.shroomiteSet === true;
+  const vortex = pp.equipStats?.vortexSet === true;
+  if (!shroom && !vortex) return null;
+  // 手持远程活查（player.inventory[selectedItem].ranged :32624/:32631）
+  const held = pp.inv?.heldItem?.();
+  const heldDef = held != null && (held.id ?? -1) >= 0 ? ITEM_DEFS[held.id!] : undefined;
+  const vid = heldDef ? (heldDef.vid ?? -1) : -1;
+  if (vid < 0 || itemCombat(vid)?.ranged !== true) return null;
+  let rgb: [number, number, number] = [1, 1, 1];
+  let ga = 1;
+  if (shroom) {                                    // :32625-32630（×=num282）
+    const num282 = Math.max(0.03, pp.stealth ?? 1);
+    rgb = [num282, num282, num282];
+    ga = num282;
+  }
+  if (vortex) {                                    // :32631-32640（MultiplyRGBA lerp 色调）
+    const num283 = Math.max(0.03, pp.stealth ?? 1);
+    const t = 1 - num283;                          // Lerp(One, target, 1−n) 逐通道
+    rgb = [rgb[0] * (1 + (0 - 1) * t), rgb[1] * (1 + (0.12 - 1) * t), rgb[2] * (1 + (0.16 - 1) * t)];
+    ga = num283;
+  }
+  // 恒等变换（stealth=1 满档——原版乘 no-op）折 null：消费侧零烘焙零 globalAlpha 写
+  if (rgb[0] >= 1 && rgb[1] >= 1 && rgb[2] >= 1 && ga >= 1) return null;
+  return { rgb, ga };
 }
 
 /** 直立族：521 水晶脉冲/79 彩虹光弹。★R27 勘误：宝石法杖弹 121-126/597 曾被误入本表——
@@ -1927,6 +2099,16 @@ export class Arrow extends Entity {
   /** 485 扇翅帧（frameCounter≥2 推帧 5 帧循环，:54834-54843——draw 消费） */
   hwFrame = 0;
   private hwFrameT = 0;
+  // ---- ★BJ704-G10（件10,G2 登记债清偿）：459 充能爆破炮弹 AI_001 专属块
+  //      （:55615-55656）三档蓄压面——发射侧 PrismProj 注入 ai[1]（0.7/1.0/1.3,
+  //      NewProjectile 尾参 num35 :67574）;AI 每子步 Clamp(0.7,1.6) 后
+  //      scale=ai[1]、判定盒 (int)(22×scale) Center 锚定（:55632-55635）----
+  /** 459 ai[1] 蓄压档（AI 块消费;0=未注入档（外源直构）——首子步按 1 起步等价
+   *  原版 ai[1] 缺省 0 经 Clamp(0.7,1.6) 落 0.7——发射位恒注入,防御性兜底） */
+  ai1Scale459 = 0;
+  /** 459 帧机（frameCounter≥3 推帧 3 帧回卷 :55622-55631——draw/ghost 帧锚消费） */
+  f459Frame = 0;
+  private f459FrameT = 0;
   /** 477 水晶镖平滑姿态角（前 5 拍对齐速度角+π/2、之后 (rot×2+aim)/3，
    *  :58666-58676——draw 消费；null = 未初始化走默认档） */
   dartRot: number | null = null;
@@ -2342,8 +2524,18 @@ export class Arrow extends Entity {
   // ---- 喵刀弹 502（Meowmere Cat）专属态 ----
   /** 614 星尘细胞弹 ai[1]（AI_113_TargetSticker :41289-41330）：目标敌 id（发射侧
    *  MinionProj 注入,原版 NewProjectile 第 11 参 = num13 目标索引）——硬追踪/失的即杀/
-   *  命中匹配目标上 buff 183×900t（StatusNPC :11381-11383 `type==614 && ai[1]==i`） */
+   *  命中匹配目标上 buff 183×900t（StatusNPC :11381-11383 `type==614 && ai[1]==i`）。
+   *  ★BJ703-D3：命中拍由 :13244-13251 转刺入时覆写为【实际 victim】（先于 StatusNPC
+   *  :13634 ⇒ 183 gate ai1==i 读新靶——途中撞非目标敌同上 183） */
   stickerTgt = 0;
+  /** ★BJ703-D3（BJ698 登记债③）：614 ai[0] 镜像（0=追踪 / 1=stuck 刺入贴附）。
+   *  原版转刺入 = Damage_PVE_Inner :13244-13251 `aiStyle==113 ∧ ai[0]<2`（首受理
+   *  命中拍）;stuck 态贴附敌身零接触伤（Damage_CanDealDamage :12463 首行
+   *  `type==614∧ai[0]==1` 拒——本仓 AI 支早退承载）至 localAI[0]≥900
+   *  （60×num11=15,:41400/:41480）或靶亡/dontTakeDamage → Kill。 */
+  stickerA0 = 0;
+  /** ★BJ703-D3：614 localAI[0]（stuck 态驻留计数,:41429 逐拍 ++） */
+  stuckT614 = 0;
   /** ai[0]：弹跳+命中共享计数（0..5，≥5 消亡）——弹跳 :18169 递增/命中 :16794
    *  递增同槽（先到 5 者杀弹，喵叫音高 style=5+ai0 随之爬升） */
   meowCount = 0;
@@ -2511,8 +2703,9 @@ export class Arrow extends Entity {
   /** usesIDStaticNPCImmunity 组共享免疫键（非 null = 启用；511-513 毒云
    *  UseGroupStaticImmunity(511) :10678-10687——三型共用一张表,重叠不叠伤） */
   idStaticGroup: number | null = null;
-  /** 组共享免疫冷却 ms（idStaticNPCHitCooldown×50ms；毒云 10t=167ms） */
-  idStaticCdMs = 167;
+  /** 组共享免疫冷却 tick（idStaticNPCHitCooldown；毒云/蜂族/黄蜂 10t——★BJ704-G10
+   *  墙钟 ms 基数退役,GTW tick 钟,MinionProj.IdStaticBucket 同语义姊妹字段） */
+  idStaticCdTicks = 10;
   // ---- ★R29 幻象弓载体 630 / 追踪矢 631（红队 §1）----
   /** 630 载体控制面（Game 注入：channel 电平/瞄准点/volley 弹药解析;null = 非 630
    *  或敌侧来源）。行为块 = AI_001 type==630 支 Projectile.cs:68194-68295 */
@@ -2523,6 +2716,9 @@ export class Arrow extends Entity {
   private ph630VolleyCd = 0;
   /** 630 soundDelay 音效节拍器（首拍 ai0==1 豁免,Item_5 每 interval 拍） */
   private ph630SndCd = 0;
+  /** ★BJ704-G2（债③）：630 localAI[0] 枪口闪光计数（:68236 音拍置 12、:68225-68228
+   *  逐 update −1;可见窗 (0,6] → Extra_65 帧行 6−c∈[0,5],>6 钳顶行全透不可见） */
+  private ph630Flash = 0;
   /** 631 ai[0] 受害者（Enemy.id;−1 = 目标失效态） */
   ph631Tgt = -1;
   /** 631 ai[1] 错峰延迟（命中侧补刀三连 0/15/30——延迟期 velocity=Zero 定身） */
@@ -2765,6 +2961,14 @@ export class Arrow extends Entity {
   foxAi1 = 0;
   /** 448 火箭激活 */
   martianRocket = false;
+  /** ★BJ704-R3 P1②b 爆炸兔 281 ai[0] 镜像：-2=NPC 614 死亡爆弹形态（AI_049 头
+   *  :28651-28656 hostile+Kill 即灭,载荷全在 Kill case 281=bunnyBlastExplode）;
+   *  ≥0=物品投掷活兔跳跃态（兔炮 1338 弹药/物品面未实装=另刀）;−3=落定静默 Kill
+   *  （:18945-18960 ReleaseNPC 后,无爆无 FX） */
+  bunnyBlastForm = 0;
+  /** 281 ai[1] 镜像 = releaseOwner+1（NPC 出生来源）：1=玩家释放（爆炸可炸释放者
+   *  本人 :14873-77 ai[1]-1==myPlayer）;256=野兔（releaseOwner 255+1,不可炸玩家） */
+  bunnyOwner = 0;
   /** 沙球族（aiStyle 10，42/65/68/354）激活——ctor 按 SAND_BALL_PROJ 自动置位 */
   sandBall = false;
   // ---- 信号枪族（aiStyle 33，AI_033 :27425-27498 + 撞块贴壁 :18731-18745）----
@@ -2833,7 +3037,10 @@ export class Arrow extends Entity {
     // `grav: shooter.grav ?? 0` 对无 grav 键的 shooter 恒显式传 0 → 绕过规格链,
     // AI1_GRAV[1097]=[0.15,40]（:58255-58269 ai[0]≥40 后 vy+=0.15）在唯一生产路径
     // （Foxparks 1094/1113 射出）恒死键——显式 0 时回落规格链（显式非 0 的调用面不动）
-    if (projId === 1097 && gravExplicit && this.grav === 0) {
+    // ★BJ700-A（2026-10-20）同型扩员 408：MINION_SHOOT[407] 无 grav 键 →
+    //   shootMinionShot 显式 0 → AI1_GRAV[408]=[0.05,45]（:58346-58351 ai[0]≥45 后
+    //   vy+=0.05 缓坠）恒死键=鲨鱼龙直线飞不坠弧;回落规格链同式（407→408 唯一生产路径）。
+    if ((projId === 1097 || projId === 408) && gravExplicit && this.grav === 0) {
       this.grav = spec0.grav;
       this.gravDelay = opts?.gravDelay ?? spec0.delay;
     }
@@ -2942,6 +3149,10 @@ export class Arrow extends Entity {
       this.sf496Ai0 = opts?.ai0 ?? 0;
       this.sf496Ai1 = opts?.ai1 ?? 0;
     }
+    // ★BJ704-G10（件10）：459 充能爆破炮弹 ai[1] 蓄压档注入（NewProjectile 尾参
+    //  num35 :67574;PrismProj ChargedBlaster fire 按 stage 传 0.7/1.0/1.3——
+    //  subStepAI 459 支每子步 Clamp(0.7,1.6) 消费;缺省 0=外源直构防御档）
+    if (projId === 459) this.ai1Scale459 = opts?.ai1 ?? 0;
     // 1457 FinalizeProjectile_GemStaves（:22259-22296）：特性穿透/穿甲/timeLeft 终值化
     if (opts?.gem) {
       this.gem = opts.gem;
@@ -3089,7 +3300,7 @@ export class Arrow extends Entity {
     if (projId >= 511 && projId <= 513) {
       this.noTileCollide = true;
       this.idStaticGroup = 511;   // 组共享免疫键（命中环 idStaticCheck(511,…) 消费）
-      this.idStaticCdMs = 167;    // idStaticNPCHitCooldown=10t ≈167ms
+      this.idStaticCdTicks = 10;  // idStaticNPCHitCooldown=10t（★G10 tick 基数）
       this.cloudPhase = Math.random() * Math.PI * 2;
       this.cloudWho = ++Arrow.cloudWhoSeq;
     }
@@ -3097,19 +3308,19 @@ export class Arrow extends Entity {
     // :2680-2688 / type==566 两版同段 :6177-6186,方法体 :10678-10683）——与毒云同
     // 机制：usesIDStaticNPCImmunity + idStaticNPCHitCooldown=10、组键共用 181 ⇒
     // 蜂群齐扑同敌只结算一颗（2026-08-31 台账无标记缺口,idStaticGroup 表级共享接线,
-    // proj1457 IdStaticSharedTable 先例;idStaticCdMs=10t≈167ms 同换算基数)
+    // proj1457 IdStaticSharedTable 先例;idStaticCdTicks=10t,★G10 tick 基数）
     if (projId === 181 || projId === 566) {
       this.idStaticGroup = 181;
-      this.idStaticCdMs = 167;
+      this.idStaticCdTicks = 10;
     }
     // 189 黄蜂枪蜂（★T1 批 2026-09-01）：SetDefaults（:2777-2778）裸写
     // usesIDStaticNPCImmunity=true + idStaticNPCHitCooldown=10，【不】走
     // UseGroupStaticImmunity ⇒ immunityIdentity 保持 spawn 期直写值 = type = 189
     // （P.cs:784 `immunityIdentity = type`）——同 10t 静态窗但组键独立（蜂枪蜂群
-    // 不与黄蜂蜂群互斥结算）。组键 189、cd 同 10t≈167ms
+    // 不与黄蜂蜂群互斥结算）。组键 189、cd 同 10t（★G10 tick 基数）
     else if (projId === 189) {
       this.idStaticGroup = 189;
-      this.idStaticCdMs = 167;
+      this.idStaticCdTicks = 10;
     }
   }
 
@@ -3518,6 +3729,75 @@ export class Arrow extends Entity {
         const mp630 = r.mainPlayer as { facing?: number; cx?: number; y?: number; h?: number } | undefined;
         const face630 = Math.sign(this.vx) || mp630?.facing || 1;
         const rot630 = Math.atan2(this.vy, this.vx);
+        // ---- ★BJ704-G2（2026-10-21,债③ 亲读补齐）：GlowMask[200] 柔光叠画 +
+        //      Extra[65] 枪口闪光（Main.cs:32668-32676,本体段后同层）。
+        //  · 柔光（:32670）：GlowMask[200]（=Images/Glow_200.png,32×54 单帧）白
+        //    (255,255,255,127)×num281 同帧矩形/旋转/锚/比例叠画;XNA A=127 source-over
+        //    单笔=globalAlpha 127/255 逐项相等（Glow 域 23.6% 非零 α,预乘贡献=rgb×a×0.498）。
+        //  · 闪光（:32671-32676）：localAI[0]>0 → Extra_65（36×276=1×6 行,行高 46）
+        //    帧行 frameY=6−(int)localAI[0];可见窗 c∈(0,6] → 行 [0,5],c>6 → 负行
+        //    PointClamp 顶行全透（资产实测顶 4 行 α=0）=不可见【跳画】。位=本体位+
+        //    Normalize(velocity)×2,origin=(flip?36:0, 54/2−2=25)（num280=本体帧高）,
+        //    色=白 127×num281。两 overlay 均【恒色不读 projectileColor】=原版 unlit
+        //    glow 面——与本体同队列层随 BJ682 口径（预染 tint 已承担光照,overlay
+        //    不再预染=原版恒亮同相）。
+        //  · ★BJ704-G11（件5a,G10 债③清偿——前提勘误）：num281 stealth 档【可达】
+        //    ——shroom/vortex stealth 仓内已建模（Player.stealth :2120 + equipStats.
+        //    shroomiteSet/vortexSet + 伤害/暴击/仇恨消费 :3903-4167;「未建模恒 1」
+        //    系 G10 登记误判）。Main.cs:32623-32640：shroomiteStealth∨setVortex ∧
+        //    手持远程（draw 期活查 inventory[selectedItem].ranged）→ num281=max(
+        //    stealth,0.03)（双支同钳）。overlay 色=(255,255,255,127)×n → XNA 预乘
+        //    rgb×trunc(255n)/255 与 a×trunc(127n)/255 【双因子】——rgb 面经
+        //    tintedTex 烘焙（BJ348b-3 entry-owned bake,零 ctx.filter）、a 面走
+        //    globalAlpha=trunc(127n)/255。本体 projectileColor×=stealth 面
+        //    （:32629/:32639——439/460/600/615/630/633/705/714 八型族绘色减光）
+        //    ★BJ704-G14 件3 已清偿（615/630/705/714 四可达员——familyBodyStealthDim
+        //    单源 + queue/直画两路径 rgb 烘焙 + ga;439/460/600/633 四员门死销案,
+        //    逐员判语见 helper 头注）。 ----
+        let n281 = 1;
+        // ★BJ704-G14（件3 [g11-family-body-stealth-dim] 清偿——G11 件5a 登记域外刀）：
+        //  n281 单源化到 familyBodyStealthDim（双支同钳 max(stealth,0.03)——overlay 面
+        //  消费 ga（shroom/vortex 两支同值）;本体面消费 rgb（两支异形:shroom 均匀 ×n /
+        //  vortex 青蓝 MultiplyRGBA lerp）,下方 queue/直画两路径并接)
+        const dim630 = familyBodyStealthDim(r.mainPlayer);
+        if (dim630) n281 = dim630.ga;
+        const glowTex630 = r.atlas?.ensureVImage?.('vanilla/Glow_200.png') ?? null;
+        const flashTex630 = r.atlas?.ensureVImage?.('vanilla/Extra_65.png') ?? null;
+        const flashRow630 = this.ph630Flash > 0 && this.ph630Flash <= 6 ? 6 - this.ph630Flash : -1;
+        const vl630 = Math.hypot(this.vx, this.vy) || 1;
+        // stealth 档双因子预烘焙（n<1 才 bake;tintedTex flatten=false 保 α 形状）
+        const tintN630 = n281 >= 1 ? null
+          : [Math.trunc(255 * n281), Math.trunc(255 * n281), Math.trunc(255 * n281)] as [number, number, number];
+        const glowSrc630 = tintN630 && glowTex630
+          ? (tintedTex(glowTex630 as unknown as Parameters<typeof tintedTex>[0], tintN630, false) ?? glowTex630)
+          : glowTex630;
+        const flashSrc630 = tintN630 && flashTex630
+          ? (tintedTex(flashTex630 as unknown as Parameters<typeof tintedTex>[0], tintN630, false) ?? flashTex630)
+          : flashTex630;
+        const ga630 = n281 >= 1 ? 127 / 255 : Math.trunc(127 * n281) / 255;
+        const draw630Overlays = (c: CanvasRenderingContext2D, ccx: number, ccy: number): void => {
+          if (glowSrc630 && glowSrc630.width > 0) {
+            c.save();
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = ga630;
+            c.translate(ccx, ccy);
+            c.rotate(rot630);
+            if (face630 < 0) { c.rotate(Math.PI); c.scale(-1, 1); }
+            c.drawImage(glowSrc630 as CanvasImageSource, -glowSrc630.width / 2, -glowSrc630.height / 2);
+            c.restore();
+          }
+          if (flashSrc630 && flashSrc630.width > 0 && flashRow630 >= 0) {
+            c.save();
+            c.imageSmoothingEnabled = false;
+            c.globalAlpha = ga630;
+            c.translate(ccx + (this.vx / vl630) * 2, ccy + (this.vy / vl630) * 2);
+            c.rotate(rot630);
+            if (face630 < 0) { c.rotate(Math.PI); c.scale(-1, 1); }
+            c.drawImage(flashSrc630 as CanvasImageSource, 0, flashRow630 * 46, 36, 46,
+              face630 < 0 ? -36 : 0, -25, 36, 46);
+            c.restore();
+          }
+        };
         // ★BJ682（2026-10-14 用户实报「弓还是被盔甲遮住,脱掉盔甲才正常」=BJ681
         //  复诊）heldProj 载体层位随玩家层组走：原版 630 drawLayer=7 经 heldProj
         //  在玩家绘制层组 27_HeldItem 开头位插入（Projectile.cs :6769-6780
@@ -3552,26 +3832,45 @@ export class Arrow extends Entity {
           }
           q682.push((c: CanvasRenderingContext2D) => {
             let src630: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img630;
-            if (lq630 && sink682.tintSliceRGB) {
-              src630 = sink682.tintSliceRGB(img630, 0, 0, img630.width, img630.height, lq630, 1) ?? img630;
+            // ★BJ704-G14 件3：本体减光 tint 合成（光×stealth 乘子逐通道相乘=可交换,
+            //  无光档(满光)单用 stealth tint）——A 面=ga（GetAlpha 默认档 A=255×n）
+            const effTint630: [number, number, number] | null = dim630
+              ? (lq630
+                ? [lq630[0] * dim630.rgb[0], lq630[1] * dim630.rgb[1], lq630[2] * dim630.rgb[2]]
+                : [...dim630.rgb] as [number, number, number])
+              : lq630;
+            if (effTint630 && sink682.tintSliceRGB) {
+              src630 = sink682.tintSliceRGB(img630, 0, 0, img630.width, img630.height, effTint630, 1) ?? img630;
             }
             c.save();
             c.imageSmoothingEnabled = false;
+            if (dim630) c.globalAlpha = dim630.ga;
             c.translate(cx630, cy630);
             c.rotate(rot630);
             if (face630 < 0) { c.rotate(Math.PI); c.scale(-1, 1); }
             c.drawImage(src630 as CanvasImageSource, -img630.width / 2, -img630.height / 2);
             c.restore();
+            draw630Overlays(c, cx630, cy630);   // ★BJ704-G2 债③：柔光+枪口闪光（本体后）
           });
           return;
         }
         ctx.save();
         ctx.imageSmoothingEnabled = false;
+        // ★BJ704-G14 件3：直画回退路径本体减光（tintedTex 烘焙 rgb×n/vortex 青
+        //  蓝 + globalAlpha=ga;flatten=false 保 α 形状——BJ700-C 同款）
+        let src630F: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img630;
+        if (dim630) {
+          const t630F: [number, number, number] = [
+            Math.trunc(255 * dim630.rgb[0]), Math.trunc(255 * dim630.rgb[1]), Math.trunc(255 * dim630.rgb[2])];
+          src630F = tintedTex(img630, t630F, false) ?? img630;
+          ctx.globalAlpha = dim630.ga;
+        }
         ctx.translate(this.cx, this.cy);
         ctx.rotate(rot630);
         if (face630 < 0) { ctx.rotate(Math.PI); ctx.scale(-1, 1); }
-        ctx.drawImage(img630, -img630.width / 2, -img630.height / 2);
+        ctx.drawImage(src630F as CanvasImageSource, -img630.width / 2, -img630.height / 2);
         ctx.restore();
+        draw630Overlays(ctx, this.cx, this.cy);   // ★BJ704-G2 债③（直画回退路径同面）
         return;
       }
     }
@@ -4078,14 +4377,22 @@ export class Arrow extends Entity {
         frame: isTy409 ? this.ty409Frame : 0,  // 通用表帧锚基准行（repo 无通用逐帧字段,登记②）;409=当前帧（:32543 y13=num271×frame）
         bodyW: this.w, bodyH: this.h,
         // ★BJ375：mode0 残影角 = 本体有效旋转（vanilla num177=proj.rotation,
-        //  Main.cs:31333-31335——AI_001 系弹 rotation=velocity+π/2 :54877）。
-        //  此前传裸 ang → 缺省支（ang+π/2）弹族残影整体落后 π/2：664/666/668
+        //  Main.cs:31333-31335——AI_001 系弹 rotation=atan2+1.57f :58733）。
+        //  此前传裸 ang → 缺省支（ang+1.57）弹族残影整体落后 π/2：664/666/668
         //  爆炸烈焰弹残影画成「未旋转直立彗星」散落速度向轨迹 = 用户实报
-        //  「弯月/钩状缺半贴图」。GHOST_PARAMS 全族∩特判旋转集=空（BJ375 普查）
-        //  → 除 409 自旋特例与 503/660 独占支外,mode0 族恒 = 缺省支 ang+π/2；
-        //  mode2/3/4 族 rotMul=0 不消费本值,零改动面。
-        bodyRot: isTy409 ? this.spinRot : ang + Math.PI / 2, // 409=自旋角（:32555 proj.rotation,与本体同角）
-        bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
+        //  「弯月/钩状缺半贴图」。★旧注「GHOST_PARAMS 全族∩特判旋转集=空（BJ375
+        //  普查）」自 BJ582②（1026 入 PROJ_ROT_RIGHT）起即为假——交集=PROJ_GHOST_
+        //  MIRROR0 全集 {408,435,459,682,1026}（随 BJ704-G10 勘正;除 409 自旋特例
+        //  与 503/660 独占支外,其余 mode0 族仍恒=缺省支;mode2/3/4 rotMul=0 不消费）。
+        //  ★BJ700-A：408 入 PROJ_ROT_RIGHT 后 ghost 角随本体分派族走——原版 ghost
+        //  num177 = proj.rotation（Main.cs:31333）= ToRotation + (direction==−1 ? π : 0)
+        //  （:58616-58621）;且 :31334 `SpriteEffects spriteEffects = dir` = mode0 ghost
+        //  恒吃本体当前翻转（本仓 mode0 原无翻转通道,mirror 选项本刀补——其余 mode0
+        //  成员维持现状,flip 缺面另案登记）。662/685 无 ghost（TrailingMode=-1）。
+        bodyRot: isTy409 ? this.spinRot
+          : PROJ_GHOST_MIRROR0.has(this.projId) ? ang + (this.vx < 0 ? Math.PI : 0)   // ★BJ700-A 408/★BJ703-B D2 435·682/★G10 1026：随本体 RIGHT 族（含左飞 +π）
+          : ang + 1.57,              // ★G10（R2-F13）：原版字面 1.57f（:58733,非 π/2=1.5708;残差 0.0008rad 纪律归位）。409=自旋角（:32555）;余 mode0 族=缺省支
+        bodyScale: this.projId === 459 ? this.ai1Scale459 : 1,   // ★G10（件10）：459 AI 块 scale=ai[1] 三档（:55633,ghost 环 end=(int)(scale×8)/step 端消费）;余=缺省 1（660=1.1 已排除集）
         bodyAlpha: isTy409 ? 200 / 255 : ghostA, // 409=GetAlpha A 侧恒值（fade=(10−i)/15 环内通用式相乘）
         // ★BJ235 ai1 喂入（登记④清偿——AI_171/172/173 族 hue=(ai[1]+0.5)%1 不随时间
         //  cycle,值=发射点注入静态档）：873 已有 empressHue 通道（bossAI_lategame
@@ -4098,6 +4405,12 @@ export class Arrow extends Entity {
         opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
         vxLen: Math.hypot(this.vx, this.vy),
         spriteDirection: this.vx < 0 ? -1 : 1,
+        // ★BJ700-A mode0 本体翻转（:31334 spriteEffects=dir）;★BJ703-B D1/D2：
+        //  mirror=dir 基底单源——mode0 RIGHT 族（408/435/682,左飞镜像）+ mode3 豁免员
+        //  1001（AI_194 :42056 每拍 spriteDirection=sign(vx)≥0?1:-1,豁免档=基底直取
+        //  :31336-31344——旧豁免=恒不翻,南瓜弹左飞残影缺镜像=本刀补）;mode2/3/4
+        //  其余成员原版零 spriteDirection 写（基底恒 None）不传。
+        mirror: (PROJ_GHOST_MIRROR0.has(this.projId) || this.projId === 1001) && this.vx < 0,
       });
     }
     // ★BJ-C1 F3（2026-10-06）常量色族通用全亮通道（BJ529 270/BJ530 44·45 判例通用化,
@@ -4265,14 +4578,17 @@ export class Arrow extends Entity {
       ctx.rotate(ang);               // R27：宝石珠 rotation=velocity.ToRotation()（:38691）
     } else if (PROJ_ROT_DOWN.has(this.projId)) {
       ctx.rotate(ang - Math.PI / 2); // 631 幻象矢（AI_122 尾 :35613 减号——贴图朝下族,见 PROJ_ROT_DOWN 注）
+    } else if (PROJ_ROT_NW.has(this.projId)) {
+      ctx.rotate(ang - Math.PI - Math.PI / 4); // ★BJ700-A 662/685 DD2 标枪（AI_001 尾 :58626-58629 ToRotation−π−π/4,贴图固有 225°,恒不翻转）
     } else if (this.projId === 477 && this.dartRot !== null) {
       ctx.rotate(this.dartRot);      // 477 水晶镖平滑姿态（:58666-58676，AI 侧维护）
     } else if (this.bee36Tilt !== null) {
       ctx.rotate(this.bee36Tilt);    // aiStyle 36 蜂族（:27716 rotation = velocity.X*0.1f
     } else {                         //   ——微倾不振转；307 小吞噬者 = atan2−π/2（:27698）
       ctx.rotate(rightArt ? ang
-        : PROJ_ROT_DIAG.has(this.projId) ? ang + Math.PI / 4   // aiStyle 27 剑气 +45°（:24860）
-          : ang + Math.PI / 2);
+        : PROJ_ROT_DIAG_0P785.has(this.projId) ? ang + 0.785   // ★G11（件4）：aiStyle 27 剑气 原文字面 0.785f（:26910-26911,非 π/4——残差 0.0004rad 字面纪律对齐）
+        : PROJ_ROT_DIAG_PI4.has(this.projId) ? ang + Math.PI / 4   // 660/451 π/4 字面支（:58632/:31582）
+          : ang + 1.57);             // ★G10（R2-F13 字面纪律）：AI_001 缺省 up 族原版字面 1.57f（:58733,非 π/2≈1.5708;旧 π/2 残差 0.0008rad）
     }
     // 469 蜂箭（:54789-54798）：vx>0 → spriteDirection=-1（贴图朝左，源翻转语义）
     if (this.projId === 469 && this.vx > 0) ctx.scale(-1, 1);
@@ -4300,6 +4616,9 @@ export class Arrow extends Entity {
                 : this.pinFrame !== null ? this.pinFrame    // ★R28 337 帧恒 ai[1]（发射掷,AI 不推进 :57927）
                   : this.projId === 467 ? this.f467Frame    // 教徒火球：3 拍/帧 4 帧循环（:55208-55218）
                     : this.projId === 409 ? this.ty409Frame // ★BJ371 剃刀台风：触发位写帧 (int)(localAI[1]/3f)%3（:30879）
+                      : this.projId === 459 ? this.f459Frame // ★G10（件10）：充能爆破炮弹 3t/帧 3 帧循环（:55622-55631 frameCounter≥3 推帧 ≥3 回卷;AI 块维护）
+                      : (this.projId === 435 || this.projId === 682) ? Math.floor(this.age / 3) % frames   // ★G10（R2-F11）：435/682 AI_001 专属块 frameCounter≥3 推帧 4 帧回卷（:55887-55896/:55923-55932）=3t/帧（EU=0 age=update 数;旧通用 age/5=5t/帧）
+                      : PROJ_FRAME_STATIC0.has(this.projId) ? 0   // ★BJ700-A 408/★G10 614：原版无帧推进支恒帧 0（见 PROJ_FRAME_STATIC0 注）
                     : (this.projId === 660 || this.projId === 712) ? this.f712Frame
                       // 660 天界碎裂：出生 Next(14) 掷定恒定帧（AI_001 :56651 写入,
                       //   DrawProj 手切 38×frame 横切 :30974-30980——本表 PROJ_GRID[660]
@@ -4424,6 +4743,23 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // ---- ★BJ704-G21 R8-F3：502 喵刀 Kill 消散尘（Projectile.Kill :75080-75094）
+    //      ——一切 502 死亡路径共段（死亡跳 meowBounceOff→killNow / 寿命尽 / 出界
+    //      :10181 均达此口）：oldPos 逐点（零位=未踩点跳过）尘 66（随机 hsl(h,1,0.5)
+    //      彩色,α150,scale0.7,noGravity;出生位=历史位+半盒=历史心）。meowTrail=
+    //      oldPos 10 点仓内承载（G2/G9 既有,subStepAI 逐子步 push,706 extraUpdates=0
+    //      同步）。旧仓 killNow/onProjectileDeath 均无 502 支=整缺（红队 R8-F3;
+    //      meowTrail 唯一消费者曾是飞行拖尾绘制 :4184）。 ----
+    if (this.projId === 502) {
+      for (let i = 0; i < this.meowTrail.length; i += 2) {
+        const px = this.meowTrail[i]!, py = this.meowTrail[i + 1]!;
+        if (px === 0 && py === 0) continue;               // :75084 oldPos 零位跳过
+        const rgb = empressHslRgb(Math.random());         // hslToRgb(NextFloat,1,0.5)——A=255（Main.cs:48689 默认参）
+        const d = game.spawnDust?.(px + this.w / 2, py + this.h / 2, 0, 0, 66,
+          0, 0, 150, null, 0.7, true);
+        if (d) d.color = { r: rgb[0], g: rgb[1], b: rgb[2], a: 255 };
+      }
+    }
     // ★BJ348 618/620 Kill 尘爆（Projectile.Kill :73671-73740 共段）：10× 尘
     //   （618→86 / 620→ai[0]=na620Dust,vel×0.1 种,α0,scale 0.5）——1/3 升档
     //   （type+1、fadeIn 0.75±0.10、scale 0.25±0.05）/ else scale 1.0±0.10；
@@ -5210,6 +5546,60 @@ export class Arrow extends Entity {
     hitPlayer(this, game, this.damage);   // :70580(:75033) Kill 内 Damage() 二次结算
   }
 
+  /** ★BJ704-R3 P1②b 爆炸兔 Kill 爆炸（Projectile.Kill case 281,:77327-77384;
+   *  448 rocketExplode/喵刀死亡跳 :11564 同族=心锚盒扩+dealContacts）。ai[0]!=-3 →
+   *  FX（Sound4 兔死库缺省+Item14+gore76/77 兔尸+61-63 四向壳块+20 尘31+10×2 尘6）
+   *  ∧ damage>0 → 盒扩 128×128 心保持 → CutTiles（Damage() :12515-12518
+   *  friendly∧myPlayer∧!npcProj∧!minion 先于结算）→ dealContacts（idStatic 10,
+   *  SetDefaults :6007）→ 还原;玩家可炸面=ai[1]-1==myPlayer（=释放者本人
+   *  :14873-77）或 getGoodWorld 强开（野兔/他释恒不可炸玩家）。 */
+  private bunnyBlastExplode(game: GameHooks): void {
+    // ---- FX（:77330-77372,原 28×28 盒上,先于扩盒）----
+    game.playSfx?.('killed', 1, this.cx, this.cy);          // :77330 PlaySound(4,x,y)（WeaponProj :76613 同款缺省形态）
+    const gvel = () => (Math.floor(Math.random() * 41) - 20) * 0.2;   // Next(-20,21)×0.2 右开
+    const g76 = GorePiece.newGore(76, this.x, this.y, gvel(), gvel());
+    if (g76) { g76.vx -= this.vx * 0.5; g76.vy -= this.vy * 0.5; }    // :77333-77334 −velocity×0.5（死亡爆弹速 0）
+    const g77 = GorePiece.newGore(77, this.x, this.y, gvel(), gvel());
+    if (g77) { g77.vx -= this.vx * 0.5; g77.vy -= this.vy * 0.5; }
+    game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);  // :77337
+    for (let i = 0; i < 20; i++) {                          // :77338-77342 尘 31×20（α100 s1.5 vel×1.4）
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+      if (d) { d.vx *= 1.4; d.vy *= 1.4; }
+    }
+    for (let i = 0; i < 10; i++) {                          // :77343-77354 尘 6 双掷（s2.5 noGravity ×5 / s1.5 ×3）
+      const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 2.5, true);
+      if (dA) { dA.vx *= 5; dA.vy *= 5; }
+      const dB = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 1.5);
+      if (dB) { dB.vx *= 3; dB.vy *= 3; }
+    }
+    for (const [kx, ky] of [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {   // :77355-77374 gore 61-63 四向（×0.4+角向 ±1）
+      const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.x, this.y, 0, 0);
+      if (g) { g.vx = g.vx * 0.4 + kx; g.vy = g.vy * 0.4 + ky; }
+    }
+    // ---- 伤害块（:77374-77384）----
+    if (this.damage <= 0) return;                           // 雕像出生 dmg=0 → 纯 FX（:77374 门）
+    const cX = this.cx, cY = this.cy;
+    const oldW = this.w, oldH = this.h, oldX = this.x, oldY = this.y;
+    this.w = 128; this.h = 128;                             // :77376-77379 心保持盒扩 128×128
+    this.x = cX - 64; this.y = cY - 64;
+    // ai[0]==-2 原版置 hostile=true——仓内敌/我两面由 dealContacts/hitPlayer 分治,
+    // 玩家门下方显式承载（勿置 this.hostile:dealContacts 敌面按敌对弹改道 :12631）
+    cutTilesBox(game, this.x, this.y, this.w, this.h, 281); // Damage() 内建割草/碎罐（先于结算）
+    // ★G21 R8-F5：duck 桥拆 peek（纯读,≙外环 flag2 表读 :12596）/ commit（写梯
+    //  :14031 受里面深位）——旧 peek=idStaticCheck 读时写,充能水母在爆盒内会白写
+    //  10t 窗（原版拒收/电击拍零落账,dealContacts 水母块 return :12687 先于写梯）。
+    const aoeCd281 = {
+      tick: () => {},                                       // GTW tick 钟绝对到期,无独立 tick 面
+      peek: (id: number) => idStaticReady(281, id),
+      commit: (id: number, cdv: number) => { idStaticWrite(281, id, cdv || 10); },
+    } as unknown as Parameters<typeof dealContacts>[2];
+    dealContacts(this, game, aoeCd281, 10);                 // idStaticNPCHitCooldown=10
+    if (this.bunnyOwner === 1 || game.world.seedFlags?.getGoodWorld) {
+      hitPlayer(this, game, this.damage);                   // :14873-77 ai[1]-1==myPlayer ∨ getGoodWorld
+    }
+    this.w = oldW; this.h = oldH; this.x = oldX; this.y = oldY;
+  }
+
   /** 469 蜂箭 Kill 放蜂（1458 Projectile.cs:78058-78081 / 1456 :73369-73390）：6 拍
    *  循环、奇数拍（1/3/5）再掷 Next(3)==0 才放（期望 4 只、3-6 只区间）；出生点 =
    *  position − oldVelocity 归一×8×i；速度 = Next(-35,36)×0.01 + oldVelocity/6
@@ -5773,7 +6163,13 @@ export class Arrow extends Entity {
    *  子步循环【内】:17198,每【子步】位移后一段=extraUpdates 弹逐子步后移）。
    *  调用位=subStep 尾（位移/尘段后、寿命杀位前——原版 Damage 之后 :17198 同序;
    *  撞块杀位 dead 早退不记录=:17132 `!active` return 同相）。rot=速度角（原版
-   *  rotation 的速度向语义子集,登记①）;dir=sign(vx)（spriteDirection 语义子集）。 */
+   *  rotation 的速度向语义子集,登记①）;dir=1 恒值（★BJ703-B D1 收编:Arrow 载体
+   *  mode2/3/4 全员——671/680/686/710/711/729/811/814/872/873/931/976/977/
+   *  1001/1039/1045/1097——1457 AI 函数逐支核【全程无 spriteDirection 写】
+   *  （唯一写位 :22750 属 AI_DisplayDoll_ItemDisplay 展示人偶非活面）→ 原版
+   *  oldSpriteDirection 恒 1;旧 sign(vx) 记录=左飞幽灵假镜像（872 贴图 95%
+   *  非对称=可见）,本刀归位。翻转员 1001 虽每拍写 spriteDirection 但属豁免档
+   *  （基底直取,XOR 臂不消费 slot.dir）→ 记录面死值,1 同相）。 */
   private recordGhostTrail(): void {
     if (this.ghostRing === undefined) {
       this.ghostRing = !Arrow.GHOST_RECORD_EXCLUDE.has(this.projId) && projTrailingMode(this.projId) >= 0
@@ -5781,7 +6177,7 @@ export class Arrow extends Entity {
         : null;
     }
     this.ghostRing?.record(this.x, this.y, Math.atan2(this.vy, this.vx),
-      this.vx < 0 ? -1 : 1, this.subIsHead);
+      1, this.subIsHead);   // dir=1（BJ703-B D1:spriteDirection 语义原位恒值）
   }
 
   /** ★BJ252 872 永恒彩虹 oldPos 命中面（Projectile.cs:15761-15775 Colliding 特支）：
@@ -5901,6 +6297,30 @@ export class Arrow extends Entity {
     this.sparkAi0 += (60 - this.sparkAi0) / 2;
   }
 
+  /** ★BJ703-D3：KillOldestJavelin（Projectile.cs:15156-15183,614 档 buffer=
+   *  _javelinsMax10 :14050-14053）：同玩家同型 stuck（ai[0]==1）∧ 同靶
+   *  ai[1]==victimIndex 的【其他】活弹 ≥10 → Kill 剩余 timeLeft 最小者（受保护弹
+   *  =本弹自身不入选,`i != protectedProjectileIndex`）。owner==Main.myPlayer 在
+   *  Damage 路径恒真 ⇒ 单机全 614 域。timeLeft 面=本仓 life。 */
+  private killOldestJavelin614(game: GameHooks, victimId: number): void {
+    // ?. 防御：测试桩 hooks 可无 entities（真游戏恒在——R7-19 夹具判例）
+    const projs = (game as unknown as { entities?: { projectiles?: unknown[] } }).entities?.projectiles ?? [];
+    const found: { p: Arrow; life: number }[] = [];
+    for (const q of projs) {
+      if (q === this || !(q instanceof Arrow)) continue;
+      const a = q as Arrow;
+      if (a.dead || a.projId !== 614 || a.stickerA0 !== 1 || a.stickerTgt !== victimId) continue;
+      found.push({ p: a, life: a.life });
+      if (found.length >= 10) break;                 // buffer 扫满即止（:15164-15167）
+    }
+    if (found.length < 10) return;                   // :15170-15173
+    let oldest = found[0];
+    for (let j = 1; j < found.length; j++) {
+      if (found[j].life < oldest.life) oldest = found[j];   // 最低 timeLeft（:15174-15181）
+    }
+    oldest.p.killNow(game);                          // :15182
+  }
+
   /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
    *  蓝队 R7-5：原版 `timeLeft--; if (timeLeft <= 0) Kill()` 位于子步循环【末尾】
    *  （Update :17307-17311，AI/位移/Damage 之后）——AI 恰好跑 timeLeft 次,且寿命尽
@@ -6005,6 +6425,15 @@ export class Arrow extends Entity {
     // 中心格几何近似（浅缘半浸/邻格液面两向偏差）,登记近似退役
     if (this.projId === 469) {
       if (this.wet && !this.honeyWet && !this.shimmerWet) { this.killNow(game); return; }
+    }
+    // ★BJ704-R3 P1②b：爆炸兔死亡爆弹（NPC 614 任意死因 → checkDead case 614
+    //   NPC.cs:80182-80191 NewProjectile 281/ai[0]=-2/速度 0）——AI_049 头
+    //   :28651-28656 `ai[0]==-2 → hostile=true; Kill(); return` 即灭,爆炸载荷
+    //   全在 Kill() case 281（bunnyBlastExplode）。雕像出生 dmg=0 → 纯 FX。
+    if (this.projId === 281 && this.bunnyBlastForm === -2) {
+      this.bunnyBlastExplode(game);
+      this.killNow(game);
+      return;
     }
     // ---- ★BJ642 喷火器 85/1106 AI_193 尘链+寿命面（Projectile.cs:42075-42142 1:1，
     //      2026-10-11——BJ639 判「演出面整缺」本刀补齐；age=localAI[0] 子步语义，
@@ -6321,9 +6750,13 @@ export class Arrow extends Entity {
         volley630 = true;
       }
       const canShoot630 = ctl.channel();
+      // ★BJ704-G2（债③）：localAI[0] 逐拍递减（:68225-68228,先于音拍块——同拍旧值
+      //  先减后置 12 = 原版顺序）
+      if (this.ph630Flash > 0) this.ph630Flash--;
       if (--this.ph630SndCd <= 0 && canShoot630) {
         this.ph630SndCd = interval630;
         if (this.ph630Age !== 1) game.playSfxFile?.('Item_5', 1, this.cx, this.cy);
+        this.ph630Flash = 12;                            // :68236（音拍同块置 12）
       }
       Arrow.phantasmWindowUntil = performance.now() + 33;   // phantasmTime=2（每拍续窗）
       if (volley630) {
@@ -7267,8 +7700,42 @@ export class Arrow extends Entity {
       //  核心输出弹哑弹）。① alpha −63/t 淡入（num=63 :41293-41299,SetDefaults 255 :6619）；
       //  ② ai[1]=发射侧注入的目标索引,目标 !CanBeChasedBy → 立即 Kill（:41317-41320）；
       //  ③ 硬追踪 v = (v×4 + 归一(目标−心)×14)/5（:41321-41330,速度向 14 收敛）。
-      //  命中侧：目标盒收缩 + buff 183 门见命中环（stickerTgt 消费）
+      //  命中侧：目标盒收缩 + buff 183 门见命中环（stickerTgt 消费）。
+      //  ★BJ703-D3（BJ698 登记债③）stuck 态（ai[0]==1,:41393-41518——命中转刺入
+      //  :13244-13251 建模）：贴附敌身【零接触伤】（Damage_CanDealDamage :12463 首行
+      //  `type==614∧ai[0]==1` 拒——本支早退于命中环=整拍 Damage 跳过同相）;窗拒
+      //  900t（localAI[0]≥60×num11(15) :41400/:41480——timeLeft=300 首达,900 为
+      //  Player.cs:6958 出生面 3600 档兜底）/靶亡/失锁/dontTakeDamage → Kill
+      //  （:41480-41487/:41497-41517,614 非 1024 无 ai0=2 返航态）;贴附净位 =
+      //  敌心 − velocity（:41490 Center=敌心−vel×2 + UpdatePosition +vel 原文合成）。
+      //  ★BJ704-G10（R2-F5）stuck 两视觉面补齐：①每 30t 血尘脉冲（localAI[0]%30
+      //  ==0 → flag2 → `Main.npc[ai[1]].HitEffect(0,1.0)` :41430-41433/:41488-41491
+      //  ——spawnNpcHitDust(hit 相,dmg=1.0) 查表承载,BJ254 单源;门位=target 有效支
+      //  内=杀门之后）;②gfxOffY 随载（:41489 `gfxOffY=npc.gfxOffY`）——【判语销案,
+      //  域外恒 0】：NPC.gfxOffY 仅骑乘/挂载 NPC 有非零值（:35417 挂 383 座椅/
+      //  :36006 挂他 NPC/:37520 挂玩家 + :91512-91529 逐拍衰减瞬态）,本仓 Enemy
+      //  无 gfxOffY 字段（npcExtraParts.ts:21 判例「蚁狮系不写=0」）⇒ 载具恒 0=
+      //  贴附位随敌心逐拍跟随已全覆盖,零可观测差。帧面：stuck 显式 frame=0
+      //  （:41395）由 PROJ_FRAME_STATIC0（G10 件3）全域承载。
       if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 63);
+      if (this.stickerA0 === 1) {
+        this.noTileCollide = true;                    // tileCollide=false/ignoreWater=true（:41398-41399）
+        this.stuckT614++;                             // localAI[0]++（:41429）
+        const tS614 = this.stickerTgt
+          ? (game.enemies() as Array<{ id: number; dead?: boolean; dontTakeDamage?: boolean; cx: number; cy: number }>)
+            .find((q) => q.id === this.stickerTgt)
+          : null;
+        if (this.stuckT614 >= 900 || !tS614 || tS614.dead || tS614.dontTakeDamage === true) {
+          this.killNow(game);                         // :41480-41487/:41497-41517
+          return;
+        }
+        this.x = tS614.cx - this.vx - this.w / 2;     // :41490 净位（敌心−vel;gfxOffY 域外恒 0 见上注）
+        this.y = tS614.cy - this.vy - this.h / 2;
+        if (this.stuckT614 % 30 === 0) {
+          spawnNpcHitDust(tS614 as Enemy, game, 0, 1);   // :41488-41491 flag2 → HitEffect(0,1.0)——原版序=Center/gfxOffY 写位之后（净位/零伤/窗 900t 不动）
+        }
+        return;                                       // 零接触伤（:12463 首行拒）
+      }
       const tgt614 = this.stickerTgt
         ? (game.enemies() as Array<{ id: number; dead?: boolean }>).find((q) => q.id === this.stickerTgt)
         : null;
@@ -8279,6 +8746,52 @@ export class Arrow extends Entity {
       if (++this.hwFrameT >= 2) {
         this.hwFrameT = 0;
         this.hwFrame = (this.hwFrame + 1) % 5;
+      }
+    } else if (this.projId === 459) {
+      // ---- ★BJ704-G10（件10,G2 登记债清偿）459 充能爆破炮弹 AI_001 专属块
+      //      （Projectile.cs:55615-55656）——G2 判例「债单载体前提必须逐员亲读」
+      //      后的余面落模。逐面：
+      //  ① 帧机 frameCounter≥3 推帧 3 帧回卷（:55622-55631,projFrames=3 :8681;
+      //    draw fIdx 459 支消费;ghost 帧锚恒 0=登记② 维持——repo 无通用逐帧字段）;
+      //  ② scale=ai[1]（发射侧注入 0.7/1.0/1.3 三档蓄压 :67574,AI 侧 Clamp(0.7,1.6)
+      //    :55632）+ 判定盒 width=height=(int)(22×scale) Center 锚定（:55634-55635
+      //    ——draw drawScale/ghost bodyScale（环 end=(int)(scale×8)/step 端 :31068-
+      //    31073）随档）;
+      //  ③ ≥0.85 档 penetrate=maxPenetrate=−1（:55642-55646——1.0/1.3 档无限穿透;
+      //    <0.85 档（0.7）不动 1）;
+      //  ④ 尘 226（:55647-55655）：<0.85 档 Next(3)==0 才 1 粒、≥0.85 恒 1 粒——
+      //    NewDust(盒,226,SpeedX=vx) 后置 position−=(3,3)/scale0.5/noGravity/
+      //    velocity=v/3（覆写非除抖）/alpha=255−(int)(255×scale)（1.3 档=−76 原样
+      //    直录,下游钳属 VDust 域）;
+      //  ⑤ 点光 AddLight(0.4,0.85,0.9)（:55636——lightRGB 自报通道,94/1114 先例）。
+      //  α−30（:55616-55620）【不建模】：GetAlpha 恒 (255,255,255,200) 不读 α
+      //  （vanillaProjAlpha fixed 档）=零视觉面;且 ghost bodyAlpha=(255−α)/255
+      //  通道依赖 α≡0（建模反引入残影误折）。spriteDirection=direction（:55621）
+      //  已由 PROJ_ROT_RIGHT+PROJ_GHOST_MIRROR0 draw 档承载（G2 落）。
+      this.ai1Scale459 = Math.min(1.6, Math.max(0.7, this.ai1Scale459));
+      this.drawScale = this.ai1Scale459;                       // scale=ai[1]（:55633）
+      const sz459 = Math.trunc(22 * this.ai1Scale459);         // (int)(22×scale)（:55634）
+      const cx459 = this.cx, cy459 = this.cy;                  // Center 锚定（:55632/:55635）
+      this.w = sz459; this.h = sz459;
+      this.x = cx459 - this.w / 2; this.y = cy459 - this.h / 2;
+      this.lightRGB = [0.4, 0.85, 0.9];                        // :55636
+      if (this.ai1Scale459 >= 0.85) {
+        this.pierce = -1; this.pierceInit = -1;                // :55642-55646（幂等直写）
+      }
+      if (++this.f459FrameT >= 3) {                            // :55622-55631
+        this.f459FrameT = 0;
+        this.f459Frame = (this.f459Frame + 1) % 3;
+      }
+      const n459 = this.ai1Scale459 < 0.85
+        ? (Math.floor(Math.random() * 3) === 0 ? 1 : 0) : 1;   // num51（:55638-55646）
+      for (let i459 = 0; i459 < n459; i459++) {
+        const d459 = game.spawnDust?.(this.x, this.y, this.w, this.h, 226, this.vx, 0, 0);
+        if (!d459) break;
+        d459.x -= 3; d459.y -= 3;                              // position−=One×3（:55649）
+        d459.scale = 0.5;                                      // :55650
+        d459.noGravity = true;                                 // :55651
+        d459.vx = this.vx / 3; d459.vy = this.vy / 3;          // velocity=v/3 覆写（:55652）
+        d459.alpha = 255 - Math.trunc(255 * this.ai1Scale459); // :55653
       }
     } else if (this.flare) {
       // ---- 信号枪族（aiStyle 33，AI_033 Projectile.cs:27425-27498）----
@@ -9609,6 +10122,40 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- ★BJ704-G11（件3,G10 登记债①清偿）AI_001 专属块 435/436/682 未扫面
+    //      （Projectile.cs:55874-55898 435 火星炮塔弹 / :55107-55131 436 脑洗器弹 /
+    //      :55900-55934 682 荧光虫电弧——逐员亲读补面;帧率 3t/4f（G10 件7）/
+    //      spriteDirection=direction+尾分派旋转（G2/G10 件5）既有,此处余面）----
+    //  · 435：首拍（ai1==0→1,本仓 age===1 单发门）Item12 + 点光(0.3,0.8,1.1)
+    //    （:55876-55880/:55896——lightRGB 自报通道,459/94/1114 同款）;
+    //  · 436：同构首拍 Item12 + 点光(0.3,1.1,0.5)（:55108-55112/:55130）;
+    //  · 682：首拍 DD2_LightningBugZap 已由发射位 shootD2 PROJ_SHOT_SFX 承载（等
+    //    价销案）;首拍 8×d272（vel×1 恒等+v×0.65 覆写、scale0.6、fadeIn0.8、
+    //    noGravity+noLight、position+=尘速×3,:55903-55915）+ 点光(0.5,0.2,1.1)
+    //    （:55933）。
+    //  alpha−40/t 三员均【死码销案】：SetDefaults 无 α 行=0 起（:5058-5071/:7274-
+    //  7285,vanilla-projectiles.json 同）,−40 钳 0 恒等;且 GetAlpha 435/436=A25/
+    //  682=A127 fixed 档（:81133-81146）不读 α,ghost bodyAlpha=(255−α)/255 通道
+    //  依赖 α≡0（459 判例同谳,G10 件10 注）。----
+    if (this.projId === 435) {
+      if (this.age === 1) game.playSfxFiles?.(['Item_12'], 1, this.x, this.y);   // :55876-55880
+      this.lightRGB = [0.3, 0.8, 1.1];                                           // :55896
+    } else if (this.projId === 436) {
+      if (this.age === 1) game.playSfxFiles?.(['Item_12'], 1, this.x, this.y);   // :55108-55112
+      this.lightRGB = [0.3, 1.1, 0.5];                                           // :55130
+    } else if (this.projId === 682) {
+      if (this.age === 1) {                                                      // :55902-55915
+        for (let i = 0; i < 8; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 272, 0, 0, 0);
+          if (!d) break;
+          d.vx += this.vx * 0.65; d.vy += this.vy * 0.65;    // vel×1 恒等（:55907）+v×0.65
+          d.scale = 0.6; d.fadeIn = 0.8;                     // :55908-55909
+          d.noGravity = true; d.noLight = true;              // :55910-55911
+          d.x += d.vx * 3; d.y += d.vy * 3;                  // :55912 position += 尘速×3
+        }
+      }
+      this.lightRGB = [0.5, 0.2, 1.1];                                           // :55933
+    }
     // ---- ★L2 通用湿段（:16903-17113）——2026-09-06 ⑥杀拍口径抽为 wetSectionStep
     //      双调用点：本位=活拍原位（AI 链末/通用位移行前,位序注随方法）;
     //      AI 杀位早退时由 subStep dead 支补跑（wetSectionRan 防同子步双跑）。
@@ -10495,13 +11042,14 @@ export class Arrow extends Entity {
         //  → 窗内水母不电同相）
         if (this.projId === 376 || this.projId === 604) {
           if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
-          if (!idStaticCheck(this.projId, e.id, this.projId === 376 ? 100 : 167)) continue;
+          // cd 单位=tick（★G10）：376=6t（:4612-4615）/ 604=10t（:6081-6082）
+          if (!idStaticCheck(this.projId, e.id, this.projId === 376 ? 6 : 10)) continue;
         }
         let immFaceIdStatic = false;
         if (this.idStaticGroup !== null) {
           immFaceIdStatic = true;   // ★GC1 写方桥 face 记录（命中尾统一写用）
           if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;   // ★BJ455⑥
-          if (!idStaticCheck(this.idStaticGroup, e.id, this.idStaticCdMs)) continue;
+          if (!idStaticCheck(this.idStaticGroup, e.id, this.idStaticCdTicks)) continue;
         }
         if ((this.projId === 376 || this.projId === 604)) immFaceIdStatic = true;
         // 502 喵刀弹：localNPCHitCooldown=10t 同敌再命中（穿透弹 hitSet 是永久免疫，
@@ -10738,6 +11286,20 @@ export class Arrow extends Entity {
         if (this.phoenixQuivered && debuffWriteAllowed(e, 323)) {
           const en4b = e as unknown as { onFire3T?: number };
           en4b.onFire3T = Math.max(en4b.onFire3T ?? 0, 5);
+        }
+        // ★BJ703-D3（BJ698 登记债③）：614 命中转刺入（Damage_PVE_Inner :13244-13251
+        //  `aiStyle==113 ∧ ai[0]<2`）：ai[0]=1/ai[1]=victimIndex/velocity=(敌心−弹心)×0.75
+        //  ——先于 StatusNPC（:13634）⇒ 183 gate ai1==i 读的就是【实际 victim】（途中
+        //  撞非目标敌=转贴该敌+183 同上,原版同相）;KillOldestJavelin（:14043-14054,
+        //  _javelinsMax10）同玩家同靶 stuck≥10 → Kill 剩余 timeLeft 最小者（本弹受
+        //  保护不入选）。位序=免疫门后（:12636 → :13244,本环 continue 已过门）。
+        if (this.projId === 614 && this.stickerA0 < 2) {
+          this.stickerA0 = 1;
+          this.stickerTgt = e.id;                     // ai[1]=victimIndex（:13247）
+          this.stuckT614 = 0;                         // localAI[0] 清零（AI_113 入口快照）
+          this.vx = (e.x + e.w / 2 - this.cx) * 0.75; // velocity=(敌心−弹心)×0.75（:13248）
+          this.vy = (e.y + e.h / 2 - this.cy) * 0.75;
+          this.killOldestJavelin614(game, e.id);
         }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         // 614 传 ai1TargetId：表内 183 条目带 gate 'ai1==i'（:11381-11383 只上绑定目标）
@@ -11177,14 +11739,30 @@ export class Arrow extends Entity {
    *    `num2 × Style×0.05` 无 ×0.5（旧式疑误并 case2 库内 style37 的 ×0.5 音量
    *    微调面——那是 PlaySound(2,…,37) 的 Item_37 档,与喵刀 case37 不同物）。
    *    修=style×0.05（style 6-10 → 0.30-0.50）。
-   *  ②彩虹尘环（:18340-18348）：dust66 ×(10+ai0×4) 环形爆发，色=hsl(i/n,1,0.5)
+   *  ②彩虹尘环（:18337-18348）：dust66 ×(10+ai0×4) 环形爆发，色=hsl(i/n,1,0.5)
    *    彩虹序（empressHslRgb=Main.hslToRgb 同式），速度=（0,−(3+ai0)) 绕随机基角
    *    +环角×(1.05,1)×(0.8+rand×0.4)，noGravity，scale=1+ai0/3，NewDustPerfect
    *    语义（perfect 通道——原版 NewDust(Center,0,0)+position/velocity 全覆写同构）。
-   *  ③弹跳扩大盒 AOE（:18350-18361）：盒临时扩 40+8×ai0（心锚定）+penetrate=-1
+   *  ③弹跳扩大盒 AOE（:18349-18364）：盒临时扩 40+8×ai0（心锚定）+penetrate=-1
    *    （dealContacts 纯结算无穿透消耗面=−1 语义免设）→Damage() 等价；cd 适配器
    *    桥到 meowHitCd——与主命中环【同表】=原版 localNPCImmunity 同表同构（弹跳
-   *    AOE 与常规命中共享 10t 局部免疫）。owner 本机门（:18350）单机恒真免设。 */
+   *    AOE 与常规命中共享 10t 局部免疫）。owner 本机门（:18349）单机恒真免设。
+   *  ★BJ704-G9（2026-10-21，R2-F1+F10 清偿）：
+   *  a)死亡跳三面补齐——原版 HandleMovement type502 块（:18317-18365）中尘环
+   *    （:18337-18348）与扩盒 Damage()（:18349-18364）位于 kill/else【两分支之外】：
+   *    第 5 跳（kill 跳）仍 position+=velocity 前移（:18323）→30 尘最大彩虹环+
+   *    40+8×5=80px 最大 AOE（Kill() 置 active=false 不拦本块直线码;Damage() 无
+   *    active 门 :12502、Damage_CanDealDamage 无 502 拒收 :12463）。旧
+   *    `if(meowCount>=5){killNow;return true;}` 早退=前移/尘环/AOE 三面全缺。
+   *  b)③盒交换心锚定修正——原版 `position=Center; w=h=box; Center=position`
+   *    （:18354-18356）=心保持;旧仓 `this.w=box 后 this.x=this.cx-box/2` 读的
+   *    cx 已含【新 w】⇒ 盒顶左钉死原位=向 +x/+y 偏 (box−16)/2（死亡跳 32px）。
+   *    修=扩盒【前】先取心。
+   *  c)R2-F10 扩盒割草——原版 Damage() 对 friendly+myPlayer 弹先 CutTiles()
+   *    （:12515-12518;CutTilesAt 吃当前【已扩】盒 :15349,CanCutTiles :15407 尾支
+   *    对 502=true）→ 每次弹跳（含死亡跳）扩盒面积割草/碎罐。常盒逐拍割面由
+   *    EntityManager 中央收口承载（Entity.ts,活拍）——本位只补弹跳拍扩盒差量;
+   *    死亡跳 killNow 后中央收口跳过（!dead 门,BJ232）⇒ 本位即死亡跳唯一割面。 */
   private meowBounceOff(game: GameHooks): boolean {
     const st = game.world.store;
     const solidAt = (px: number, py: number) => {
@@ -11196,16 +11774,23 @@ export class Arrow extends Entity {
     // ①喵叫音（case37）：音量 style×0.05（勘误——原版无 ×0.5）
     game.playSfxFiles([Math.random() < 0.5 ? 'Item_57' : 'Item_58'],
       style * 0.05, this.cx, this.cy);
-    if (this.meowCount >= 5) { this.killNow(game); return true; }
-    if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
-      this.x -= this.vx;
-      this.vx = -this.vx;
+    // kill/else 两分支（:18321-18336）：死亡跳=前移+Kill（反射只在 else 支）
+    if (this.meowCount >= 5) {
+      this.x += this.vx;   // :18323 position += velocity（前移后再环/AOE）
+      this.y += this.vy;
+      this.killNow(game);
+    } else {
+      if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+        this.x -= this.vx;
+        this.vx = -this.vx;
+      }
+      if (!solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+        this.y -= this.vy;
+        this.vy = -this.vy;
+      }
     }
-    if (!solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
-      this.y -= this.vy;
-      this.vy = -this.vy;
-    }
-    // ②彩虹尘环（:18340-18348）
+    // ②彩虹尘环（:18337-18348）——kill/else 分支外,死亡跳（ai0=5：30 尘/r=8/
+    //    scale=1+5/3）照跑;心=前移后 Center（this.cx 于 16px 原盒读=同构）
     {
       const base = Math.random() * Math.PI * 2;          // RotatedByRandom(π)=任意基角
       const r = 3 + this.meowCount;                       // (0,−(3+ai0)) 长度
@@ -11220,7 +11805,8 @@ export class Arrow extends Entity {
         if (d) d.scale = 1 + this.meowCount / 3;          // scale=1+ai0/3（后置赋值）
       }
     }
-    // ③弹跳扩大盒 AOE（:18350-18361）：盒交换→dealContacts→还原
+    // ③弹跳扩大盒 AOE（:18349-18364）——kill/else 分支外,死亡跳（80px）照跑：
+    //    心锚定盒交换→CutTiles（R2-F10,先于结算 :12517→:12523 同序）→dealContacts→还原
     {
       const aoeCd = {
         tick: () => {},   // 主拍 tick 在 subStepAI meowHitCd 段同表已做,此处不双扣
@@ -11229,8 +11815,12 @@ export class Arrow extends Entity {
       } as unknown as Parameters<typeof dealContacts>[2];   // cd 参（第 3 位）duck 桥
       const oldW = this.w, oldH = this.h, oldX = this.x, oldY = this.y;
       const box = 40 + 8 * this.meowCount;
+      const cX = this.cx, cY = this.cy;                   // 扩盒前取心（:18354 先于尺寸交换）
       this.w = box; this.h = box;
-      this.x = this.cx - box / 2; this.y = this.cy - box / 2;
+      this.x = cX - box / 2; this.y = cY - box / 2;       // 心保持（旧式顶左钉死=+偏(box−16)/2）
+      if (!this.hostile && !this.reflected) {             // :12516 friendly&&myPlayer&&!npcProj&&!minion
+        cutTilesBox(game, this.x, this.y, this.w, this.h, 502);   // R2-F10 扩盒割草
+      }
       dealContacts(this, game, aoeCd, 10);                // localNPCHitCooldown=10 同表
       this.w = oldW; this.h = oldH; this.x = oldX; this.y = oldY;
     }

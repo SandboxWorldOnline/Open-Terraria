@@ -11,10 +11,12 @@
 //   final = 贴图.rgb × C.rgb + 背景 × (1 − C.A)
 // 即 RGB 分量是【加色贡献】、A 是【背景衰减】。Canvas source-over 是
 //   final = S.rgb × S.A + 背景 × (1 − S.A)，二者仅在 A=255（纯替换）时相等，故：
-//   - A === 0   → 纯加色：摊平 alpha 的染色贴图走 'lighter' 单笔（C.A=0 背景零衰减）
+//   - A === 0   → 纯加色：保形染色贴图 'lighter' 单笔（C.A=0 背景零衰减,
+//                 贡献=tex.rgb×tex.a×C.rgb——透明域贡献 0,★BJ703-F 勘误:摊平
+//                 会让透明域全幅加色=染色带）
 //   - A === 255 → 纯替换：保形染色的贴图 source-over 单笔（背景衰减 100%）
 //   - 中间档    → 两笔精确等价：黑色保形贴图 source-over @A/255（压暗背景）+
-//                 摊平染色贴图 'lighter'（补上贡献）
+//                 保形染色贴图 'lighter'（补上贡献,★BJ703-F:同不吃 C.a）
 // 【光照】原版逐段 Lighting.GetColor(:27905/:35199) 把段色乘所在格光照；本仓实体层
 // 画在全屏光照合成【之前】，逐像素乘光 ≈ 逐段取光（Bobber 既有口径），故段色不再
 // 乘光——但 stringColor==29 时原版【免】逐段取光（:27903-27906/:35200-35204），
@@ -111,7 +113,11 @@ type Tex = ImageBitmap | HTMLImageElement | HTMLCanvasElement;
 const tintCache = new WeakMap<Tex, Map<string, HTMLCanvasElement>>();
 
 /** 染色：multiply 乘 RGB；flatten=false 时 destination-in 回贴原 alpha（保形），
- *  flatten=true 时摊平 alpha=255（'lighter' 加色用——透明像素成不透明黑，加 0 无害）。
+ *  flatten=true 时摊平 alpha=255——★BJ371/BJ700-C 勘误：透明像素成不透明【染色底】
+ *  非黑（canvas multiply αb=0 域 Co=Cs,αo=1——rgb 非全黑即整幅染色;探针实证 329 图
+ *  6684 透明 texel 全变 (200,200,200,255)）——'lighter' 消费即白/彩底大方块。
+ *  flatten=true 仅对【全不透明贴图】（渔线段等）或 rgb=(0,0,0) 无害;含透明域贴图
+ *  的 'lighter'/加色面一律 flatten=false（透明域贡献 0,XNA 预乘逐项相等）。
  *  （ChunkCache.tintRegion 同款三段合成；鞭渲染 WhipProj 亦消费——鞭身渔线/彩色鞭尖） */
 export function tintedTex(tex: Tex, rgb: readonly [number, number, number], flatten: boolean): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;   // node 单测/非 DOM 环境无画布可染（消费端跳笔）
@@ -160,8 +166,12 @@ function drawSegment(
   ctx.rotate(rot);
   ctx.imageSmoothingEnabled = false;
   if (a === 0) {
-    // 纯加色：摊平染色 + 'lighter'（A=0 预乘 = 背景零衰减）
-    const t = tintedTex(tex, [color[0], color[1], color[2]], true);
+    // 纯加色：保形染色 + 'lighter'（A=0 预乘 = 背景零衰减,贡献=tex.rgb×tex.a×C.rgb
+    // ——透明域贡献 0）。★BJ703-F：原 flatten=true 摊平把透明域填成不透明染色底
+    // （multiply 对 αb=0 背景 Co=Cs——BJ700-C 探针实证）→ 'lighter' 全幅加色
+    // =12px 宽染色带（FishingLine 仅列 5/6 不透明,83.3% 透明）;渔线色 29
+    // （A=0 档）消费面实况。二值 α 贴图 flatten=false 逐 texel 精确。
+    const t = tintedTex(tex, [color[0], color[1], color[2]], false);
     if (!t) { ctx.restore(); return; }
     ctx.globalCompositeOperation = 'lighter';
     ctx.drawImage(t, 0, 0, w, h, -w / 2, 0, w, h);
@@ -171,9 +181,14 @@ function drawSegment(
     if (!t) { ctx.restore(); return; }
     ctx.drawImage(t, 0, 0, w, h, -w / 2, 0, w, h);
   } else {
-    // 中间档两笔：黑形压暗背景(×(1−A/255)) + 摊平染色 'lighter' 补贡献
+    // 中间档两笔：黑形压暗背景(×(1−T.a×A/255)) + 保形染色 'lighter' 补贡献
+    // （贡献=tex.rgb×tex.a×C.rgb 不吃 C.a——XNA One 因子,PrismProj 白 pass 同判例）。
+    // ★BJ703-F：原第二笔 flatten=true 摊平 → 透明列全幅加 C.rgb = 6× 宽染色带;
+    // 悠悠球线默认档（psc=0 → GetAlpha 重置 255 → ×0.5 = A=127）即此档——
+    // 每根悠悠球/配重球线都是消费面（Main.cs:28466-28474 亲读:White×0.4→
+    // TryApplying→非 29 GetColor 重置→×0.5 ⇒ A=127 恒中间档）。
     const black = tintedTex(tex, [0, 0, 0], false);
-    const t = tintedTex(tex, [color[0], color[1], color[2]], true);
+    const t = tintedTex(tex, [color[0], color[1], color[2]], false);
     if (!black || !t) { ctx.restore(); return; }
     ctx.globalAlpha = a / 255;
     ctx.drawImage(black, 0, 0, w, h, -w / 2, 0, w, h);

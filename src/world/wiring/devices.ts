@@ -841,17 +841,23 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         if (num35 === 4) px += 5;
         py += 5;
       }
-      // num36 3/4 原版发 PortalGunBolt 601（WorldGen.cs:50622-50631）：速度 3、damage 0、
-      // ai[0] = ammo5 ? 1 : 0（传送门 form，橙 0/蓝 1）。撞块 → PortalHelper.TryPlacingPortal
-      // 落门（entities/Portal.ts），不再沿用巨石弹体
-      const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny' : 'portalbolt';
+      // num36 2 原版发彩带弹 178（WorldGen.cs:51043-51045 ammo3 → type 178,damage
+      //  0 纯视觉——★BJ704-G14 件1 勘误:旧三元式把 band2 落 'portalbolt'=整型错配,
+      //  与手工火把档（band<3 含 2）同刀对齐）;num36 3/4 原版发 PortalGunBolt 601
+      // （:50622-50631）：速度 3、damage 0、ai[0] = ammo5 ? 1 : 0（传送门 form，
+      //  橙 0/蓝 1）。撞块 → PortalHelper.TryPlacingPortal 落门（entities/Portal.ts），
+      //  不再沿用巨石弹体
+      const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny'
+        : num36 === 2 ? 'confetti' : 'portalbolt';
       const form = num36 === 4 ? 1 : 0; // :50622-50631（ammo4 → ai0=0 / ammo5 → ai0=1）
       // 全局冷却置位（Wiring.cs:1334-1339：大炮 120 / 兔兔炮 480）——先于弹内判定，
       // 与原版一致（冷却在 HitWireSingle 置位，BunnyCannonCanFire 在 ShootFromCannon 内）
       if (num36 === 0) w.cannonCoolDown = 120;
       if (num36 === 1) w.bunnyCannonCoolDown = 480;
-      // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :50722-50760：
-      //   NPC614+弹281 计数 ≥4 拒绝；NPC614 无对应实体，此处只数 281 弹）
+      // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :51150-51192：
+      //   NPC614（前 100 槽全量）+弹281 计数 ≥4 拒绝——★BJ704-G11：活兔落定 →
+      //   ReleaseNPC(614) 接通后 countProjectiles 亦计 critters 桶 614;NPC 槽位
+      //   空位门（num2 空槽计数）系 vanilla 100 槽数据结构面,仓内无槽位模型不入）
       if (kind === 'bunny' && ctx.countProjectiles('bunny', px, py, Infinity) >= 4) return true;
       ctx.shootProjectile(px, py, vx, vy, damage, kind, form);
       return true;

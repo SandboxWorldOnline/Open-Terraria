@@ -178,7 +178,7 @@ describe.skipIf(EXT_MISSING)('BJ617 A组 件1：SessionLock Web Locks 会话锁'
     expect(s).toContain("'Mods.SandboxWorld.Toast.CharLockedByOtherTab'");
     // 释放三面：missing 分支 / catch / quitToMenu（先落盘再放锁）
     expect(s.match(/heldSessionLocks\?\.release\(\);/g)?.length, 'missing+catch+abort+rethrow+quitToMenu+双防御释放面').toBeGreaterThanOrEqual(5);
-    expect(s).toContain('heldSessionLocks = null;\n      console.error(e);');   // catch 面
+    expect(s).toContain('heldSessionLocks = null;\n      currentWorld = null;');   // catch 面（★BJ704-G7 2026-10-21 形随刀更新:锁释放与 console.error 之间插入 currentWorld 绑定清零——语义不变「先放锁」,改判史=初锁直贴 console.error）
     // 创建面：角色锁（新世界 id 全新=无世界争用面）;中止支放锁
     expect(s).toContain('const c = await acquireSessionLock(charLockKey(cid0));');
     // 退出面在 currentWorld=null 之后（doSave 全链落定才放锁——序关系锚,注释剥离留空行不依赖）

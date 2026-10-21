@@ -15,11 +15,13 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 export interface SaveEntry { id: number; name: string; json: string | null }
 
 export interface MultiplayerSelectCallbacks {
-  /** 加入房间（完整 ws URL：ws://host:wsPort/<房间码>[?token=...]） */
-  onJoinRoom: (url: string, hostToken: string) => void;
+  /** 加入房间（完整 ws URL：ws://host:wsPort/<房间码>[?token=...]）。
+   *  worldId=建房链进房时传入的本机世界槽位 id（★BJ704-G7 件1:playedWorlds 绑定;
+   *  码入房/房间列表进房不传=undefined） */
+  onJoinRoom: (url: string, hostToken: string, worldId?: number) => void;
   /** 创建房间资产链(2026-08-25 用户要求,单人式流程):角色选择 → 世界列表 →
-   *  then(saveJson, worldName) 继续建房 */
-  onCreateRoomFlow: (then: (worldJson: string, worldName: string) => void) => void;
+   *  then(saveJson, worldName, worldId?) 继续建房（worldId=选定世界槽位 id） */
+  onCreateRoomFlow: (then: (worldJson: string, worldName: string, worldId?: number) => void) => void;
   /** 加入/创建前需要角色(2026-08-25 用户要求):跳转既有单人角色列表
    *  (CharSelectPanel 覆盖层,多人面板保持挂载)——选完 then() 继续动作 */
   onNeedCharacter: (then: () => void) => void;
@@ -139,7 +141,7 @@ export class MultiplayerSelect {
     createBtn.style.margin = '8px 0 4px';
     createBtn.onclick = () => {
       // 单人式资产链:角色选择 → 世界列表 → 建房(2026-08-25 用户要求)
-      this.cb.onCreateRoomFlow((worldJson, worldName) => void this.createRoom(createBtn, worldJson, worldName));
+      this.cb.onCreateRoomFlow((worldJson, worldName, worldId) => void this.createRoom(createBtn, worldJson, worldName, worldId));
     };
     this.root.appendChild(createBtn);
 
@@ -219,7 +221,7 @@ export class MultiplayerSelect {
 
   // ================= 建房 =================
 
-  private async createRoom(btn: HTMLButtonElement, worldJson: string, worldName: string) {
+  private async createRoom(btn: HTMLButtonElement, worldJson: string, worldName: string, worldId?: number) {
     const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.createdInfo, T('BadAddr'), '#ff6b6b'); return; }
     btn.disabled = true;
@@ -246,7 +248,7 @@ export class MultiplayerSelect {
       enter.style.cssText = 'width:auto; margin:6px 0 0; display:block;';
       enter.onclick = () => {
         const url = this.joinUrl(this.hostCode, this.hostToken);
-        if (url) this.cb.onJoinRoom(url, this.hostToken);
+        if (url) this.cb.onJoinRoom(url, this.hostToken, worldId);   // ★BJ704-G7 件1:建房世界槽位 id 随进房下传
       };
       this.createdInfo.appendChild(enter);
       // 建房成功后房间码所在房可能进列表（公开时）——轻刷一次

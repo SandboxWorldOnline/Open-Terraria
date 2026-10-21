@@ -219,6 +219,7 @@ import {
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
   settingsAnchorOf, defenseRowOf,   // ★BJ416:设置钮锚/装备列尾行族单源(Main.cs:46254-46285/42091-42102);★BJ501:advisorRowOf/advisorInlineXY/hasSpaceForInlineAdvisor 内联接线退役(用户明令恒大卡位,函数留 vanillaInvLayout.ts 备查)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
+import { cursorTooltipAnchor } from './tooltipAnchor';   // ★BJ704-G7 件4:光标锚公式纯函数单源(toolTipDistance 补齐)
 import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool, buildItemSearchView } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源;★BJ207 view 构建单源
 import {
   // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
@@ -251,7 +252,7 @@ import { sortContainerItems } from '../stats/ItemSorting';   // ★SW-RB13c:ches
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor, ADVISOR_SCALE_LARGE } from './AchievementsUI';   // ★BJ501:advisorHasCard/ADVISOR_SCALE_INLINE 接线退役(用户明令恒大卡,回滚口见 buildVanillaInventoryPanel)
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
-import { openJourneyPowersPanel } from './JourneyPowersUI';
+import { openJourneyPowersPanel, closeJourneyPowersPanel } from './JourneyPowersUI';
 import { openPlayerListPanel } from './PlayerListPanel';
 import { openEmoteMenu } from './EmoteMenu';
 import { CharCreation } from './CharCreation';
@@ -1938,7 +1939,26 @@ export class UI {
       //  OverrideLeftClick 只由左键驱动 :552/:895）——曾让中键/侧键+Shift/Ctrl 触发
       //  快移/丢桶（改动前中键=惰性 dragFrom,mouseup button!==0 早退）
       if (e.button === 0 && e.altKey && this.altSlotClick(i, where, panelOpen)) return;
-      if (e.button === 0 && (e.shiftKey || e.ctrlKey) && this.altMoveClick(i, where, e.shiftKey, e.ctrlKey, panelOpen)) return;
+      // ★BJ704-R5 P1（红蓝审查 F6 同族缺口,探针 B2/B3/B4 实证）：Shift/Ctrl 替代点击
+      //  可原地清空/换掉悬停槽（Ctrl 快速回收·Shift 快移/guide 对换）——mousedown 支
+      //  无任何边界事件（鼠标未离格）,旧气泡残留且跟随臂携之漂移;F6 只盖了 mouseup
+      //  pickUp 支。原版=ItemSlot.MouseHover 逐帧重评（ItemSlot.cs:3174/:3179
+      //  item.IsAir 不置 hoverItemName）→ 空槽零 tooltip、内容变更当帧重渲染。近似=
+      //  槽空→hideCursorTooltip;内容变（id/词缀/堆数）→重走 showSlotHintTouch 同
+      //  enter 路径重渲染。门 tooltipFollowsCursor=只管光标支槽位泡（元素锚气泡:
+      //  重铸/buff/触屏长按不属本槽悬停链,不动;与 F6 同门）。
+      if (e.button === 0 && (e.shiftKey || e.ctrlKey)) {
+        const before = this.slotContent(where, i);
+        if (this.altMoveClick(i, where, e.shiftKey, e.ctrlKey, panelOpen)) {
+          if (this.tooltipFollowsCursor && this.tooltip.style.display === 'block') {
+            const after = this.slotContent(where, i);
+            if (!after) this.hideCursorTooltip();
+            else if (after.id !== before?.id || (after.prefix ?? 0) !== (before?.prefix ?? 0)
+              || after.stack !== before?.stack) this.showSlotHintTouch(i, where, host);
+          }
+          return;
+        }
+      }
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
     // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
@@ -3812,28 +3832,18 @@ export class UI {
   /** 触屏长按元素锚标记（showSlotHintTouch 触屏支单写,showTooltipFor 单读即清） */
   private tooltipTouchAnchor: HTMLElement | null | undefined = undefined;
 
-  /** ★BJ669e2 光标锚定位公式单源（Main.cs:20378-20392,原 BJ669e 内联式迁移）：
-   *  X=mouseX+14/Y=mouseY+14（:20378-20379）→ ThickMouse +6/+6（:20385-20389;
-   *  MouseBorderColor 默认 (64,64,64,64)≠Transparent :276 → :2684 默认档恒 true
-   *  ——★清偿A-F1 2026-10-14 补齐：此前丢 +6/+6,气泡恒贴光标 8px 视距（原版
-   *  14px）,与 Renderer.mouseTextAnchor（thickMouse 缺省 true 同建模）对齐）→
-   *  持物 X+=34 避让（:20390-20392）。
-   *  钳制真锚=MouseText_DrawItemTooltip :20561-20579（★清偿A-F2 注释重锚——此前
-   *  误锚 :20403-20412=num2 40 纯文本支）:文字盒缘钳 num4=4（:20563 悬停文本框
-   *  关）/18（:20565-20570 开,原版并文字原点 +8/+2——本仓 .sw-tooltip 自带
-   *  padding 9/13 已按盒模型承担该偏移,不再叠加）;按文字缘换算元素缘 pad=
-   *  num4−padding（opaque 开档盒右缘收 sw−4 与 DrawInvBG X−14..+14 盒几何同相,
-   *  1px 差=padR 13 vs num8 14;opaque 关档 pad 为负=元素不可见 padding 允许越出
-   *  屏、文字缘仍收 num4——与原版关档纯文字语义同相）。
+  /** ★BJ669e2 光标锚定位公式单源（Main.cs:20378-20392 + :20561-20579,原 BJ669e
+   *  内联式迁移）→ ★BJ704-G7 件4（R5 登记债③清偿,2026-10-21）：公式体迁
+   *  tooltipAnchor.cursorTooltipAnchor 纯函数（achTipAnchorXY/mouseTextAnchor
+   *  同族）,补齐 toolTipDistance(+6,+6,Main.cs:411 静态私有仅 :20561-20562 读)
+   *  ——旧式只建 +14+ThickMouse+持物+opaque 换算,toolTipDistance 被 opaque 档
+   *  padding 13≈(6+8) 巧合吸收(1px 差),nobox 档文字原点恒偏右 ~7px/偏下 ~3px。
+   *  逐项锚/换算推导见 tooltipAnchor.ts 头注（opaque 盒几何 X−14/Y−9 保留 1px
+   *  差族声明;nobox=文字缘−padding 钳 num4）。
    *  showTooltipFor 定位拍与 mousemove 跟随臂共用 */
   private cursorTooltipPos(tw: number, th: number): { left: number; top: number } {
-    let left = this.mouseX + 14 + 6, top = this.mouseY + 14 + 6;   // +14 :20378-20379 / ThickMouse +6 :20385-20389
-    if (this.heldStack) left += 34;    // !mouseItem.IsAir → +34（:20390-20392）
-    const num4 = options.data.opaqueBoxBehindTooltips ? 18 : 4;   // :20565-20570 / :20563
-    const padX = num4 - 13, padY = num4 - 9;   // .sw-tooltip padding:9px 13px → 文字缘→元素缘补偿
-    if (left + tw > window.innerWidth - padX) left = Math.max(0, window.innerWidth - padX - tw);
-    if (top + th > window.innerHeight - padY) top = Math.max(0, window.innerHeight - padY - th);
-    return { left, top };
+    return cursorTooltipAnchor(this.mouseX, this.mouseY, !!this.heldStack,
+      options.data.opaqueBoxBehindTooltips, tw, th, window.innerWidth, window.innerHeight);
   }
 
   /** ★清偿A-F5/F6（2026-10-14）：光标支气泡隐藏+跟随态清零单点（display none/
@@ -7484,9 +7494,17 @@ export class UI {
     //   classic 构建器下两态恒 false=行为无差,改门只为两布局单一规则;判例锚=
     //   smart-cursor-dark-visibility-user-divergence）。原版平价面（制作菜单关+箱开=藏,
     //   箱内三钮承接）不变。
+    // ★BJ704-G7 件2（R5 登记债⑥清偿,2026-10-21）：商店半边补齐——旧门只建 openChest
+    //   半边（注释宣称「开箱/商店不显示」但代码从未落 npcShop 项,商店期钮恒显=旧注释
+    //   假陈述面）。vinv 面 pos 闭包经 layoutVanilla ctx.chestOpen（=openChest∨
+    //   npcShopOpen,见 layoutVanilla）早已双半边=正确无需动;R5「pos 门 none 输给
+    //   refreshAll 竞写→恒显旧位」定谳=伪影（vinvQuickBtn 唯一写位=pos 循环,classic
+    //   quickStackBtn/qsSmartBtn 在 vanilla 构建下被 teardown 置 null 本循环即跳过
+    //   ——两元素互不竞写）。classic 门与 vinv 同规则:quickStackXY(chestOrShopOpen,
+    //   craftMenuOpen) 单源语义。
     for (const [b, mode] of [[this.quickStackBtn, 'quick'], [this.qsSmartBtn, 'smart']] as const) {
       if (!b) continue;
-      b.style.display = this.openChest && !(this.vinvModernCraftOpen || this.vinvPipsUseGrid) ? 'none' : '';
+      b.style.display = (this.openChest || this.game.npcShopOpen) && !(this.vinvModernCraftOpen || this.vinvPipsUseGrid) ? 'none' : '';
       // title 不走 GameUI.* 官译（带「右键点击切换堆叠方式」提示,双钮拆分后无此交互）
       b.title = mode === 'smart' ? '智能堆叠至附近宝箱' : '快速堆叠至附近宝箱';
     }
@@ -8047,6 +8065,10 @@ export class UI {
     this.closeNpcDialog();
     closeAchievementsPanel();
     closeResearchPanel();
+    // ★BJ704-G7 件5：Journey 面板同律收口（closeAll=IngameUIWindows.CloseAll
+    //  Main.cs:43017 语义=fancy UI 全关——Research 在收而 Journey 缺席=不对称遗漏,
+    //  面板变量/Esc 监听/uiBlocking claim（栈律 token）滞留到下局）
+    closeJourneyPowersPanel();
     this.achWrapEl = null;
     // 住房右缘条（body 级 Canvas,不随 root 清空）——先摘旗再 destroy：onClosed
     // 里 `if (game) openInventory` 在退菜单路径 game 已 null,不会误开背包
@@ -8750,7 +8772,8 @@ export class UI {
     // 悬停文案 MouseTextNoOverride("GameUI.SortInventory") :42618-42620→title 代承载)
     // 排序主干=src/stats/ItemSorting.ts(52 层谓词+21 张 SortingPriority 集比较器+
     // 运行时层序推导+金标 tests/sw-fx29);vanilla Sort 钮仅 chest==-1 && npcShop==0
-    // 绘制(:42586),本仓开箱态也画=登记形差,点击功能同链
+    // 绘制(:42586)——本仓 sortXY(chestOrShopOpen) 同门 1:1(开箱/商店均藏;★BJ704-G7
+    // 件2 勘误:旧注「本仓开箱态也画=登记形差」为假陈述,sortXY 一直按门隐藏,点击功能同链)
     {
       const b = btn(30, 30);
       this.vinvSortBtn = b;

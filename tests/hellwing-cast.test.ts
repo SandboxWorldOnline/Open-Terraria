@@ -214,7 +214,18 @@ describe('485 狱翼蝠 GetAlpha (255,255,255,200) → 本体 78.4% 不透明（
       imageSmoothingEnabled: false,
       drawImage: () => { calls.push({ ga, gco }); },
     } as unknown as CanvasRenderingContext2D;
-    a.draw({ ctx, mainPlayer: undefined } as never, undefined as never);
+    // ★BJ703-F 夹具勘误（2026-10-21,存量红分诊=夹具病非 src 回归）：BJ-C1 F3
+    //  （2026-10-06 常量色族通用全亮通道）后 485（fixed 白 (255,255,255,200) →
+    //  constFullbrightGate 过门）本体段经 recording-ctx 捕获、由 r.queueProjFullbright
+    //  闭包重放——旧直断 ctx 笔=零调用恒红（本测 2026-09-03 早于 F3 架构）。本夹具
+    //  给队列桩:立即以断言 ctx 执行闭包 = 重放路径 1:1（bj529 同款习语）。
+    const queued: Array<(c: CanvasRenderingContext2D) => void> = [];
+    a.draw({
+      ctx, mainPlayer: undefined,
+      queueProjFullbright: (fn: (c: CanvasRenderingContext2D) => void) => { queued.push(fn); },
+    } as never, undefined as never);
+    expect(queued.length).toBe(1);                     // 常量色族 capture→commit 单闭包
+    for (const fn of queued) fn(ctx);
     expect(calls.length).toBeGreaterThanOrEqual(1);    // 本体走帧切片 drawImage 路径
     expect(calls.every((c) => Math.abs(c.ga - 200 / 255) < 1e-9)).toBe(true);   // 78.4%
     expect(calls.every((c) => c.gco === 'source-over')).toBe(true);   // 不在加算组

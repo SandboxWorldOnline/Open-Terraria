@@ -180,14 +180,14 @@ describe('BJ666 ② 257 Dart：capture→projFullbrightQueue lighter（DART_STYL
     expect((rc.ctx as unknown as { globalAlpha: number }).globalAlpha).toBeCloseTo(1, 6);
   });
 
-  it('姿态面零改：闭包 rotate=align90（atan2+π/2,DART_STYLE 257 照旧）', () => {
+  it('姿态面零改：闭包 rotate=align90（atan2+1.57 字面,DART_STYLE 257 照旧——★G10/R2-F13 字面随迁,旧 π/2 断言退役）', () => {
     const d = mk257(3);
     const { queued } = drawWithQueue((r: never) => d.draw(r, undefined as never));
     const rc = recordingCtx();
     queued[0](rc.ctx);
     const rotOp = rc.recs.find((r) => r.op === 'rotate');
     expect(rotOp).toBeTruthy();
-    expect(rotOp!.args![0]).toBeCloseTo(Math.atan2(0, 15) + Math.PI / 2, 5);
+    expect(rotOp!.args![0]).toBe(Math.atan2(0, 15) + 1.57);
   });
 
   it('源矩形同源：闭包 9 参 drawImage 用 projFrameSrcRect(257,0)', () => {

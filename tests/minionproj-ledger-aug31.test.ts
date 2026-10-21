@@ -25,6 +25,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { canHit, canHitLine } from '../src/physics/LineOfSight';
+import { pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ704-G1 债①：idStatic 桶 GTW 钟驱动（vitest 钉钟面）
 import { temporaryBubbleSnapshot } from '../src/render/EmoteBubble';
 import type { GameHooks } from '../src/entities/types';
 
@@ -279,11 +280,21 @@ describe('台账批③ 接触冷却三态（P.cs:466/-2 全局窗;local;idStatic
     const { hooks, player } = makeHooks([e]);
     const f1 = mk(758, player, e.cx, e.cy);
     const f2 = mk(758, player, e.cx, e.cy);
+    // ★BJ704-G1 债①：idStatic 桶=gameTickCount 绝对到期（原版 perIDStaticNPCImmunity
+    //   按 GameUpdateCount 到期——写 count+cd（:14035-14037）/门 stored≤count
+    //   （:606-608）,【无】倒数衰减通道）。夹具「一咬=一拍」模型随之扩到 GTW 钟
+    //   （原 mock 只衰减敌 iframes=倒数桶时代旧世界模型;旧 MinionHitCd 倒数桶零
+    //   tick 驱动=本红根因,oracle 重产判例 Z1 同式）。钉钟 0 起步=文件内序无关。
+    pinGameTimeTicks(0);
     expect(bite(f1, hooks)).toBe(true);
     expect(bite(f2, hooks)).toBe(false);                  // 同型桶共享 perIDStaticNPCImmunity
     let unlocked = false;
-    for (let k = 0; k < 12 && !unlocked; k++) unlocked = bite(f2, hooks);
-    expect(unlocked).toBe(true);
+    let tick = 0;
+    for (let k = 0; k < 12 && !unlocked; k++) {
+      pinGameTimeTicks(++tick);                           // 一咬=一拍（GTW 钟=GameUpdateCount 等价）
+      unlocked = bite(f2, hooks);
+    }
+    expect(unlocked).toBe(true);                          // 首咬写 0+10 → 第 10 拍（count=10）解封
   });
   it('533 致命球 local 12 各弹独立（:6008）', () => {
     const e = mkEnemy(12, 60 * 16, 96 * 16);

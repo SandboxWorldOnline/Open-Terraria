@@ -10,6 +10,7 @@ import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS, AVOIDED_BY_NPCS_SHEETS, INTERACTABLE_BY_NPCS_SHEETS } from '../data/tiles';
+import { TOWN_CRITTER_IDS } from '../data/critters';   // ★BJ704-G3 D7：TownCritter 集单源（NPCID.cs:4827）
 import type { TileStore } from '../world/TileStore';
 // ★BJ656：tileSolid 真表代理已收编进 TileStore.isVanillaTileSolid（平台九件套
 // PLATFORM_SOLID2_SHEETS 同集,nactive() 门）——旧直查 GenSolid.VAN_TILE_SOLID_EXTRA
@@ -54,6 +55,8 @@ import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, type Enemy } from './Enemy';
+// ★BJ704-G6 D12：行走预测共享叶子（walkPrediction 本体已迁出,见下方 re-export 注）
+import { walkPrediction, HOME_DRIFT_RANGE } from './npcWalkPrediction';
 import { spawnVanillaEnemy } from './bossAI';
 import { spawnWOF } from './bossAI_wof';   // ★BJ574：checkDead case 22 向导浸浆死召唤链
 import { newLovestruckHeart, GorePiece } from './GorePiece';   // ★清偿刀 F：Lovestruck 头爱心 331 单源（城镇/敌怪共用,GorePiece.ts 尾）;★BJ592：case 11 困盹臭气团 580-582 发射面
@@ -87,11 +90,6 @@ import { runModOnHitAny, runModOnNpcHitByAny, runModOnNpcDeath, runModOnKillAnyN
 // 以及上文随机源豁免五件的伴随视觉面。[本仓视觉添加] 标注 = 原版无此视觉件
 // （如溺水 −2 的观感飘字,NPC.cs:96118-96154 为静默扣血）。
 
-/** 关门/高门关态判定(行走预测器放行用——门列不算坑、不算跳障实体) */
-function isClosedDoorOrGate(t: number): boolean {
-  return t === TILE_BY_KEY_DOOR_TILES['door_closed'] || t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed'];
-}
-
 export interface NpcHome { x: number; y: number; }
 
 /** NPCID.Sets.IsTownPet（NPCID.cs:4446）全表：猫 637/狗 638/兔 656/蓝城镇史莱姆
@@ -123,12 +121,11 @@ const IS_TOWN_PET = new Set([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 6
  *  IsTownPet。AI_007 的回家双臂(:54198/:54320 `!TownCritter[type]` 门)与
  *  GetWalkPrediction 避坠豁免(:56120-56123)消费的是【本集】——此前误用 IS_TOWN_PET
  *  使家化宠物不回家且恒放弃避坠判定；拨正后宠物恢复回家/避坠，两消费面不动
- *  NO_SIT_NPC_IDS / 聊天等真实 IsTownPet 位 */
-export const VANILLA_TOWN_CRITTER_SHEETS = new Set([
-  46, 148, 149, 230, 299, 300, 303, 337, 361, 362, 364, 366, 367, 443, 445, 447,
-  538, 539, 540, 583, 584, 585, 592, 593, 602, 607, 608, 610, 616, 617, 625, 626,
-  627, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 687, 688,
-]);
+ *  NO_SIT_NPC_IDS / 聊天等真实 IsTownPet 位。
+ *  ★BJ704-G3 D7（2026-10-21）：表体抽至 src/data/critters.ts TOWN_CRITTER_IDS
+ *  单源（Enemy 侧 townCritterWalkAI 三闸/夜间即停支同集消费,防双副本漂移）,
+ *  本别名保留既有消费面（含 tests/townnpc-*） */
+export const VANILLA_TOWN_CRITTER_SHEETS: ReadonlySet<number> = TOWN_CRITTER_IDS;
 /** NPCID.Sets.IsTownSlime（NPCID.cs:4446）——站定态湿身强制走动门（真锚
  *  cs:54171-76；★对抗修复批⑤ A11 行号考古：旧注 ":54047-4054" 系错引） */
 const SLIME_TOWN_IDS = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
@@ -364,8 +361,10 @@ export const LEASH_SOFT = 25;
 export const LEASH_HARD = 50;
 export const LEASH_TURN_CHANCE = 80;
 export const LEASH_TURN_LOCK = 200;
-/** 背离 home 超 ±35 格且方向背家 → 停程倒计时额外 −5/t（:54220-54231） */
-export const HOME_DRIFT_RANGE = 35;
+/** 背离 home 超 ±35 格且方向背家 → 停程倒计时额外 −5/t（:54220-54231）
+ *  ——★BJ704-G6 D12：常量本体迁 npcWalkPrediction.ts 共享叶子（walkPrediction
+ *  家域豁免带同值同源）,此处 re-export 保既有消费面 */
+export { HOME_DRIFT_RANGE } from './npcWalkPrediction';
 export const HOME_DRIFT_TICK = 5;
 /** 到家站定入停态 ai[1] = 200+Next(200)（★对抗修复批⑤ A11 行号考古：真锚
  *  cs:54241-43 站定回家未到走臂 / cs:54353-56 行走到家刹停入停,旧注
@@ -501,80 +500,11 @@ export function meleeAttackRect(
   return { x: e.x, y: e.y, w: e.w, h: e.h };
 }
 
-/** AI_007_TownEntities_GetWalkPrediction（NPC.cs:56093-56165）1:1：
- *  keepwalking 三路（:56098-56117）：①起步期（isLikeATownNPC && ai[1]<30，即
- *  走程剩余 <30t）身体竖线（Top→Bottom × width 展开 = 自身占据列）命中
- *  AvoidedByNPCs 块 → 续走（SearchAvoidedByNPCs：命中集合块=阻断，keepwalking
- *  取反 = 挤开走）；②未阻断时前方盒（X−20/宽+40）内有 velocity.X==0 的
- *  friendly NPC → 续走（挤人绕行）；③溺水恒续走。①②由调用方合算为
- *  crowdedOrBlocked 传入（plotAvoidClear 反相 + crowdedByStationaryNpc）。
- *  消费点（:54609-54613 障碍段尾）：keepwalking → 走程重置 90t。
- *  avoidFalling 主链：前视列扫 j=−1..+4（:56279）：液体累计 num / 岩浆 flag2 /
- *  首个实心格（:56291 `nactive() && Main.tileSolid[type]`——★BJ656 三站同式
- *  定谳,仓内=isVanillaTileSolid）记落点 p 并放行；avoidFalling |= flag2（岩浆
- *  恒避）；num ≥ ceil(h/16)（深水没身）→ 避；落点水淹（DrownCollision）→ 避。
- *  豁免（:56120-56123）：TownCritter 恒不避；不在 home±35 且正朝 home 走 →
- *  不避（远处赶路愿意跳坑） */
-export function walkPrediction(
-  st: TileStore, myTileX: number, homeFloorX: number, isTownCritter: boolean,
-  dir: number, tileX: number, tileY: number, heightPx: number,
-  startLeg = false, drowning = false, crowdedOrBlocked = false, widthPx = 20,
-): { keepwalking: boolean; avoidFalling: boolean } {
-  // ---- keepwalking（:56098-56117）----
-  let keepwalking = false;
-  if (startLeg && crowdedOrBlocked) {
-    keepwalking = true;                    // ① 贴 AvoidedByNPCs 块 / ② 挤站定友方
-  }
-  if (!keepwalking && drowning) keepwalking = true;       // ③ 溺水续走（:56116）
-  // ---- avoidFalling（:56119-56165）----
-  let avoidFalling = true;
-  if (isTownCritter || (!(myTileX >= homeFloorX - HOME_DRIFT_RANGE && myTileX <= homeFloorX + HOME_DRIFT_RANGE)
-    && dir === Math.sign(homeFloorX - myTileX))) {
-    avoidFalling = false;                     // :56120-56123
-  }
-  if (!avoidFalling) return { keepwalking, avoidFalling };
-  let lava = false;
-  let px = 0, py = 0;                         // 落点 p（X!=0 判有效）
-  let depth = 0;
-  for (let j = -1; j <= 4; j++) {
-    const ty = tileY + j;
-    if (!st.inBounds(tileX, ty)) continue;
-    const idx = st.idx(tileX, ty);
-    if (st.liquid[idx] > 0) {
-      depth++;
-      if (st.liquidType[idx] === 2) { lava = true; break; }   // :56136-56140
-    }
-    if (st.type[idx] !== 0 && isClosedDoorOrGate(st.type[idx])) {
-      continue;   // ★2026-08-30:关门列=可行走面(门口到达的前提;否则避坠停走死循环在门前)
-    }
-    // ★BJ656（2026-10-12）支撑谓词统一=st.isVanillaTileSolid（=原版裸
-    // Main.tileSolid[type] 代理,nactive() 门,平台九件套经双旗真值
-    // Main.cs:8031-32 计入）——与臂B/坑口停走三站同式（NPC.cs:56291/:54771-72/
-    // :54563 全 `nactive() && Main.tileSolid[type]`）。旧 isSolid∪isPlatform 系
-    // 2026-08-31 平台落点修复（用户实报向导楼梯/dyer 屋内铁证:npcMove span=0,
-    // 平台前视只认 isSolid 会判深坑钉死原地——该案保真,平台计入不变）,但其注释
-    // 锚 SolidOrSlopedTileOrPlatform 系错锚（NPC.cs:53335=FindGoodRestingSpot
-    // :53352 找地板谓词,非本扫描）,isPlatform 把家具顶（桌14/工作台18 等原版
-    // tileSolid=false）一并宽化=登记债;本刀摘除家具顶,平台保 8-31 案。
-    if (st.isVanillaTileSolid(tileX, ty)) {
-      if (depth > 0) { px = tileX; py = ty; }                 // :56148-56151
-      avoidFalling = false;                                   // 实心落点 → 放行
-      break;
-    }
-  }
-  avoidFalling ||= lava;                                      // :56154
-  const bodyTiles = Math.ceil(heightPx / 16);
-  if (depth >= bodyTiles) avoidFalling = true;                // :56156-56159
-  if (!avoidFalling && px !== 0 && py !== 0) {
-    // 落点没顶检验（:56298-56312：ToWorldCoordinates(8,0) + (−W/2,−H) 后走
-    // DrownCollision(width,height,gravDir=1)——★F4 换真探针几何，宽度取
-    // widthPx（缺省 20 = 本仓城镇盒宽；仅影响 min(10,W) 探针 ±1px 级）
-    avoidFalling = drownCollision(
-      st, px * TILE + 8 - widthPx / 2, py * TILE - heightPx, widthPx, heightPx, 1,
-    );
-  }
-  return { keepwalking, avoidFalling };
-}
+// ★BJ704-G6 D12（2026-10-21）：AI_007_TownEntities_GetWalkPrediction（NPC.cs:
+//   56093-56165）1:1 本体迁 npcWalkPrediction.ts 共享叶子（Enemy 侧三消费位
+//   :54136/:54280/:54534 接通需同源——TownNPC.ts 已 import type Enemy,反向
+//   import 成环;逻辑零改动逐字迁出）。此处 re-export 保 Game.ts/测试既有导入面。
+export { walkPrediction } from './npcWalkPrediction';
 
 
 /** 软帽链（StrikeNPC :82147-82166）：kb>8 起每段衰减 0.9/0.8/0.7/0.6、>16 封顶 */
@@ -2371,10 +2301,15 @@ export class TownNPC extends Entity {
       //    管——微光中溺水伤害【照常】结算;致死一击 StrikeNPCNoInteraction(owner=255)
       //    同样不查 dontTakeDamage(:82012→:82017)）。序位 = AI 之后、碰撞之前。
       // ② 重力 + 碰撞 + 找帧。
-      // ★重力 = 0（UpdateNPC_UpdateGravity :91918-91922 aiStyle7 && ai[0]==25 档）：
+      // ★重力 = 0（UpdateNPC_UpdateGravity :92036-92038 aiStyle7 && ai[0]==25 档,
+      //   旧注 :91918-91922 系 1456 行带漂移——Enemy 侧 applyGravity 表对该档有
+      //   「域不可达勿落死码」完备性备注,BJ704-G6 R3-P2④）：
       //   微光上升演出期不坠，仅落速帽——曾加 ENEMY_GRAVITY = 上升被拽下坠
       this.envHurtUpdate(world, game);
       this.vy = Math.min(this.vy, MAX_FALL_SPEED);
+      // ★BJ704-G3 D9：原版小 vx 清零（NPC.cs:91588-91591 `|vx|<0.005 → 0`，
+      //   UpdateNPC 全局段 AI 后/碰撞前无条件——微光上升演出臂同样照清）
+      if (this.vx < 0.005 && this.vx > -0.005) this.vx = 0;
       moveAndCollide(this, world, this.vx, this.vy);
       this.updateWalkFrame(game);
       return;
@@ -2417,6 +2352,9 @@ export class TownNPC extends Entity {
         if (Math.abs(this.vx) < 0.1) this.vx = 0;
       }
       this.vy = Math.min(this.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
+      // ★BJ704-G3 D9：同款小 vx 清零（被缚 AI_000 自带 |vx|<0.1 档 :19971-19975
+      //   之外,全局 :91588 0.005 档尾清——两档并存=原版双清结构）
+      if (this.vx < 0.005 && this.vx > -0.005) this.vx = 0;
       moveAndCollide(this, world, this.vx, this.vy);
       // 液体段（UpdateNpcLiquid :93712-93805）——原版 UpdateCollision 不分家,
       // bound 照跑（[MAJOR-F4] 的完整承接:此前 bound 永远 wet=false,被缚者入水
@@ -2951,6 +2889,11 @@ export class TownNPC extends Entity {
       ? (this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2)
       : ENEMY_GRAVITY;
     this.vy = Math.min(this.vy + grav, MAX_FALL_SPEED);
+    // ★BJ704-G3 D9（2026-10-21）：原版小 vx 清零（NPC.cs:91588-91591
+    //   `|vx|<0.005 → 0`，UpdateNPC 全局段 AI 后/碰撞前对全体 NPC 无条件——
+    //   Enemy 侧 BJ703-C D6 已接,AI_007 城镇面的走/站/坐 vx 残尾（×0.93 衰减链
+    //   0.0048 级）同拍清零,帧机站定钉（vx==0 门）读到清零值）
+    if (this.vx < 0.005 && this.vx > -0.005) this.vx = 0;
     moveAndCollide(this, world, this.vx, this.vy);
     // ★对抗修复批①2026-09-01：删除 `if(this.hitWall) this.vx*=0.5` 死阻尼——
     // X 轴拦截在 TileCollision.moveAxis 内已 b.vx=0，乘法恒零且原版无城镇撞墙半速
@@ -4106,6 +4049,15 @@ export class TownNPC extends Entity {
       this.shimmerRiseT = 0;
       this.shimmerRisePause = 0;
       this.vx = 0; this.vy = -4;                                  // :53808
+      // ★BJ704-G19（G3 备案②「松鼠黑化 lai2=0」复核翻案落地,2026-10-21）：原版
+      //   转族拍整段清 ai[0..3]+localAI[0..3]（NPC.cs:53800-53815,localAI[2]=0 在
+      //   :53811）。G6 备案时判「lai2 转族后无消费面」——D13（卡墙折返 :54789
+      //   localAI[2]++≥30）同批落地后 stuckT 有了消费面,且本块即写位宿主（备案
+      //   把宿主误记在 Enemy 域:ai[0]==25 微光上升态属 ShimmerTownTransform 集
+      //   =城镇 NPC 专属,Enemy 侧 42 型 critter 结构性不可达）。落地传送
+      //   （:53816 Teleport(12)）后卡墙计数若带旧值=新落点折返提前触发——补
+      //   :53811 单笔（stuckT 即 localAI[2] 承载位,「无衰减清零」语义不变）。
+      this.stuckT = 0;                                            // :53811 localAI[2]=0（转族拍）
       this.shimmered = !this.shimmered;                           // :53814 变体翻转（双向）
       // ShimmerTownNPC 到场粒子（:53817 BroadcastParticleSpawn(ShimmerTownNPC) →
       // Spawn_ShimmerTownNPC :1696-1752）：

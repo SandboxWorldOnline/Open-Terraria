@@ -102,6 +102,14 @@ export interface Body {
    *  ★曾用 vy>=0 宽门：低空飞行小动物（萤火虫/蝴蝶平飞 vy≥0）脚下 7~17px 有落面
    *  即被瞬移按压 → "怪力按地+闪现"周期循环（飞行 AI 抬升后再次触发） */
   stepDownGate?: 'grounded' | 'gravity' | 'never';
+  /** ★BJ703-C D1（2026-10-21）：WalkDownSlope 预备阶段显式 opt-out。stepDownGate
+   *  的 'never' 档【只】门 StepDown（flag22 语义,NPC.cs:54518-21）——原版 NPC 的
+   *  Collision_WalkDownSlopes 无条件跑（UpdateCollision 首步 :93667,内门 vy==gravity
+   *  Collision.cs:1695）,玩家 SlopeDownMovement 也仅 mount48/shimmering 豁免
+   *  （Player.cs:23607）。'never' 档此前把本阶段连带拦截 = aiStyle-7 小动物/TownNPC
+   *  flag22-true 下坡贴地缺失;解耦后仅本旗 true 才跳过（玩家载具态=保守档,原版
+   *  矿车/贴轨照跑 SlopeDownMovement——登记债 BJ703-C D8）。 */
+  walkDownSlopeOff?: boolean;
   /** ★BJ227：Collision.StepDown 第 8 参 waterWalk（Player.cs:23717/:28267 两处调用均传
    *  `waterWalk || waterWalk2`——水上行走族走下台阶时把【液面】也当 7~17px 吸附窗内
    *  落面（Collision.cs:3603-3610 液面臂，liquid>0 且上格无液）。玩家 fixedUpdate 每
@@ -637,10 +645,18 @@ export function walkDownSlopePre(b: Body, world: World, wasGround: boolean): voi
   // 活性门（:1695 字面 `Velocity.Y != gravity` 早退）：玩家侧 vy===GRAVITY 字面
   // 等价；NPC 族本仓重力先累加、碰撞头已清 onGround——贴地判据用入口快照
   // wasGround（'grounded' 档）;跳起首帧 vy<0 / 飞行体照旧早退。
-  // TownCritter 'never' 档不参与（AI_007 flag22 语义）。
+  // ★BJ703-C D1：TownCritter 'never' 档（AI_007 flag22 语义）不再连带跳过本阶段
+  //   ——见下方 walkDownSlopeOff 门注（'never' 只辖 StepDown）。
   if (!b.stepUp) return;
+  // ★BJ703-C D1（2026-10-21）：'never' 连带拦截退役——原版 NPC 无条件跑
+  //   Collision_WalkDownSlopes（NPC.cs:93667,UpdateCollision 首步;flag22 只门
+  //   StepDown :54518-21）,玩家 SlopeDownMovement 也仅 mount48 豁免
+  //   （Player.cs:23607）。显式 opt-out = walkDownSlopeOff（玩家载具态保守档,
+  //   见 Body 字段注）;AI_007 flag22-true 小动物/城镇 NPC 的下坡贴地由此复活,
+  //   'never' 体落默认 'grounded' 门（wasGround ∧ vy>=0,原版 vy==gravity 内门
+  //   的 NPC 域等价——本仓重力先累加,vy 恒 gravity 值非 0）。
+  if (b.walkDownSlopeOff === true) return;
   const gate = b.stepDownGate ?? 'grounded';
-  if (gate === 'never') return;
   // ★SW-FX34：门值 = gravity*gravDir（Player.cs:23610 `Collision.WalkDownSlope(…,
   //  gravity * gravDir)` → Collision.cs:1695 `Velocity.Y != gravity` 早退）——倒挂
   //  贴顶态 vy=-GRAVITY 过门（vanilla 语义：倒挂玩家同样跑 WalkDownSlope,其扫描窗
@@ -1224,6 +1240,8 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   if (b.stepUp) {
     const gate = b.stepDownGate ?? 'grounded';
     // 'never'（AI_007 TownCritter flag22 恒 true 档）跳过 StepDown,StepUp 照常。
+    // ★BJ703-C D1：'never' 只辖本 StepDown 门——WalkDownSlope 预备阶段
+    //   （下方 walkDownSlopePre）不再被连带拦截（原版 NPC :93667 无条件跑）。
     // ★'grounded' 门补 vy>=0（2026-08-25）：原版字面 vy==0（NPC.cs:54374）在跳起
     //   首 tick（AI 已置 vy=-8）同样不吸附——曾只查 wasGround，跳起首 tick 被
     //   StepDown 先拽下 16px 再起跳（观感=起跳顿挫/沉一下；探针 tick=56 实录

@@ -91,7 +91,7 @@ const bat = (player: Player, hooks: GameHooks, cx: number, cy: number,
   return m;
 };
 const P = (m: MinionProj) => m as unknown as {
-  bA0: number; bA1: number; bSX: number; bSY: number; tA0: number; twA0: number; twA1: number;
+  bA0: number; bA1: number; bSX: number; bSY: number; tA0: number; tA1: number; twA0: number; twA1: number;
 };
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -144,7 +144,11 @@ describe('§2 AI_156 族体触鞭 tag（Damage_PVE_Inner :12947-12961）', () =>
     const { hooks, player } = makeHooks([en]);
     const b = bat(player, hooks, en.cx, en.cy);       // 盒叠敌
     player.tagEffectStack.tryApplyTagToNPC(5688, en.id, 0, 0);   // 皮革鞭 tag +3,零 proc 零 crit
-    b.fixedUpdate(1, hooks);                          // idle 拍 bHitTick 即结算
+    // ★BJ698 夹具勘误：755 待机拍（ai[0]==0）被 projPet 门拒伤（Projectile.cs:12495
+    //  `(type != 755 || ai[0] == 0f)`——唯 ai[0]≠0 攻击段放行）,旧 idle 拍直结=锁了
+    //  错窗。改经类型手术直入攻击段（bA0=66 减速段拍,速度 0 位不移=盒仍叠敌）。
+    P(b).bA0 = 66; P(b).bA1 = en.id;
+    b.fixedUpdate(1, hooks);                          // 攻击减速段拍 bHitTick 即结算
     expect(en.calls.map((c) => c.d)).toEqual([9]);    // 6+3（M2:摘 resolveWhipTagHit → [6] 恰红）
     expect(en.calls[0].crit).toBe(false);
   });
@@ -154,19 +158,22 @@ describe('§2 AI_156 族体触鞭 tag（Damage_PVE_Inner :12947-12961）', () =>
     const en = mkEnemy(1, 60 * 16, 90 * 16 - 30);
     const { hooks, player } = makeHooks([en]);
     const b = bat(player, hooks, en.cx, en.cy);
+    P(b).bA0 = 66; P(b).bA1 = en.id;                  // ★BJ698 攻击段拍（同上,窗=ai0≠0）
     b.fixedUpdate(1, hooks);
     expect(en.calls.map((c) => c.d)).toEqual([6]);
   });
 
   it('946 棱镜同锁:tHitTick 亦吃 tag（旧直 hurt =6 恰红）', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.99);
-    // 946 idle SmoothStep 会把棱镜移向肩上 idle 位（玩家侧 ~22px）——用大盒敌罩住
-    // idle 位（盒大小不影响 dmg0,伤害=蝙蝠 damage×summonMult）
+    // ★BJ698 夹具勘误：946 待机拍（ai[0]==0）同被 projPet 门拒（:12495 `(type != 946
+    //  || ai[0] == 0f)`）——改直入攻击段（tA0=80 跃空首拍,起点=出生位=玩家心,
+    //  lerp2=0 位不移）。用大盒敌罩住出生位（盒大小不影响 dmg0）。
     const en = mkEnemy(1, 60 * 16, 90 * 16, 90, 90);
     const { hooks, player } = makeHooks([en]);
     const t = bat(player, hooks, player.cx, player.cy, 946);  // terraprismaAI 首拍 tInit 设盒 7×7
     player.tagEffectStack.tryApplyTagToNPC(5688, en.id, 0, 0);
-    t.fixedUpdate(1, hooks);                          // idle 拍 tHitTick
+    P(t).tA0 = 80; P(t).tA1 = en.id;
+    t.fixedUpdate(1, hooks);                          // 攻击跃空首拍 tHitTick
     expect(en.calls.map((c) => c.d)).toEqual([9]);    // （M2 连坐:946 同摘 → [6] 恰红）
   });
 

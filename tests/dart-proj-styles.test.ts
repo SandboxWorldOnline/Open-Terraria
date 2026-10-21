@@ -31,13 +31,13 @@ function flyTicks(d: Dart, hooks: never, n: number) {
 }
 
 describe('敌怪弹幕 DART_STYLE（对照 Projectile.cs）', () => {
-  it('38 羽毛：align90 旋转 = atan2+π/2（AI_001 尾 :54868,静止朝上贴图对齐弹向）', () => {
+  it('38 羽毛：align90 旋转 = atan2+1.57（AI_001 尾 :58733 字面 1.57f,静止朝上贴图对齐弹向——★G10/R2-F13 字面纪律,旧 π/2/旧锚 :54868 随迁）', () => {
     const { hooks } = dartHooks();
     const d = new Dart(30 * 16, 50 * 16, 6, 0, 15, 38); // 向右平飞
     expect(d.life).toBe(300);                            // NPC 侧 timeLeft 覆写 :23492
     flyTicks(d, hooks, 5);
-    const ang = Math.atan2(0, 6) + Math.PI / 2;
-    expect(d['rot']).toBeCloseTo(ang, 5);
+    const ang = Math.atan2(0, 6) + 1.57;               // ★G10：原版字面 1.57f（非 π/2,残差 0.0008）
+    expect(d['rot']).toBe(ang);
     expect(d.w).toBe(14); expect(d.h).toBe(14);         // SetDefaults 14×14
     expect(d.life).toBe(295);                            // timeLeft 每 tick -1
   });
@@ -158,13 +158,13 @@ describe('敌怪弹幕 DART_STYLE（对照 Projectile.cs）', () => {
     const d = new Dart(20 * 16, 30 * 16, 7, 2, 12, 498);
     expect(d.life).toBe(180);                            // SetDefaults timeLeft :5723
     flyTicks(d, hooks, 49);
-    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2, 5); // else 支 atan2+1.57
+    expect(d['rot']).toBe(Math.atan2(2, 7) + 1.57); // else 支 atan2+1.57（★G10 字面精确）
     expect(d.vy).toBeCloseTo(2, 5);                      // 前 49t 无重力(vy 保持初值 2)
     flyTicks(d, hooks, 1);
     expect(d.vy).toBeCloseTo(2.15, 5);                   // 第 50 更新起 vy+=0.15(:58487)
-    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5, 5); // 自旋一拍
+    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + 1.57 + 0.5, 6); // 自旋一拍
     flyTicks(d, hooks, 3);
-    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + Math.PI / 2 + 0.5 * 4, 5);
+    expect(d['rot']).toBeCloseTo(Math.atan2(2, 7) + 1.57 + 0.5 * 4, 6);
     expect(d.vx).toBeCloseTo(7 * Math.pow(0.98, 4), 4);  // 同支摩擦 ×0.98/更新(:58486)
   });
 });

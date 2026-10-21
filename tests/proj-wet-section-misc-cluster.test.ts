@@ -77,6 +77,13 @@ function makeGame(w: World): {
     world: w,
     player: { x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21, dead: true, iframes: 0, equipStats: {} },
     enemies: () => [], critters: () => [], npcs: () => [],
+    // ★BJ704-G10（件10,预存红夹具修复——bj704g2「湿段域另批修桩」清偿）：
+    //  MinionProj.fixedUpdate 头 whoAmI 懒快照（BJ650件1,:8742-8744）读
+    //  game.entities.projectiles.indexOf(this)——桩缺 entities=3 测恒红
+    //  （TypeError,非断言红;本刀前即红,代码+测试均 HEAD 原样）。空数组=indexOf
+    //  −1 → whoAmI=0（Math.max 钳,对湿段断言零行为影响）;cloneDust 桩同批补
+    //  镜像（GameHooks 契约面,防后续尘站接线再撞同型红）。
+    entities: { projectiles: [] as unknown[], cloneDust: () => null },
     spawnDust: (x: number, y: number, bw: number, bh: number, type: number) => {
       const d = { vx: 1, vy: 1, scale: 1, alpha: 0, fadeIn: 0, noGravity: false,
         noLight: false, noLightEmittance: false, color: null as unknown };

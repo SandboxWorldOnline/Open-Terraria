@@ -19,6 +19,7 @@
 // 运行：cd game && npx vitest run tests/bj395-hurt-accept-plane.test.ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Arrow } from '../src/entities/Arrow';
+import { pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ704-G10（G1 债②）：idStaticCheck GTW tick 钟钉拨
 import { FallingStar } from '../src/entities/FallingStar';
 import { ForbiddenSignProj } from '../src/entities/ForbiddenSignProj';
 import { BeamBoltProj } from '../src/entities/MagnetSphereProj';
@@ -94,11 +95,21 @@ function makeGame(enemies: unknown[], opts?: { player?: Player }): {
   return { hooks, bridge, steal };
 }
 
-/** tick 墙钟（idStaticCheck 组表以 Date.now 节流——每 tick 恒速推 1000/60ms） */
+/** tick 钟（idStaticCheck 组表以 gameTickCount() 节流——★BJ704-G10（G1 债②）
+ *  墙钟 Date.now 版退役,GTW 钉钟随迁：clock.t 仍按 ms 计步（1000/60=1t 恒速,
+ *  调用体零改）,每写换算 tick 钉 pinGameTimeTicks（基值 70_000 偏移防撞窗;
+ *  bj209/bj274 钉钟判例） */
 function withTickClock(fn: (clock: { t: number }) => void): void {
-  const clock = { t: 1_000_000 };
-  const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.t);
-  try { fn(clock); } finally { spy.mockRestore(); }
+  let ms = 1_000_000;
+  const clock = {
+    get t() { return ms; },
+    set t(v: number) {
+      ms = v;
+      pinGameTimeTicks(70_000 + Math.round((v - 1_000_000) / (1000 / 60)));
+    },
+  };
+  clock.t = 1_000_000;   // 初始钉
+  try { fn(clock); } finally { pinGameTimeTicks(70_000 + Math.round((ms - 1_000_000) / (1000 / 60))); }
 }
 
 // ============================================================

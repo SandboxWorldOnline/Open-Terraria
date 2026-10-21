@@ -75,7 +75,11 @@ function ltFindLowestCloudRow(st: TileStore, gs: GenState): number {
 }
 // ★IIIII97c 微段仪：叶簇/走道域每事件打印（SW_I109_MARK 门控；与 x86 taglog 主实例流对位）
 const MK109 = typeof process !== 'undefined' && !!process.env.SW_I109_MARK;
-if (typeof process !== 'undefined') console.log(`[LT109load] mark=${process.env.SW_I109_MARK} mk=${MK109}`);
+// ★BJ702（2026-10-21）：打点并入 MK109 门——线上浏览器环境存在 process 伪定义
+//  （用户实报 console 首行即本打点；扩展/依赖可注入全局 process），旧
+//  `typeof process` 门在生产页必然通过=每次载入必打一行纯噪声。置
+//  SW_I109_MARK 才打印（dev/探针语义不变）。
+if (MK109 && typeof process !== 'undefined') console.log(`[LT109load] mark=${process.env.SW_I109_MARK} mk=${MK109}`);
 function mk109(s: string): void {
   if (!MK109) return;
   const rc = (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1;

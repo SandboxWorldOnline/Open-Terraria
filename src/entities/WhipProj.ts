@@ -529,6 +529,7 @@ export class WhipProj extends Entity {
           env: whipSwingEnvelope(ai0s / this.timeToFlyOut),
           t: ai0s / this.timeToFlyOut,
           facing,
+          hue: owner?.miscCounterNormalized ?? 0,   // ★BJ703-B D4（P.cs:48741 player.miscCounterNormalized）
           pvx: owner?.vx ?? 0, pvy: owner?.vy ?? 0,
           vx: this.wvx, vy: this.wvy,   // proj.velocity（:48853 支 1035 弹向消费;旧传空 vx/vy）
         });
@@ -791,7 +792,14 @@ export class WhipProj extends Entity {
             .equipStats?.armorPen ?? 0) : 0;
           return timerCritTown ? { flatPen, crit: true } : { flatPen };
         });
-      for (const ent of game.enemies()) {
+      // ★2026-10-21 用户实报「万花筒打不到小动物（猫头鹰等）」定谳修复:本扫只扫
+      //  enemies 桶=小动物（EntityManager 独立 critters 桶）对鞭不可见。原版 Colliding
+      //  扫 Main.npc 全槽（小动物可被玩家鞭抽,泰拉经典行为）;镇民桶被下方
+      //  playerCanHitEnemy friendly 门滤（:11892 同语义）→ 正确域=enemies+critters
+      //  （RollingBoulder:1931 三桶命中先例同族）。★其余 ~121 处 `game.enemies()`
+      //  命中扫同病=系统性登记债（子弹/溅射族打不到小动物,原版全域可伤）——逐面
+      //  按需扩,不一次性盲改（Enemy.ts AI 同族计数等非命中消费也读 enemies()）。
+      for (const ent of [...(game.enemies() as unknown[]), ...(game.critters?.() ?? []) as unknown[]]) {
         // ★dontTakeDamage 目标排除（:12600 同款——applyWhipDebuffs/applyBuffTicks(24)
         //   直写在 hurt 前,曾绕门落账,终审补;鞭 tag 本体另有 TAG_IMMUNE_TO_WHIPS 门）
         // ★ZappingJellyfish 豁免（:12600 与 dontTakeDamage 并列,最终清零补）——鞭=
@@ -1034,16 +1042,20 @@ export class WhipProj extends Entity {
         tex: lineTex as never,
         color: [...WHIP_1034_LINE] as [number, number, number, number],
       });
-    } else if (lineTex) drawWhipLineBody(ctx, lineTex, this.projId, pts);
+    } else if (lineTex) drawWhipLineBody(ctx, lineTex, this.projId, pts, r);
     // ② 鞭尖（DrawWhip switch :36759-36815 → WHIP_TIPS 分发表）
     const tip = WHIP_TIPS[this.projId];
     if (tip && img) {
       tip({
-        ctx, tex: img,
+        ctx, tex: img, r,
         // GlowMask[358]（DrawWhip_EelWhip :37206-37207 加色辉光,仅电鳗鞭消费）
         glow: this.projId === 1033 ? r.atlas?.ensureVImage?.('vanilla/Glow_358.png') ?? null : null,
         pts, n: pts.length - 1, prog: this.progress, dir: this.spriteDir,
-        lai1: this.lai1, hue: whipHueClock(), opacity: 1, // proj.Opacity :542-547 = 1-alpha/255,鞭 alpha 恒 0
+        // ★BJ703-B D4：hue=miscCounterNormalized（DrawWhip_RainbowWhip :37361 读
+        //  theOwner.miscCounterNormalized=Player.cs:3373 miscCounter/300,wrap 300
+        //  :29529-29532）——旧 performance.now()/5000 时钟近似（暂停/菜单相位漂移+
+        //  与游戏 tick 解耦）退役。owner 缺席（理论不可达,鞭恒玩家发射）回退 0。
+        lai1: this.lai1, hue: this.ownerRef()?.miscCounterNormalized ?? 0, opacity: 1, // proj.Opacity :542-547 = 1-alpha/255,鞭 alpha 恒 0
       });
     }
     ctx.restore();
@@ -1067,6 +1079,9 @@ interface WhipDustCtx {
   t: number;
   /** player.direction */
   facing: number;
+  /** ★BJ703-B D4：owner.miscCounterNormalized（Player.cs:3373）——915 AI 尘
+   *  hue=miscCounterNorm×9%1（Projectile.cs:48741 读 player.miscCounterNormalized）。 */
+  hue: number;
   /** 玩家速度（1030 血鞭掺入）与弹体速度（1104 掺入） */
   pvx: number; pvy: number; vx: number; vy: number;
 }
@@ -1126,14 +1141,15 @@ const WHIP_TRAIL_DUST: Record<number, (c: WhipDustCtx) => void> = {
     c.game.addLightAt?.(tip.x, tip.y, 0.2, 0, 0.4);
   },
   // 915 万花筒（:48741-48776）：env>0.1 → 尖端 d267(hue=miscCounterNormalized×9%1——
-  //    本仓 whipHueClock 时钟档,scale0.9+r×0.9,fadeIn r×0.9,v×r×0.8+段向×2)+
-  //    白影 CloneDust(scale÷2,fadeIn×0.85)
+  //    ★BJ703-B D4:owner tick 时钟,旧 whipHueClock wall-clock 档退役,scale0.9+r×0.9,
+  //    fadeIn r×0.9,v×r×0.8+段向×2)+白影 CloneDust 全字段拷贝(scale÷2,fadeIn×0.85,
+  //    color 白;含 noGravity=true)
   915: (c) => {
     if (!(c.env > 0.1)) return;
     const n = c.pts.length;
     const tip = c.pts[n - 1];
     const dir = whipSegDir(c.pts[n - 2], tip);
-    const [r, g, b] = hslToRgb255((whipHueClock() * 9) % 1, 1, 0.5, 255);
+    const [r, g, b] = hslToRgb255((c.hue * 9) % 1, 1, 0.5, 255);
     const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 267, 0, 0, 0,
       { r, g, b, a: 255 }, 1.3);
     if (!d) return;
@@ -1143,9 +1159,18 @@ const WHIP_TRAIL_DUST: Record<number, (c: WhipDustCtx) => void> = {
     d.scale = 0.9 + Math.random() * 0.9;
     d.fadeIn = Math.random() * 0.9;
     d.vx += dir.x * 2; d.vy += dir.y * 2;
-    const w = c.game.spawnDust?.(d.x - 15, d.y - 15, 30, 30, 267, d.vx, d.vy, 0,
-      { r: 255, g: 255, b: 255, a: 255 }, d.scale / 2);
-    if (w) w.fadeIn = d.fadeIn * 0.85;
+    // ★BJ700-D（2026-10-20）白影改走 CloneDust 全字段拷贝（:48741-48744 → Dust.cs
+    //    :265-288,含 noGravity :276——源尘已置 true）。曾手工 spawnDust 重掷克隆,
+    //    noGravity 漏拷 → 链 B 兜底 −0.04 收缩（Dust.cs:2407-2413）不生效,267 尘净
+    //    +0.01/t 无界生长至 scale>10 死门 ≈16s——用户实报「粒子慢慢变大过段时间才
+    //    消失」;cloneDust 钩连位置/速度/帧三次级偏差（CloneDust 逐字段覆写 :273-284）
+    //    一并消解（MinionProj:1012/:1062、NpcHitDust:346 同款范式）。
+    const w = c.game.cloneDust?.(d);
+    if (w) {
+      w.scale /= 2;                                  // :48742 dust10.scale /= 2f
+      w.fadeIn *= 0.85;                              // :48743 dust10.fadeIn *= 0.85f
+      w.color = { r: 255, g: 255, b: 255, a: 255 };  // :48744 new Color(255,255,255,255)
+    }
   },
   // 914 荆棘鞭（:48777-48800）：env>0.1 且 rand<env/2 → d39(scale1.2,noGr 1/3,v+=段向×2)
   914: (c) => {
@@ -1416,8 +1441,8 @@ const WHIP_TRAIL_DUST: Record<number, (c: WhipDustCtx) => void> = {
 //  FireWhip/RainbowWhip/ThornWhip/WhipSword 的 vector2 从 controlPoints[0] 起每段
 //  累加段矢量（:36826/:36861 等）——累计和 ≡ controlPoints[i],统一按 pts[i] 取位。
 //  【预乘混合】XNA AlphaBlend = 预乘（One/InvSrcAlpha）：画色 C 实效 =
-//  tex.rgb×C.rgb + 背景×(1−C.A) —— A=0 纯加色（'lighter'+摊平染色）、A≥255 纯替换
-//  （保形染色 source-over）、中间档两笔（StringLine.drawSegment 同款三档）。
+//  tex.rgb×C.rgb + 背景×(1−C.A) —— A=0 纯加色（'lighter'+保形染色,★BJ703-B D5）、
+//  A≥255 纯替换（保形染色 source-over）、中间档两笔（StringLine.drawSegment 同款三档）。
 
 type Tex = ImageBitmap | HTMLImageElement;
 type RGBA = readonly [number, number, number, number];
@@ -1425,12 +1450,11 @@ type RGBA = readonly [number, number, number, number];
 const TIP_WHITE: RGBA = [255, 255, 255, 255];
 const scalarLerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
-/** miscCounterNormalized 等价（Player.cs:3373 = miscCounter/300;miscCounter 每
- *  tick +1、wrap 300 :29529-29531 → 5s 一循环;performance.now 秒/5 同率同域）。
- *  消费点 = DrawWhip_RainbowWhip :37361（晨星鞭彩虹相） */
-function whipHueClock(): number {
-  return typeof performance !== 'undefined' ? (performance.now() / 5000) % 1 : 0;
-}
+/** ★BJ703-B D4（2026-10-21）退役：旧 whipHueClock=performance.now()/5000 时钟近似
+ *  （同率同域但【与游戏 tick 解耦】——暂停/菜单/探针 freezeClock 下相位漂移,且
+ *  原版 5s 循环锚在 Player.miscCounter 的 tick 计数上）。两消费位（WhipTipCtx.hue
+ *  尾绘 + 915 AI 尘 hue）均改读 owner.miscCounterNormalized（Player.cs:3373
+ *  =miscCounter/300,wrap 300 :29529-29532 → 5s/60fps 一循环,域 [0,1) 逐值等价）。 */
 
 /** Main.hslToRgb（:48689-48728,hue2rgb :48730-48748）——Math.Round 后 (byte) */
 function hue2rgb(c: number, t1: number, t2: number): number {
@@ -1514,17 +1538,27 @@ function drawWhipFrame(
   if (r === 255 && g === 255 && b === 255 && a === 255) {
     ctx.drawImage(tex, sx, sy, sw, sh, dx, dy, dw, dh);
   } else if (a === 0) {
-    // 纯加色：摊平染色 + 'lighter'（A=0 预乘 = 背景零衰减）
-    const t = tintedTex(tex, [r, g, b], true);
+    // 纯加色：保形染色 + 'lighter'（A=0 预乘 = 背景零衰减;贡献=tex.rgb×染色×tex.a）
+    // ★BJ703-B D5（2026-10-21,BJ371/BJ700-C flatten 判例收编）：旧 flatten=true 把
+    //  透明域 multiply 填成不透明染色底（αb=0 域 Co=Cs）→ 'lighter' 全幅加染色=
+    //  染色大方片（鞭贴图透明域 67-86%:915 81%/1034 75%/1104 67%/Glow_358 86%/
+    //  FishingLine 83%,逐张像素实测）——保形（flatten=false）后透明域贡献 0=XNA
+    //  预乘逐项相等。消费面=915 彩虹鞭 ②笔（col×0.1）/1033 电鳗鞭 GlowMask[358]
+    //  白辉光（旧=整帧白方片）。
+    const t = tintedTex(tex, [r, g, b], false);
     if (t) { ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(t, sx, sy, sw, sh, dx, dy, dw, dh); }
   } else if (a >= 255) {
     // 纯替换：保形染色 source-over
     const t = tintedTex(tex, [r, g, b], false);
     if (t) ctx.drawImage(t, sx, sy, sw, sh, dx, dy, dw, dh);
   } else {
-    // 中间档两笔：黑形压暗背景(×(1−A/255)) + 摊平染色 'lighter' 补贡献
+    // 中间档两笔：黑形压暗背景(×(1−A/255)) + 保形染色 'lighter' 补贡献
+    //  （★BJ703-B D5 同刀:add 笔 flatten=true→false——旧透明域全额加染色=染色带;
+    //  保形后贡献=染色×tex.a=XNA 单笔逐项分解。消费面=915 ①③笔（A=127·lerpValue）/
+    //  1034 星座鞭中段 (255,255,255,50)（旧=整帧白方片）/1104 史莱姆鞭段 (127,127,127,127)
+    //  /1034·1104 渔线线体（A=12/127,FishingLine 仅中 2 列不透明→旧=宽染色带））
     const black = tintedTex(tex, [0, 0, 0], false);
-    const t = tintedTex(tex, [r, g, b], true);
+    const t = tintedTex(tex, [r, g, b], false);
     if (black && t) {
       ctx.globalAlpha = a / 255;
       ctx.drawImage(black, sx, sy, sw, sh, dx, dy, dw, dh);
@@ -1550,6 +1584,8 @@ export interface WhipTipCtx {
   ctx: CanvasRenderingContext2D;
   /** TextureAssets.Projectile[proj.type]（各 tip 的帧切片源） */
   tex: Tex;
+  /** ★鞭尖白笔批透传（2026-10-21 二段;whipSeg 消费——shim 活跃时 White 段收批） */
+  r?: import('../render/Renderer').Renderer;
   /** TextureAssets.GlowMask[358]（仅 DrawWhip_EelWhip :37206-37207 加色辉光） */
   glow: Tex | null;
   /** FillWhipControlPoints 视觉曲线（:36658） */
@@ -1568,8 +1604,70 @@ export interface WhipTipCtx {
   opacity: number;
 }
 
+
+/** ★鞭尖批顶点发射（whipSeg 批支与 whipTipRainbow 直调三笔共用——三段刀）:
+ *  源矩形 fr、dst 几何（a=锚点/ang/ox/oy/sx/sy/flip）与 whipSeg 同式;color 映射:
+ *  White/A=255 → (rgb,1) SO;0<A<255 → (rgb,A) SO 单笔（XNA 预乘单笔=GL 单笔逐项等价,
+ *  2D 的黑形+染色两笔是 canvas 无预乘通道时的近似展开——GL 有,单笔还省一笔）;A=0 →
+ *  (rgb,0) ADD 桶。返回 true=已入批。 */
+function emitWhipQuad(
+  c: WhipTipCtx,
+  a: V2, ang: number,
+  fr: { sx: number; sy: number; sw: number; sh: number },
+  ox: number, oy: number, sx: number, sy: number, flip: boolean,
+  color: RGBA,
+  replayFn: () => void,
+): boolean {
+  const r = (c as WhipTipCtx & { r?: import('../render/Renderer').Renderer | null }).r ?? null;
+  const cam = (r as unknown as { frameCam?: { worldToScreen(wx: number, wy: number): [number, number]; zoom: number } | null } | null)?.frameCam ?? null;
+  if (!r || !cam
+    || !(r as unknown as { constructor: { whipbatch: boolean } }).constructor.whipbatch
+    || !(r as unknown as { bglEntShim?: { active: boolean } }).bglEntShim?.active) return false;
+  const W = fr.sw, H = fr.sh;
+  const cr = Math.cos(ang), sr = Math.sin(ang);
+  const l0 = -ox * sx, l1 = (W - ox) * sx;
+  const t0 = -oy * sy, t1 = (H - oy) * sy;
+  const eps = -1 / 4096;
+  const u0 = (fr.sx + eps) / c.tex.width, u1 = (fr.sx + W + eps) / c.tex.width;
+  const w0 = (fr.sy + eps) / c.tex.height, w1 = (fr.sy + H + eps) / c.tex.height;
+  // ★坐标域修（2026-10-21 bug 定谳:顶点曾推世界坐标→全屏外消失）:批顶点=屏幕域
+  //  （尘批 px/py 同款;2D 路径由 ctx 世界层矩阵转换,批路径绕过 ctx 必须自转）。
+  //  W2S=均匀 zoom 缩放+平移 → 旋转角不变、局部偏移×zoom:
+  //  屏幕位 = W2S(a) + R(ang)·local×zoom（worldToScreen 数学恒等式）。
+  const [ax0, ay0] = cam.worldToScreen(a.x, a.y);
+  const zk = cam.zoom;
+  const cfun = (lx: number, ly: number): [number, number] =>
+    [ax0 + (lx * cr - ly * sr) * zk, ay0 + (lx * sr + ly * cr) * zk];
+  const x0f = flip ? l1 : l0, x1f = flip ? l0 : l1;
+  const p0 = cfun(x0f, t0), p1 = cfun(x1f, t0), p2 = cfun(x1f, t1), p3 = cfun(x0f, t1);
+  const [cr0, cg0, cb0, ca0] = color;
+  const addSeg = ca0 === 0;
+  const vcr = cr0 / 255, vcg = cg0 / 255, vcb = cb0 / 255, vca = addSeg ? 0 : ca0 / 255;
+  const q = (r as unknown as {
+    whipLineBatch: Array<{ v: number[]; tex: Tex; key: string; segs: Array<{
+      ax: number; ay: number; ang: number; len: number; w: number; h: number; replay?: () => void;
+    }> }>;
+    whipLineAddBatch: Array<{ v: number[]; tex: Tex; key: string; segs: Array<{
+      ax: number; ay: number; ang: number; len: number; w: number; h: number; replay?: () => void;
+    }> }>;
+  });
+  const arr = addSeg ? q.whipLineAddBatch : q.whipLineBatch;
+  const wantKey = addSeg ? `whipline:tip:add:${c.tex.width}x${c.tex.height}` : 'whipline:tip';
+  let b = arr[arr.length - 1];
+  if (!b || b.tex !== c.tex || b.key !== wantKey) {
+    b = { v: [], tex: c.tex, key: wantKey, segs: [] } as typeof b;
+    arr.push(b);
+  }
+  b.v.push(p0[0], p0[1], u0, w0, vcr, vcg, vcb, vca, p1[0], p1[1], u1, w0, vcr, vcg, vcb, vca,
+    p2[0], p2[1], u1, w1, vcr, vcg, vcb, vca, p0[0], p0[1], u0, w0, vcr, vcg, vcb, vca,
+    p2[0], p2[1], u1, w1, vcr, vcg, vcb, vca, p3[0], p3[1], u0, w1, vcr, vcg, vcb, vca);
+  b.segs.push({ ax: a.x, ay: a.y, ang, len: -1, w: W, h: H, replay: replayFn });
+  return true;
+}
+
 /** 段绘制共用（各 tip 循环体同构）：第 i 段 = pts[i]→pts[i+1] 切向,帧 row
- *  （竖向 rows 行、cols 列）,oyShift = origin.Y 偏移（-4/-8 档）,sc=(sx,sy)。 */
+ *  （竖向 rows 行、cols 列）,oyShift = origin.Y 偏移（-4/-8 档）,sc=(sx,sy)。
+ *  ★三段刀批支=emitWhipQuad（色档映射/replay 闭包统一在那——此处只组装几何+replay）。 */
 function whipSeg(
   c: WhipTipCtx, i: number, rows: number, cols: number, row: number,
   oyShift: number, sx: number, sy: number, flip: boolean, color: RGBA = TIP_WHITE,
@@ -1577,6 +1675,10 @@ function whipSeg(
   const a = c.pts[i], b = c.pts[i + 1];
   const dx = b.x - a.x, dy = b.y - a.y;
   const fr = whipFrameRect(c.tex, cols, rows, row);
+  const cc0 = { ...c, r: undefined } as WhipTipCtx;
+  if (emitWhipQuad(c, a, Math.atan2(dy, dx) - Math.PI / 2, fr,
+    fr.sw / 2, fr.sh / 2 - oyShift, sx, sy, flip, color,
+    () => whipSeg(cc0, i, rows, cols, row, oyShift, sx, sy, flip, color))) return;
   drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh,
     a.x, a.y, Math.atan2(dy, dx) - Math.PI / 2,
     fr.sw / 2, fr.sh / 2 - oyShift, sx, sy, color, flip);
@@ -1733,14 +1835,27 @@ function whipTipRainbow(c: WhipTipCtx): V2 {
       Math.trunc(255 + (col[1] - 255) * 0.5) & 0xff,
       Math.trunc(255 + (col[2] - 255) * 0.5) & 0xff, a1,
     ];
-    drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1, 1, c1);
+    // ★三段刀:三笔经 emitWhipQuad（①中间档 SO 单笔/②A=0 ADD/③中间档）——hue 烘焙链
+    //  （tintedTex 每帧全 miss 的万花筒烘焙风暴）在 GL 批下整链退役;批不可用回原式。
+    const cR = c;
+    const d1 = c1, colR = col;
+    if (!emitWhipQuad(cR, a, ang, fr, ox, oy2, 1, 1, false, d1,
+      () => drawWhipFrame(cR.ctx, cR.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1, 1, d1))) {
+      drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1, 1, c1);
+    }
     // ②color2.A=0 → ×0.1,scale ×1.2（:37392-37393,加色）
-    drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.2, 1.2,
-      [Math.trunc(col[0] * 0.1) & 0xff, Math.trunc(col[1] * 0.1) & 0xff, Math.trunc(col[2] * 0.1) & 0xff, 0]);
+    const c2r: RGBA = [Math.trunc(col[0] * 0.1) & 0xff, Math.trunc(col[1] * 0.1) & 0xff, Math.trunc(col[2] * 0.1) & 0xff, 0];
+    if (!emitWhipQuad(cR, a, ang, fr, ox, oy2, 1.2, 1.2, false, c2r,
+      () => drawWhipFrame(cR.ctx, cR.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.2, 1.2, c2r))) {
+      drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.2, 1.2, c2r);
+    }
     if (i === 39) {
       // ③color2=color,A=127 → ×0.3,scale ×1.4（:37396-37398）
-      drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.4, 1.4,
-        [Math.trunc(col[0] * 0.3) & 0xff, Math.trunc(col[1] * 0.3) & 0xff, Math.trunc(col[2] * 0.3) & 0xff, 127]);
+      const c3r: RGBA = [Math.trunc(colR[0] * 0.3) & 0xff, Math.trunc(colR[1] * 0.3) & 0xff, Math.trunc(colR[2] * 0.3) & 0xff, 127];
+      if (!emitWhipQuad(cR, a, ang, fr, ox, oy2, 1.4, 1.4, false, c3r,
+        () => drawWhipFrame(cR.ctx, cR.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.4, 1.4, c3r))) {
+        drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.4, 1.4, c3r);
+      }
     }
   }
   return c.pts[c.n - 1];
@@ -1948,6 +2063,7 @@ export const WHIP_TIPS: Record<number, (c: WhipTipCtx) => V2> = {
  *  1104 色 ×0.5（:36750-36752）——色表落终态后直画 */
 function drawWhipLineBody(
   ctx: CanvasRenderingContext2D, tex: Tex, projId: number, pts: V2[],
+  r?: import('../render/Renderer').Renderer,
 ): void {
   if (projId === 1035) return;                                  // flag2=false :36726/:36738
   const color0 = WHIP_LINE_COLORS[projId] ?? TIP_WHITE;         // 缺省 White :36668
@@ -1960,13 +2076,56 @@ function drawWhipLineBody(
   }
   // 1034 flag3（:36721/:36747-36749）= 免逐段取光——本仓光照由合成统一乘,无分支
   const num = whipLineSegmentCount(projId, pts.length - 1);     // :36733-36736
+  // ★鞭线体白笔批（2026-10-21 万花筒掉帧刀;见 Renderer.whipLineBatch 注）:White 档
+  //  （r=g=b=a=255 免染色直绘——drawWhipFrame 白快路径）+shim 活跃+批可用 → 顶点
+  //  收集（四角=translate·rotate·scale 同式,uv 全贴图+quadSprite −1/4096 tie 补正,
+  //  col 恒 1）;每 whip 一条 rec 材料,WhipProj.draw 尾冲（保序=调用序单 rec 原位）。
+  //  非 White 档/tinted 批外（染色缓存面批化复杂,登记后续）。
+  const canBatch = !!r && (r as unknown as { constructor: { whipbatch: boolean } }).constructor.whipbatch
+    && color[0] === 255 && color[1] === 255 && color[2] === 255 && color[3] === 255
+    && !!(r as unknown as { bglEntShim?: { active: boolean; batchAvail(): boolean } }).bglEntShim?.active
+    && !!(r as unknown as { bglEntShim?: { active: boolean; batchAvail(): boolean } }).bglEntShim?.batchAvail?.();
+  let bv: number[] | null = null;
+  const segs: Array<{ ax: number; ay: number; ang: number; len: number; w: number; h: number }> = [];
+  if (canBatch) bv = [];
   for (let i = 0; i < num; i++) {
     const a = pts[i], b = pts[i + 1];
     const dx = b.x - a.x, dy = b.y - a.y;
     const len = Math.hypot(dx, dy);
+    const ang = Math.atan2(dy, dx) - Math.PI / 2;
+    if (bv) {
+      // 顶点:origin(W/2,2)·scale(1,(len+2)/h) ≙ 2D translate·rotate·drawImage(-ox, -oy, w, h)
+      //  四角=(−W/2,−2)..(W/2,len) 局部域经 rotate(ang) 后 + 屏幕锚（★坐标域修:
+      //  W2S(a)+R·local×zoom——emitWhipQuad 同款,批顶点=屏幕域）。
+      //  ★t0 修正:原式 dy=-oy*scy（2×(len+2)/H 非 2）——一段刀此处有 ~1.7px 平移偏差。
+      const W = tex.width, H = tex.height;
+      const sc = (len + 2) / H;
+      const cam = (r as unknown as { frameCam?: { worldToScreen(wx: number, wy: number): [number, number]; zoom: number } | null }).frameCam;
+      if (!cam) { bv = null; segs.length = 0; break; }
+      const [ax0, ay0] = cam.worldToScreen(a.x, a.y);
+      const zk = cam.zoom;
+      const cr = Math.cos(ang), sr = Math.sin(ang);
+      const l0 = -W / 2, l1 = W / 2, t0 = -2 * sc, t1 = (len + 2) - 2 * sc;
+      const eps = -1 / 4096;
+      const u0 = (0 + eps) / W, u1 = (W + eps) / W;
+      const w0 = (0 + eps) / H, w1 = (H + eps) / H;
+      const c = (lx: number, ly: number): [number, number] =>
+        [ax0 + (lx * cr - ly * sr) * zk, ay0 + (lx * sr + ly * cr) * zk];
+      const p0 = c(l0, t0), p1 = c(l1, t0), p2 = c(l1, t1), p3 = c(l0, t1);
+      void sc;
+      bv.push(p0[0], p0[1], u0, w0, 1, 1, 1, 1, p1[0], p1[1], u1, w0, 1, 1, 1, 1,
+        p2[0], p2[1], u1, w1, 1, 1, 1, 1, p0[0], p0[1], u0, w0, 1, 1, 1, 1,
+        p2[0], p2[1], u1, w1, 1, 1, 1, 1, p3[0], p3[1], u0, w1, 1, 1, 1, 1);
+      segs.push({ ax: a.x, ay: a.y, ang, len, w: W, h: H });
+      continue;
+    }
     // value2 = value.Frame() 整图（:36661,无 Height-=2——与鞭尖帧切片不同档）
     drawWhipFrame(ctx, tex, 0, 0, tex.width, tex.height,
-      a.x, a.y, Math.atan2(dy, dx) - Math.PI / 2,
+      a.x, a.y, ang,
       tex.width / 2, 2, 1, (len + 2) / tex.height, color);      // origin(W/2,2)/scale(:36662/:36746)
+  }
+  if (bv && segs.length) {
+    (r as unknown as { whipLineBatch: Array<{ v: number[]; tex: Tex; key: string; segs: typeof segs }> })
+      .whipLineBatch.push({ v: bv, tex, key: `whipline:${projId}`, segs });
   }
 }

@@ -498,7 +498,7 @@ export class DeerclopsSpikeProj extends Entity {
     if (p && !p.dead && this.opacity > 0.05
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域旗(直调面进 modifyHitPlayerByProj 链;旧两链皆不进)
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 961 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
     void game.world;
   }
@@ -555,7 +555,7 @@ export class DeerclopsRubbleProj extends Entity {
     if (p && !p.dead
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域旗(直调面进 modifyHitPlayerByProj 链;旧两链皆不进)
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 962 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
@@ -713,7 +713,7 @@ export class InsanityShadowProj extends Entity {
     if (p && !p.dead && this.alpha < 250
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域旗(直调面进 modifyHitPlayerByProj 链;旧两链皆不进)
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 965 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {

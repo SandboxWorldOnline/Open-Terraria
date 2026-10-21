@@ -15,6 +15,7 @@ import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { freeUpMinionsForSummon } from '../src/core/Game';
+import { pinGameTimeTicks } from '../src/core/GameTime';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -506,12 +507,18 @@ describe('⑨ 蜘蛛/蛙地面 AI（tileCollide 门/撤退档/镜像）', () => 
     player.y = 100 * 16 - 42;
     const m = mkMinion(390, player, 60 * 16, 100 * 16 - 16);
     const hp0 = e.hp;
+    // ★BJ704-G9（R1-P2②）夹具重产（G1 758 oracle 判例）：步行支接触冷却已归一
+    //  idStatic 15 共享桶（绝对到期,GTW 钟）——夹具须逐拍推进钉钟（旧模型=冻结钟
+    //  下私表倒数桶时代旧世界,不推进则 15t 永不到期=复咬永拒伪红）。
+    let tick = 0;
+    pinGameTimeTicks(tick++);
     m.fixedUpdate(1, hooks);
-    expect(e.hp).toBeLessThan(hp0);                      // 首咬
+    expect(e.hp).toBeLessThan(hp0);                      // 首咬（bucket 390 写 0+15）
     expect(priv(m).spLai1).toBe(20);                     // localAI[1]=20（:14027-14030）
     let bitten = 0;
-    for (let k = 0; k < 20; k++) {                       // 撤退 20t：hp 冻结
+    for (let k = 0; k < 20; k++) {                       // 撤退 20t：hp 冻结（friendly=false）
       const before = e.hp;
+      pinGameTimeTicks(tick++);
       m.fixedUpdate(1, hooks);
       if (e.hp < before) bitten++;
       expect(priv(m).spLai1).toBeGreaterThanOrEqual(0);
@@ -519,12 +526,13 @@ describe('⑨ 蜘蛛/蛙地面 AI（tileCollide 门/撤退档/镜像）', () => 
     expect(bitten).toBe(0);
     expect(priv(m).spLai1).toBe(0);
     let resumed = false;
-    for (let k = 0; k < 80 && !resumed; k++) {           // 撤退结束后复咬（命中冷却 20t 内）
+    for (let k = 0; k < 80 && !resumed; k++) {           // 撤退结束（21t>15t 窗）→ 复咬
       const before = e.hp;
+      pinGameTimeTicks(tick++);
       m.fixedUpdate(1, hooks);
       if (e.hp < before) resumed = true;
     }
-    expect(resumed).toBe(true);
+    expect(resumed).toBe(true);                          // idStatic 15 到期（旧私表 20 档退役）
   });
   it('蜘蛛镜像：direction=sign(vx)+行走精化 → spriteDirection=-direction（:63302-63323/:65162）——右行 facing=-1', () => {
     const { hooks, player } = makeHooks();

@@ -35,8 +35,12 @@ function makeHooks(opts: { player?: unknown; enemies?: Array<Record<string, unkn
     playSfxFiles: () => {},
     showPickupLabel: () => {},
   };
-  (hooks as unknown as { entities: { add: (e: unknown) => void } }).entities =
-    { add: (e: unknown) => { added.push(e); } };
+  // ★BJ703-F 夹具勘误（2026-10-21,存量红分诊=夹具病）：BJ650件1 起 MinionProj.
+  //  fixedUpdate 头 whoAmI 槽位懒快照读 game.entities.projectiles.indexOf(this)
+  //  ——旧 entities 桩只有 add 无 projectiles 数组 = TypeError。补活体表（未入表
+  //  弹 indexOf=−1 → Math.max(0,−1)=0=首空闲槽同语义,断言面零变化）。
+  (hooks as unknown as { entities: { add: (e: unknown) => void; projectiles: unknown[] } }).entities =
+    { add: (e: unknown) => { added.push(e); }, projectiles: added };
   return { hooks: hooks as unknown as GameHooks, added };
 }
 

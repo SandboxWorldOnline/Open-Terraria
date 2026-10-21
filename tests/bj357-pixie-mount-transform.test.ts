@@ -154,7 +154,9 @@ describe('BJ357 坐骑伴生 buff（SetMount :6291 + Player.cs:9968-9971 钉时�
     expect(buffTypeByVanilla(384)).toBe(BuffType.PixieMount);
   });
 
-  it('控场（冰冻）强制下坐同拍清 buff（Player.cs:26556 + Dismount :6214 ClearBuff）', () => {
+  it('控场（冰冻）61 仙灵拒下坐保骑保 buff（★BJ704-G13 债2 判据翻正:MountID.cs:29 '
+    + 'DontDismountWhenCCed{55,56,61}——CanDismountWithResult :6686-6690 FailedCCed;'
+    + '旧判据「冰冻强制下坐」系仓内直调 dismount 期行为,与 vanilla 相反）', () => {
     const w = mkWorld();
     const p = mkPlayer(w); tick(p, w, 8);
     p.mount.setMount(61, p);
@@ -162,8 +164,10 @@ describe('BJ357 坐骑伴生 buff（SetMount :6291 + Player.cs:9968-9971 钉时�
     expect(p.buffs.has(BuffType.PixieMount)).toBe(true);
     p.buffs.apply(BuffType.Frozen, 1);
     tick(p, w, 1);
-    expect(p.ridingMount).toBe(false);
-    expect(p.buffs.has(BuffType.PixieMount)).toBe(false);
+    expect(p.ridingMount).toBe(true);               // FailedCCed 拒下坐（55/56/61 变身骑族豁免）
+    expect(p.buffs.has(BuffType.PixieMount)).toBe(true);   // Dismount 未跑=ClearBuff 不发生
+    // 下坐清伴生 buff 面改由湿拍路径承载（56 蝙蝠湿拍 TryDismount :28183——
+    // bj704g13 B4 拒下坐清偿对照;CCed+变身骑族在 vanilla 结构性不可达本面）
   });
 });
 

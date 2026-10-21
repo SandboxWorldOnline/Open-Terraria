@@ -85,7 +85,7 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
     expect(bound.hurtLog).toHaveLength(1);
     expect(bound.stardustT).toBe(15);          // 900t/60=15s（贴附层同入池）
   });
-  it('非绑定敌受击不上 183（同门对照）', () => {
+  it('非绑定敌受击【转贴附+183 同上】（★BJ703-D3 勘误：:13248 改写 ai[1] 先于 StatusNPC :13634）', () => {
     const bound = mkEnemy(1, 1200, 792);       // 绑定目标在场（远处,不被命中）
     const other = mkEnemy(2, 496, 792);        // 挡路敌（被命中,含 614 目标盒收缩余量）
     const g = makeHooks([bound, other]);
@@ -93,7 +93,13 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
     a.stickerTgt = 1;
     a.fixedUpdate(1 / 60, g.hooks);
     expect(other.hurtLog).toHaveLength(1);     // 照常受击
-    expect(other.stardustT).toBeUndefined();   // 但 183 不上（非 ai[1] 绑定敌）
+    // ★BJ703-D3：转刺入（Damage_PVE_Inner :13244-13251）在 StatusNPC（:13634）【前】
+    //  改写 ai[1]=victimIndex ⇒ 183 gate `ai[1]==i` 读的就是实际受击敌——挡路敌
+    //  同上 183×900t 并被贴附（旧锁「非绑定不上 183」系按出生 ai[1] 读门=时序误读,
+    //  R1-F1 钉值锁误读判例同族,随刀改判）。stickerA0=1=stuck 态直锁。
+    expect(other.stardustT).toBe(15);          // 900t/60=15s（实际 victim 同上）
+    expect((a as unknown as { stickerA0: number }).stickerA0).toBe(1);
+    expect((a as unknown as { stickerTgt: number }).stickerTgt).toBe(2);
     expect(bound.hurtLog).toHaveLength(0);
   });
 });

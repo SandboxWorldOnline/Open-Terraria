@@ -187,10 +187,13 @@ describe('② F2 flinx 951 贴地 rot 归零支活（:51767 AngleTowards）', ()
 //      病灶形拍首直读 0.4 → 门死 → vy 恒 0.4）
 // ============================================================
 describe('③ F3 跳尾 :52113 贴地门活（walkChase 四族追高敌平地跳）', () => {
-  // 虎 833 玩家远置 900px：虎特攻池（|Δx|≤800 判）恒空 → 不劫拍;视野域 960 内保索敌
+  // 虎 833 玩家置 450px（★BJ704-G1 夹具重产:旧 900px 系「特攻池 |Δx|≤800 恒空」的
+  // 拍隔离法,但 BJ703-D2 归位门（>500 ∨ |dy|>300 → ai0=1 飞行,:51171-51199）后
+  // 900px 令虎起飞离地 → settling 恒红。450<500 保步行;特攻劫拍改由敌拍前显式
+  // 钉 pounceCd=1000 摘门（bj703a §2 同式）;视野域 960 内保索敌）
   // 雾网 1036 需 whipBuffs[365]（:50027-50041 生命绑定,缺省即 Kill——bj516 先例 stub）
   const CASES: Array<{ label: string; id: number; playerDx: number; whipBuff?: boolean }> = [
-    { label: '虎 833', id: 833, playerDx: 900 },
+    { label: '虎 833', id: 833, playerDx: 450 },
     { label: '海盗 393', id: 393, playerDx: 150 },
     { label: 'flinx 951', id: 951, playerDx: 150 },
     { label: '雾网蜘蛛 1036', id: 1036, playerDx: 150, whipBuff: true },
@@ -205,6 +208,7 @@ describe('③ F3 跳尾 :52113 贴地门活（walkChase 四族追高敌平地跳
       for (let t = 0; t < 5; t++) m.fixedUpdate(1, h.hooks);   // settling：贴地稳态建快照 0
       expect(m.y + m.h, 'settling 后贴地').toBe(GROUND_TOP);
       expect(priv(m).lastWalkPreGravVy, '快照=碰撞后重力前=贴地 0（capturePreGravVy 载体）').toBe(0);
+      if (c.id === 833) priv(m).pounceCd = 1000;       // 摘特攻门（旧 900px 拍隔离法退役,见上注）
       h.enemyList.push(mkEnemy(1, m.cx, m.cy - 50));   // 敌心高 50px（<80 避虎 flag3 墙意图;Δx=0 避 flag21 梯）
       m.fixedUpdate(1, h.hooks);
       expect(m.vy, '拍尾跃起（−√(50×0.8) 经 walkChase 重力 ≈ −5.9;病灶形=+0.4 → 红）').toBeLessThan(-1);

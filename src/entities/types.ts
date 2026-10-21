@@ -201,8 +201,11 @@ export interface GameHooks {
   /** 出生敌人 */
   spawnEnemy(key: string, x: number, y: number): void;
   /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。
-   *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝 */
-  spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
+   *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝。
+   *  ★BJ704-G14 件2②：style/released 参=ReleaseNPC 语义域（356 蝴蝶 Style /
+   *  released 释放旗=releaseOwner!=255）——释放域调用走 CanReleaseNPCs 内门
+   *  （NPC.cs:80930,超限返 null） */
+  spawnNpcByVanilla?(id: number, x: number, y: number, style?: number, released?: boolean): import('./Enemy').Enemy | null;
   /** WorldGen.CheckAchievement_RealEstateAndTownSlimes（WorldGen.cs:5581）——镇民
    *  史莱姆/Transform 族实体侧触发面（微光 4986 解锁等）回调 Game 实现 */
   checkAchievementRealEstateAndTownSlimes?: () => void;

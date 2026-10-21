@@ -109,7 +109,10 @@ describe('BJ331 WorldGenClient 静默看门狗', () => {
     const genP = client.generate(CFG_LARGE, { timeoutMs: 600_000 });
     const guard = genP.catch((e) => e);
     await vi.advanceTimersByTimeAsync(0);           // pending 装配微任务
-    (client as unknown as { onFatal(): void }).onFatal();   // worker 级故障全量 reject
+    // ★BJ704-R6 P1 签名随迁：onFatal(source, mayBeLoadPhase)——传夹具伪实例+运行期
+    //  形态（作业在途=握手已过,handshake=null → 硬故障『worker 故障』消息不变）
+    const fw = (client as unknown as { worker: { postMessage(m: { id: number }): void; terminate(): void } }).worker;
+    (client as unknown as { onFatal(s: unknown, l: boolean): void }).onFatal(fw, false);   // worker 级故障全量 reject
     await guard.then((e) => expect((e as Error).message).toContain('worker 故障'));
     expect(client.hasPendingWork()).toBe(false);
     await vi.advanceTimersByTimeAsync(40_000);      // 故障后静默 40s>30s

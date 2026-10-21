@@ -262,8 +262,11 @@ describe('townFrameIndex(帧源锚)', () => {
     expect(townFrameIndex(590, 0, 0, 1)).toBe(3);
     expect(townFrameIndex(590, 5, 0, 1)).toBe(3 + 1);
   });
-  it('其余单帧/恒帧 0(585 族 AI_001 不推帧)', () => {
-    expect(townFrameIndex(585, 999, 0, 0)).toBe(0);
+  it('其余单帧/恒帧 0(456 族 AI_001 不推帧);585 乒乓帧机(BJ704-G2 勘误)', () => {
+    // ★BJ704-G2（2026-10-21,债① 585 员勘误）:AI_001 585 专属块【推帧】——
+    //  :57095-57104 frameCounter 12 循环 → frame=fc/2、>3 → 6−fc/2（乒乓
+    //  0,1,1,2,2,3,3,2,2,1,1,0 周期 12;旧注「585 恒帧 0」系误读）。999%12=3 → 帧 1。
+    expect(townFrameIndex(585, 999, 0, 0)).toBe(1);
     expect(townFrameIndex(1, 999, 0, 0)).toBe(0);
   });
 });

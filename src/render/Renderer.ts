@@ -1383,7 +1383,9 @@ export function playerMountRotation(
   type: number, fullRotation: number,
   box: { x: number; y: number; w: number; h: number }, heightBoost: number,
 ): PlayerMountRotation | null {
-  if (fullRotation === 0 || (type !== 7 && type !== 8 && type !== 23)) return null;
+  // ★BJ704-G20（R10-P2 case49-tilt 消费面扩员）：门 {7,8,23} 补 49 熔岩鲨——
+  //   origin 同 7/8 = mounted 盒心 (w/2,h/2)（Mount.cs:3745）,非 23 底锚支。
+  if (fullRotation === 0 || (type !== 7 && type !== 8 && type !== 23 && type !== 49)) return null;
   const mh = 42 + (heightBoost || 0);   // mounted 盒高（本仓玩家盒恒 42，底锚换算）
   return {
     angle: fullRotation,
@@ -1749,20 +1751,24 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     if (!walking) return 0;
     return Math.min(frames - 1, 3 + (Math.floor(t / 4) % 7));
   }
-  // 龟 616/617（case 616，cs:77379-77432）：wet=游带 8..13（走 6t/停 11t 一帧）；
-  // 陆上 0..7（9t/帧）；站定=帧0；腾空=帧8
+  // 龟 616/617（case 616，cs:77486-77530）：计数器由 Enemy.turtleFindFrameStep 逐字
+  // 维护（BJ700b——停走/腾空双钉=周期重启;★落地后帧 8 保持 8 拍再回卷 0=「蜷壳定拍
+  // →出壳」原版节拍;湿泳带 8..13 走 6t/停 11t,入水帧号续走 quirk）。此处直读帧行。
   if (id === 616 || id === 617) {
-    if (e.wet) return Math.min(frames - 1, 8 + (Math.floor(t / (walking ? 6 : 11)) % 6));
-    if (!e.onGround) return Math.min(8, frames - 1);
-    if (!walking) return 0;
-    return Math.floor(t / 9) % Math.min(8, frames);
+    return Math.min(frames - 1, e.turtleFrame);
   }
-  // 龟 625（case 625，cs:77434-77473）：wet=游带 6..11（走 5t/停 9t 一帧）；
-  // 陆上 0..5（8t/帧）；站定=帧0
+  // 龟 625（case 625，cs:77532-77578）：同维护器海龟档（干带 0..5 8t/帧;湿带 6..11
+  // 走 5t/停 9t;入水 <6 抬 6/出水 >5 回 0;【无】腾空钉——空中帧续走）
   if (id === 625) {
-    if (e.wet) return Math.min(frames - 1, 6 + (Math.floor(t / (walking ? 5 : 9)) % 6));
-    if (!walking) return 0;
-    return Math.floor(t / 8) % Math.min(6, frames);
+    return Math.min(frames - 1, e.turtleFrame);
+  }
+  // ★BJ704 陆龟族 153/154/496/497（FindFrame aiStyle 39,type≠417——NPC.cs:78093-78162）：
+  //  帧行由 Enemy.tortoiseFindFrameStep 逐字维护（态 0 走带 0-4 按 |vx|×1.1 计数
+  //  /态 1 缩壳 5→6→7/态 5 出壳 7→6→5/态 3·4 恒壳 7;态 0 头逐帧 rotation=0=倒走
+  //  病灶根因——justHit 出旋冲的残角唯一回收点）。曾零专支落通用年龄循环=8 帧表
+  //  连播两带（走+缩壳混播=用户实报「边走边缩龟壳」;533 支同病先例）。
+  if (id === 153 || id === 154 || id === 496 || id === 497) {
+    return Math.min(frames - 1, (e as unknown as { tortoiseFrame: number }).tortoiseFrame);
   }
   // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 cs:70159-70240）——仅城镇/绑缚族：
   // 小动物专属 case（46 族/230/299/300/361/362/616/625 等已在上方各自分支截胡，
@@ -4348,6 +4354,18 @@ export class Renderer {
    *  渲染期相位退回——fixedUpdate 的 TrailingMode 4 整步平移在插值相机下=拖尾带
    *  每步跳一个玩家位移,用户实报「飞行挥天顶剑特效残影感;静止挥无」定谳)。 */
   interpA = -1;
+  /** ★鞭批（2026-10-21 三段刀 bug 修）:当前渲染帧的相机（render 头缓存;
+   *  emitWhipQuad 顶点 worldToScreen 消费——批顶点必须屏幕域（尘批 px/py 同款）,
+   *  2D 路径由 ctx 世界层矩阵转换,批路径绕过 ctx 必须自转）。null=渲染外。 */
+  frameCam: import('./Camera').Camera | null = null;
+  /** ★鞭线体白笔批旗（2026-10-21,?whipbatch=0 逃生门;缺省开——White 线体逐段
+   *  直绘在 shim 下=40×5 GL op/帧（万花筒 Windows 1.2-4.8ms/帧推算主体）。node 恒关。 */
+  static whipbatch = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('whipbatch') !== '0';
+    } catch { return false; }
+  })();
   bglPathStats: Record<string, number> = {};
   /** ★B2b 探针面：worldCanvas 建面次数（acc 稳态恒 0;非 acc 帧/降级帧首次 +1） */
   b2bWorldCanvasCreations = 0;
@@ -5736,6 +5754,8 @@ export class Renderer {
     if (sKeys.length > nSort) sKeys.length = nSort;
     if (sIdx.length > nSort) sIdx.length = nSort;
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
+    this.whipLineBatch.length = 0;   // ★鞭批逐帧重建（WhipProj 收集,flush 在 bglEntWindowEnd）
+    this.whipLineAddBatch.length = 0;
     this.towerGlowQueue.length = 0;   // ★BJ509 四塔 GlowMask 残影队列逐帧重建（drawNpcGlow vel4 收集,7d''' 消费）
     this.npcWhiteLiftQueue.length = 0;   // ★BJ504 白提亮 40% 复绘队列逐帧重建（drawEnemy 收集,7d' 消费）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
@@ -5755,6 +5775,7 @@ export class Renderer {
     let ctx = mainCtx;   // 世界层切换期指向 worldCtx（光照分层，见 beginWorldLayer）
     const viewW = this.canvas.width, viewH = this.canvas.height;
     cam.viewW = viewW; cam.viewH = viewH;
+    this.frameCam = cam;   // ★鞭批:帧相机缓存（emitWhipQuad worldToScreen 消费）
     // ★SW-FX27：呈现面垂直翻转开关（GameViewMatrix.Effects=FlipVertically
     //  Main.cs:62944 `(!gameMenu && gravDir != 1f)` ↔ BackgroundViewMatrix.Effects
     //  :62945——游戏内渲染无 gameMenu 态，门=gravDir!==1）。Game.fixedUpdate/
@@ -6927,6 +6948,7 @@ export class Renderer {
     if (wK < 1) ctx.scale(wK, wK);   // 低清档:同上
     this.drawVanillaDustPass(false, cam, player);
     ctx.restore();
+    this.flushWhipLineBatch();   // ★鞭线体白笔批冲（窗收口前——保序:末条 rec 原位入队）
     this.bglEntWindowEnd();   // ★B2 实体主窗收口（flush present+ctx 恢复）
 
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720；
@@ -17702,12 +17724,15 @@ export class Renderer {
    *  ——差分链自然保持（连续性同原版）。行序列：入水行 5 →6→钳19，之后 7..19 循环。
    *  WeakMap 键 = Player（swimTime 归零即删——离水 vy≠0 分支清 counter 同构） */
   private static swimPhase = new WeakMap<Player, number>();
-  /** body/legs 双行（原版两条独立状态机：腿链 Player.cs:35718-35855、身体链
-   *  :35874-36186——use 行/静持行只钉身体，腿照常 legFrame 循环；行走时身体同步
-   *  腿（:36184-36186 bodyFrame.Y = legFrame.Y）。行序 1:1 照源码分支排布）。
-   *  legArmorId = 腿甲槽位 id（legs==140 神灯诅咒特殊行 :36195-36208——主链整体
+  /** body/legs 双行（原版两条独立状态机：腿链 Player.cs:36430-36443（坐骑钉行）+
+   *  :36501-36560（循环族）、身体链 :36590-36905——use 行/静持行只钉身体，腿照常
+   *  legFrame 循环；行走时身体同步腿（:36897 bodyFrame.Y = legFrame.Y）。
+   *  行序 1:1 照源码分支排布。★BJ704-G18 锚勘误（G17 登记债6）：旧注
+   *  「:35718-35855/:35874-36186/:36195-36208/:36202-36206」系旧世代行号——1457
+   *  实测全部指进 RefreshItems 币槽/银行逻辑,真实锚=PlayerFrame 内（本注）。
+   *  legArmorId = 腿甲槽位 id（legs==140 神灯诅咒特殊行 :36907-36919——主链整体
    *  跳过，行 = vy≠0?1:0、身体行∈{7,8,9,14,15,16}（OffsetsPlayerHeadgear.Y==0）→7、
-   *  翼 22/28→0；legs==217 坐/睡强制行 5 :36202-36206） */
+   *  翼 22/28→0（身体侧行走臂 :36877-36895）;legs==217 坐/睡强制行 5 :36921-36925） */
   private playerFrameRows(p: Player,
     swing: { useStyle?: number } | null, holdStyleRaw: number,
     mnt: import('../entities/Mounts').MountInstance | null, cart: unknown,
@@ -17720,17 +17745,21 @@ export class Renderer {
     const noBodyOverride = !!MOUNT_SETS.DoesNotOverrideBodyFrames?.[mtype];
     const latched = p.grappleProjs.find((g) => g.latched) ?? null;
     const wing = p.equipStats.wing;
-    // ShouldDrawWingsThatAreAlwaysAnimated（:30271）——22/28/45 翼腿行 0 门
+    // ShouldDrawWingsThatAreAlwaysAnimated（:30969 定义——★G19 锚勘正,旧 :30271）——22/28/45 翼腿行 0 门
     const wingsAlways = p.vy !== 0 && !mountActive && !latched
       && !(p.inWater && (p.equipStats.flipper || p.buffs.has(BuffType.FlipperPotion)));
-    const leg140 = legArmorId === 140;               // :35786 legs!=140 门（主链跳过）
-    // ---- 腿链（:35718-35731 坐骑钉行 / :35786-35855 循环族 / :35858-35877 覆写族）----
+    const leg140 = legArmorId === 140;               // :36501 legs!=140 门（主链跳过）
+    // ---- 腿链（:36430-36443 坐骑钉行 / :36501-36560 循环族 / :36570-36589 覆写族
+    //      （地毯/沙暴钉行 0）——★BJ704-G18 锚勘误,旧 :35718/:35786/:35858 系旧世代）----
     let legs: number;
     if (mountActive && !noLegOverride) {
+      // ★BJ704-G17 销案（G13 债6 误登记翻正,2026-10-21）：本三元+行6基线+计数复位
+      //  （swimPhase.delete）≙ vanilla Player.cs:36430-36443 全面已在位（Oct 20
+      //  dist-release 快照同逻辑=面先于登记在盘）;勿按 G13/G15 旧移交再落刀。
       legs = (mtype === 23 || mtype === 45 || mtype === 48) ? 0 : 6;   // 普通坐骑行6（含矿车）
       Renderer.swimPhase.delete(p);
     } else if (p.swimTime > 0 && !leg140) {
-      // 划水循环 +2/t 行 7..19（:35792-35805）——相位见 swimPhase 注释
+      // 划水循环 +2/t 行 7..19（:36503-36518——★G19 锚勘正,旧 :35792-35805）——相位见 swimPhase 注释
       let m0 = Renderer.swimPhase.get(p);
       if (m0 === undefined) m0 = p.miscCounter;
       else if (p.miscCounter < m0) m0 -= 300;        // miscCounter wrap 300 → 虚拟轴滚动
@@ -17745,18 +17774,18 @@ export class Renderer {
       }
       legs = row;
     } else if (p.vy !== 0 || latched) {
-      Renderer.swimPhase.delete(p);                  // vy≠0 分支 counter=0（:35807-35810）
+      Renderer.swimPhase.delete(p);                  // vy≠0 分支 counter=0（:36520-36528——★G19 勘正,旧 :35807-35810）
       legs = (wing && (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) && wingsAlways) ? 0 : 5;
     } else if (p.vx !== 0 && p.onGround) {
-      Renderer.swimPhase.delete(p);                  // 站立/行走分支 counter=0（:35824/35850）
-      // 行走循环（:35817-35847）：counter += |vx|·1.3、每 8 进一行、行 7..19 回绕；
-      // 滚轴鞋（IsRollerSkates）满速档每 tick +2（:35830-35833 counter=2.0）。
+      Renderer.swimPhase.delete(p);                  // 站立/行走分支 counter=0（:36534/:36563——★G19 勘正,旧 :35824/35850）
+      // 行走循环（:36538-36561——★G19 勘正,旧 :35817-35847）：counter += |vx|·1.3、每 8 进一行、行 7..19 回绕；
+      // 滚轴鞋（IsRollerSkates）满速档每 tick +2（:36541-36544——★G19 勘正,旧 :35830-35833）。
       // animTime = |vx| 逐 tick 累计（走停清零）→ counter = animTime × 速率
       const skates = !!MOUNT_SETS.IsRollerSkates?.[mtype] && mountActive;
-      // ★打滑面/滚轴鞋上无左右输入（:35818-35826）：(slippy||slippy2||windPushed||
+      // ★打滑面/滚轴鞋上无左右输入（:36532-36537——★G19 勘正,旧 :35818-35826）：(slippy||slippy2||windPushed||
       // flag8) && !controlLeft && !controlRight → counter=0、腿钉行 0（惯性滑行
       // vx≠0 但无输入，不走循环）。slippy={161,162,127,163,164,200,659}、slippy2=197
-      // （FloorCheck :23454-23455，读 p.floorTileT）；windPushed（:35819 原版风推旗，
+      // （FloorCheck :23454-23455，读 p.floorTileT）；windPushed（:36532 原版风推旗——★G19 勘正,旧 :35819，
       // :11432 置位）本引擎无风推模拟不列——普通地面无输入滑行（击退余速）原版走
       // 行走循环，与本门不冲突。曾有门 |vx|>0.3 无输入照走循环 = 冰面滑行腿跑步
       const ft = p.floorTileT;
@@ -17773,13 +17802,21 @@ export class Renderer {
       Renderer.swimPhase.delete(p);
       legs = 0;
     }
-    if (!p.onGround && p.carpetTime > 0) legs = 0;   // 飞毯滑翔腿钉 0(:35858-35863;
-    // ★门=滑翔中(airborne)非燃料>0——2026-08-16 水体批把 onGround 重置段写了
-    // carpetTime=300 回满,落地恒 300 → 旧门把地面走路腿钉死站立帧(用户实报)
-    if (p.performingJump === 'Sandstorm') legs = 0;                  // 沙暴跳腿钉 0（:35865-35877）
-    // ---- 身体链（:35874-36186，else-if 序 1:1）----
+    // ★BJ704-G5（R4-P2②）毯腿钉 0（:36570-36575 `carpetFrame >= 0`——★G19 尾括勘正
+    //   （块至 :36575 止,沙暴块 :36577 起））：门=本拍在
+    //   展开（Player.carpetFlying ≙ carpetFrame>=0——CarpetMovement 带内置位,松跳/
+    //   卸毯/骑乘/挂钩拍即 -1）;旧门 `!onGround && carpetTime>0` 无按跳条件=松跳
+    //   带余油/空中卸毯毯姿残留（原版 carpetFrame 每拍 Cancel 归零）。2026-08-16
+    //   水体批的 onGround 门（地面走路腿钉死站立帧,用户实报）随 BJ699 清零面退役。
+    if (p.carpetFlying) legs = 0;
+    // ★BJ704-G19（G16 债③）：沙暴跳腿钉 0（:36577-36589 `if (sandStorm) {…
+    //   legFrameCounter=0; legFrame.Y=0; }`——★锚勘正:旧 :35865-35877 系旧世代;
+    //   消费位改读 sandStormVisual（jump 窗口∧上升同窗,旧 performingJump 键控
+    //   =整个跳程含下落段钉 0,宽于原版）。
+    if (p.sandStormVisual) legs = 0;
+    // ---- 身体链（:36590-36905，else-if 序 1:1——★BJ704-G18 锚勘误,旧 :35874-36186 系旧世代）----
     let body: number;
-    if (useRow >= 0) body = useRow;                       // useStyle 行（:35879-36018）
+    if (useRow >= 0) body = useRow;                       // useStyle 行（:36592-36725——★G19 勘正,旧 :35879-36018）
     else if (p.pulley) body = p.pulleyDir === 2 ? 1 : 2;  // ★BJ576 绳攀姿势（:36727-36736——
     //   侧挂档(pulleyDir==2)=行1、居中档=行2「上举抓绳」;原版序位=useStyle 支后/
     //   holdStyle 支前（:36727 else-if 链位）→ 绳上静持火把(holdStyle 1)照钉攀爬行。
@@ -17788,30 +17825,32 @@ export class Renderer {
     //   腿行走上方 vy≠0 支行5、静悬行0,两侧本仓腿链已同相,免刀。复合臂格由
     //   PaperDoll ARM_FRAME 行1→(3,0)/行2→(4,0)（CreateCompositeData :1995/:2002
     //   同构已落）承接近举臂——本支是缺的最后一块）。
-    else if (holdStyleRaw === 1 || holdStyleRaw === 3 || holdStyleRaw === 5) body = 3;   // :36025-36040
-    else if (holdStyleRaw === 2) body = 2;                // :36036
-    else if (holdStyleRaw === 4 && p.onGround && p.gravDir === 1) body = 0;             // :36042-36049
-    else if (holdStyleRaw === 7) body = 11;               // :36042-36045（物品本身不画）
-    else if (p.shieldRaised) body = 10;                   // 盾举行10（:36052-36055）
-    else if (mountActive && !noBodyOverride) body = p.mount.bodyFrame;  // :36056-36060（矿车=3）
+    else if (holdStyleRaw === 1 || holdStyleRaw === 3 || holdStyleRaw === 5) body = 3;   // :36738-36753（★G19 勘正,旧 :36025-36040）
+    else if (holdStyleRaw === 2) body = 2;                // :36742-36745（★G19 勘正,旧 :36036）
+    else if (holdStyleRaw === 4 && p.onGround && p.gravDir === 1) body = 0;             // :36758-36763（★G19 勘正,旧 :36042-36049）
+    else if (holdStyleRaw === 7) body = 11;               // :36754-36757（★G19 勘正,旧 :36042-36045;物品本身不画）
+    else if (p.shieldRaised) body = 10;                   // 盾举行10（:36764-36767——★G19 勘正,旧 :36052-36055）
+    else if (mountActive && !noBodyOverride) body = p.mount.bodyFrame;  // :36768-36772（★G19 勘正,旧 :36056-36060;矿车=3）
     else if (latched) {
-      body = latched.y < p.y ? 2 : latched.y > p.y + p.h ? 4 : 3;     // :36061-36096
+      body = latched.y < p.y ? 2 : latched.y > p.y + p.h ? 4 : 3;     // :36773-36809（★G19 勘正,旧 :36061-36096）
       if (p.gravDir === -1 && body !== 3) body = body === 2 ? 4 : 2;
     }
     else if (p.inWater && !p.inputDown && (p.equipStats.canFloat || (p.ridingMount && p.mount.type === 37))
-      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3856-68——canFloatInWater=4404 甲件(:13364-67)∪buff265 火烈鸟坐骑(:9982-86,本仓以骑 37 等价表达)；Flipper 药 109 只授 ignoreWater+accFlipper(:10257-59) 不入 canFloat 源——R1-F1 2026-09-03 同根残留清偿）
-    else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36102-36119
+      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36810-36812——★G19 勘正,旧 :36098-36100 + :3856-68——canFloatInWater=4404 甲件(:13364-67)∪buff265 火烈鸟坐骑(:9982-86,本仓以骑 37 等价表达)；Flipper 药 109 只授 ignoreWater+accFlipper(:10257-59) 不入 canFloat 源——R1-F1 2026-09-03 同根残留清偿）
+    else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36813-36832（★G19 勘正,旧 :36102-36119）
     else if (p.vy !== 0) {
       if (p.eocDash > 0) body = 6;
-      else if (p.performingJump === 'Sandstorm' || (!p.onGround && p.carpetTime > 0)) body = 6;  // :36123-36134(同上门修)
+      // ★BJ704-G19：沙暴改读 sandStormVisual（同腿链窗口勘正——原版 :36838-36840
+      //   读 sandStorm 字段=jump 窗口∧上升,旧 performingJump 键控含下落段）。
+      else if (p.sandStormVisual || p.carpetFlying) body = 6;  // :36839（★BJ704-G5 R4-P2② 同上门改 carpetFlying）
       else if (wing) {
         if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) body = 0;
-        else body = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;   // :36135-36155
+        else body = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;   // :36848-36865（★G19 勘正,旧 :36135-36155）
       } else body = 5;
     }
-    else if (p.vx !== 0 && p.onGround) body = legs;       // 行走身体同步腿（:36184-36186）
+    else if (p.vx !== 0 && p.onGround) body = legs;       // 行走身体同步腿（:36872-36901——★G19 勘正,旧 :36184-36186）
     else body = 0;
-    // ---- legs==140 神灯诅咒（3770，:36195-36208；主链已跳过，此处覆写）----
+    // ---- legs==140 神灯诅咒（3770，:36907-36920——★G19 勘正,旧 :36195-36208；主链已跳过，此处覆写）----
     // 行 = vy≠0?1:0；身体行∈HEADGEAR_ZERO_ROWS（OffsetsPlayerHeadgear.Y==0：
     // {7,8,9,14,15,16}，Main.cs:504-525）→ 行 7；翼 22/28 → 行 0
     if (leg140) {
@@ -17819,7 +17858,7 @@ export class Renderer {
       if (HEADGEAR_ZERO_ROWS.has(body)) legs = 7;
       if (wing && (wing.slot === 22 || wing.slot === 28)) legs = 0;
     }
-    if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36202-36206
+    if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36921-36925（★G19 勘正,旧 :36202-36206）
     return { body, legs };
   }
 
@@ -18040,6 +18079,37 @@ export class Renderer {
     tex: CanvasImageSource & { width: number; height: number };
     color: [number, number, number, number];
   }> = [];
+  /** ★鞭线体白笔批（2026-10-21 万花筒掉帧刀,?whipbatch 缺省开/0 逃生门）：
+   *  WhipProj.drawWhipLineBody 的 White 档（r=g=b=a=255:免染色直绘——915 万花筒
+   *  40 段主战场/缺省档全族）逐段 ctx op（save/translate/rotate/draw/restore≈5 op
+   *  ×40 段）→ shim 活跃时收顶点批（pushLiquidAddBatch? 否——线体=source-over 白笔
+   *  直绘非加色,走 pushQuadBatchRgba 通道;stride 8 col 恒 (1,1,1,1)）单
+   *  drawArrays。tinted 档（'lighter'/两笔/染色 SO）与鞭尖 WHIP_TIPS 16 型不批
+   *  （混合复杂度/各型 tip 几何异构——首刀只收 White 线体,余面登记后续批）。
+   *  分段保序=「whip draw 调用序」单 rec 原位入队（与其他实体层 rec 保序同
+   *  gore/尘批判例）。replay=批通道失败/2D 回退的逐段原式重放。 */
+  whipLineBatch: Array<{
+    /** 顶点（stride 8:x,y,u,v,r,g,b,a;TRIANGLES 6 顶点/段） */
+    v: number[];
+    tex: CanvasImageSource & { width: number; height: number };
+    key: string;
+    /** replay 逐段原式参数。len>=0=线体形（w,h=tex 尺寸,drawImage 整图拉伸 len+2）;
+     *  len<0=tip 形（sx/sy/swh/shh=源矩形,ox/oy=锚点,sxk/syk=缩放,flip=镜像——
+     *  drawWhipFrame 同参重画）。 */
+    segs: Array<{
+      ax: number; ay: number; ang: number; len: number; w: number; h: number;
+      sx?: number; sy?: number; sw?: number; sh?: number;
+      ox?: number; oy?: number; sxk?: number; syk?: number; flip?: boolean;
+      replay?: () => void;
+    }>;
+  }> = [];
+  /** ★三段刀:A=0 加色档独立桶（'lighter' 纯加 → ADD rec tier=1;whipTipRainbow ②笔） */
+  whipLineAddBatch: Array<{
+    v: number[];
+    tex: CanvasImageSource & { width: number; height: number };
+    key: string;
+    segs: Array<{ ax: number; ay: number; ang: number; len: number; w: number; h: number; replay?: () => void }>;
+  }> = [];
   /** ★BJ509（2026-10-04 用户实报"四柱晚上很暗"）四塔 GlowMask 残影队列：原版
    *  塔残影色 Color(64,64,64,0)×Opacity 不经 GetAlpha=不吃光照（Main.cs:24483-24520
    *  的 Draw 顶点色恒定），夜里恒亮=塔身自发光观感主体；旧实现 vel4 在实体层原位
@@ -18148,7 +18218,51 @@ export class Renderer {
    *  extra38=Lerp(colorArmorBody,White,0.5) 光采样 */
   /** 1034 星辰鞭线体全亮消费（7e'，compositeLight 后）：flag3（:36747-36749 color2=color）
    *  = 线体固定色 (0,61,153,12) 不受光照——世界系控制点 worldToScreen 后逐段直画
-   *  （rot=atan2−π/2、scale=(1,(段长+2)/H)×z、origin=(W/2,2)，与 WhipProj 预合成同式） */
+   *  （rot=atan2−π/2、scale=(1,(段长+2)/H)×z、origin=(W/2,2)，与 WhipProj 预合成同式）。
+   *  ★BJ703-F（BJ700-C flatten 债③复审定谳——原「ga≈0.047 忽略级」前提不成立）：
+   *  XNA 预乘 AlphaBlend（One/InvSrcAlpha,Main.cs:22399 实体 pass）对白 texel 的
+   *  贡献 = tex.rgb×tex.a×C.rgb【不吃 C.a】（PrismProj 白 pass「白芯 ×127/255 亮度
+   *  减半皆误」同判例已被实证废黜）→ 原单笔 source-over@ga=12/255 把线体画成
+   *  原版约 4.7% 亮度（≈21× 过暗,近乎不可见）+ 摊平带污染。修=StringLine.drawSegment
+   *  中间档同款两笔：黑形 @ga=A/255 压暗（×(1−T.a×A/255)）+ 保形染色 'lighter'
+   *  全额贡献（FishingLine 列 5/6 白 texel → (0,61,153) 全额加 = 原版逐 texel）。 */
+  /** ★鞭线体白笔批冲（2026-10-21 万花筒掉帧刀;收集=drawWhipLineBody White 档,
+   *  材料=WhipProj 收集进 whipLineBatch）。逐 whip 一条 rec 原位入队（pushQuadBatchRgba
+   *  SO 通道——白线体=source-over 直绘非加色）;失败/2D 回退=replay 逐段原式（save/
+   *  translate/rotate/drawImage 白快路径）。批外档（tinted/1034 全亮/鞭尖）不在此。 */
+  private flushWhipLineBatch(): void {
+    const ctx = this.ctx;
+    const sh = this.bglEntShim;
+    const replayAll = (segs: Array<{ replay?: () => void }>) => {
+      for (const q of segs) {
+        if (q.replay) q.replay();
+      }
+    };
+    for (const b of this.whipLineBatch) {
+      const quads = b.segs.length;
+      if (quads <= 0) continue;
+      const data = new Float32Array(b.v);
+      const tex = b.tex;
+      const segs = b.segs;
+      const ok = !!sh && sh.pushQuadBatchRgba(
+        tex, b.key, data, quads, () => replayAll(segs));
+      if (!ok) replayAll(segs);
+    }
+    // ADD 桶（A=0 加色段:whipTipRainbow ②笔等）——pushLiquidAddBatch tier=1
+    for (const b of this.whipLineAddBatch) {
+      const quads = b.segs.length;
+      if (quads <= 0) continue;
+      const data = new Float32Array(b.v);
+      const tex = b.tex;
+      const segs = b.segs;
+      const ok = !!sh && sh.pushLiquidAddBatch(
+        tex, b.key, data, quads, () => replayAll(segs));
+      if (!ok) replayAll(segs);
+    }
+    this.whipLineBatch.length = 0;
+    this.whipLineAddBatch.length = 0;
+  }
+
   private flushWhipFullbright(cam: Camera, z: number): void {
     if (!this.whipFullbrightQueue.length) return;
     const ctx = this.ctx;
@@ -18158,9 +18272,9 @@ export class Renderer {
     for (const q of this.whipFullbrightQueue) {
       const tex = q.tex;
       const [r, g, b, a] = q.color;
-      const tinted = tintedTex(tex as never, [r, g, b], true);
-      if (!tinted) continue;
-      ctx.globalAlpha = a / 255;
+      const black = tintedTex(tex as never, [0, 0, 0], false);
+      const tinted = tintedTex(tex as never, [r, g, b], false);
+      if (!black || !tinted) continue;
       for (let i = 0; i + 1 < q.pts.length; i++) {
         const p0 = q.pts[i], p1 = q.pts[i + 1];
         const dx = p1.x - p0.x, dy = p1.y - p0.y;
@@ -18171,18 +18285,27 @@ export class Renderer {
         ctx.rotate(Math.atan2(dy, dx) - Math.PI / 2);
         ctx.scale(z, z);
         const qm = this._veilActive ? ctx.getTransform() : null;   // ★BJ679
+        ctx.globalAlpha = a / 255;
+        ctx.drawImage(black, 0, 0, tex.width, tex.height,
+          -tex.width / 2, -2, tex.width, len + 2);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(tinted, 0, 0, tex.width, tex.height,
           -tex.width / 2, -2, tex.width, len + 2);
         ctx.restore();
         // ★BJ679 水罩镜像（鞭线体=原版 DrawProjectiles :63199 水前面,flag3
         //   :36747-36749 color2=color 免取光=逃逸族;直绘 identity 基座+段变换,
-        //   qm 快照同式重放,tintedTex 保形染帧 α 同）
+        //   qm 快照同式重放——mask α 覆盖=线形双笔同式,黑形+保形染色各一）
         if (qm) this.escapeVeilStroke(
           Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
             -tex.width / 2, -2, tex.width, len + 2),
           (mc) => {
             mc.setTransform(qm);
             mc.globalAlpha = a / 255;
+            mc.drawImage(black, 0, 0, tex.width, tex.height,
+              -tex.width / 2, -2, tex.width, len + 2);
+            mc.globalAlpha = 1;
+            mc.globalCompositeOperation = 'lighter';
             mc.drawImage(tinted, 0, 0, tex.width, tex.height,
               -tex.width / 2, -2, tex.width, len + 2);
           });
@@ -20929,7 +21052,7 @@ export class Renderer {
               offX = 6; offY = 28 + HEADGEAR_OFFSET_Y[2];
             }
             // 变身坐骑静持锚（AdjustmentsFor*Mount——静持 = 无动画档 animating=false；
-            // num=静持身体行：hold1/3/5→3、hold2→2、无→0（:36025-36040））
+            // num=静持身体行：hold1/3/5→3、hold2→2、无→0（:36738-36745——★G19 勘正,旧 :36025-36040））
             if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
               // ★传物品真实 useStyle：原版 flag4/5/10/8/7 档只读 heldItem.useStyle
               //（:50684-50690）,静持同样命中（IsFood us2 静持 54 上应 (3,2)/52 上 (14,-4)）;
@@ -21119,7 +21242,7 @@ export class Renderer {
             dyeEmu.uniforms.uLightSource = this.reflectiveLightSource(p);
           }
         }
-        // ShouldDrawWingsThatAreAlwaysAnimated 门（:30271）：vy≠0 && 未锚定钩爪 &&
+        // ShouldDrawWingsThatAreAlwaysAnimated 门（:30969——★G19 勘正,旧 :30271）：vy≠0 && 未锚定钩爪 &&
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
           || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
@@ -22154,7 +22277,7 @@ export class Renderer {
         //      坐标线性放大（|P|≈3.4 万 px、θ=0.37 → 甩出 ≈1 万 px）= 钻头一动
         //      舱体贴图整层消失（用户实报①）。旋转零角时 playerMountRotation 返
         //      null，跳过等价 ----
-        const mrot = (mnt.type === 7 || mnt.type === 8 || mnt.type === 23)
+        const mrot = (mnt.type === 7 || mnt.type === 8 || mnt.type === 23 || mnt.type === 49)   // ★BJ704-G20:49 熔岩鲨倾转扩员（函数门同拍）
           ? playerMountRotation(mnt.type, mnt.fullRotation,
             { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost)
           : null;
@@ -27625,4 +27748,27 @@ export class Renderer {
     }, viewW, viewH, info, options.data.showBossBarHealthText);
   }
 
+}
+
+/** ★鞭批 replay 单段原式（线体形 len>=0:整图拉伸 len+2 origin(W/2,2);
+ *  tip 形 len<0:源矩形+锚点+缩放+镜像——drawWhipFrame 同参重画（White 快路径直绘）。 */
+function whipSegReplay(ctx: CanvasRenderingContext2D,
+  tex: CanvasImageSource, q: {
+    ax: number; ay: number; ang: number; len: number; w: number; h: number;
+    sx?: number; sy?: number; sw?: number; sh?: number;
+    ox?: number; oy?: number; sxk?: number; syk?: number; flip?: boolean;
+  }): void {
+  ctx.save();
+  ctx.translate(q.ax, q.ay);
+  ctx.rotate(q.ang);
+  if (q.flip) ctx.scale(-1, 1);
+  ctx.imageSmoothingEnabled = false;
+  if (q.len >= 0) {
+    ctx.drawImage(tex, 0, 0, q.w, q.h, -q.w / 2, -2, q.w, q.len + 2);
+  } else {
+    const dw = (q.sw ?? q.w) * (q.sxk ?? 1), dh = (q.sh ?? q.h) * (q.syk ?? 1);
+    ctx.drawImage(tex, q.sx ?? 0, q.sy ?? 0, q.sw ?? q.w, q.sh ?? q.h,
+      -(q.ox ?? q.w / 2) * (q.sxk ?? 1), -(q.oy ?? q.h / 2) * (q.syk ?? 1), dw, dh);
+  }
+  ctx.restore();
 }

@@ -10,7 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { blockBelowMakesSandFall } from './FallingBlock';   // ★④ BBMSF 单源（掉落/沙族批 2026-09-04）
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
-import { prefetchProjectiles, BULLET_KILL_SFX, projFrameCount } from './Arrow';
+import { prefetchProjectiles, BULLET_KILL_SFX, projFrameCount, idStaticCheck } from './Arrow';
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360）——Dart 载体弹接入（573/811/814）
 import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';
 import type { GameHooks } from './types';
@@ -48,6 +48,9 @@ export const TRAP_SHOT_STYLE: Record<string, {
   projs?: string[];
   /** 隐形弹（733 alpha=255 SetDefaults）：纯尘/gore 发射器，不画本体 */
   invisible?: boolean;
+  /** ★BJ704-G14 件1：A=0 纯加算白闪族（XNA 预乘语义,GetAlpha A=255−α=0 →
+   *  source.rgb 全额加 dest 不衰减=ctx 'lighter';178 彩带弹 2t 白闪） */
+  additive?: boolean;
   spin?: boolean | 'roll' | 'bunny'; rotOff?: number;
   /** spin=true 时的滚转系数。现役唯一消费 = 巨石 99(AI_025 :26681 rotation +=
    *  velocity.X*0.06,累加在 kind==='boulder' 支内于踢门【之后】——表值供绘制门
@@ -105,18 +108,27 @@ export const TRAP_SHOT_STYLE: Record<string, {
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
   // ---- 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon / 直接 NewProjectile）----
   // 162 炮弹（SetDefaults Projectile.cs:2239-2246）：16×16 aiStyle2 friendly penetrate4；
-  // AI（:21540-21592）：18 tick 直线后 vy+=0.28/vx*=0.99；终端 vy 32（aiStyle2 通用钳
-  // :21978-21981，2026-08-14 补）；Kill（:72768-72831）：64×64→144×144
+  // AI（:23418-23938）：18 tick 直线后 vy+=0.28/vx*=0.99（:23499-23501）；终端 vy 32
+  // （aiStyle2 通用钳 :23929-23931，2026-08-14 补;★G22 勘正旧混代锚 :21540-21592/
+  // :21978-21981）；Kill（:77391-77453）：64×64→144×144
   // 两段 Damage() 纯伤害（不在 ExplodeTiles 表 = 不破坏地形）
   cannonball: { w: 16, h: 16, color: '#33333C', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 32,
     proj: 'vanilla/Projectile_162.png', fw: 18, fh: 18, spin: 'roll', friendly: true, blast: 72, kb: 8,
     launchSfx: 'explosion', life: 3600 },
   // 281 爆炸兔兔（SetDefaults Projectile.cs:3408-3418）：28×28 aiStyle49 friendly timeLeft600；
-  // AI（:26822-26913）同炮弹弧线（18 tick 后 vy+=0.28/vx*=0.99，vy 上限 15.9）；
-  // Kill（:72704-72758）：128×128 Damage() 纯伤害
+  // AI（:28647-28736）同炮弹弧线（18 tick 后 vy+=0.28/vx*=0.99 :28680，vy 上限 15.9
+  // :28683-28685;★G22 勘正旧混代锚 :26822-26913）；
+  // Kill（:77327-77389）：128×128 Damage() 纯伤害
   bunny: { w: 28, h: 28, color: '#E8E2D8', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 15.9,
     proj: 'vanilla/Projectile_281.png', fw: 28, fh: 28, spin: 'bunny', friendly: true, blast: 64, kb: 8,
     launchSfx: 'explosion', life: 600 },
+  // ★BJ704-G14 件1 [g11-cannon-torch-fire]：178 彩带弹（SetDefaults :2643-2651）——
+  //  10×10 aiStyle1 无重力直线 / α255 / penetrate−1 / timeLeft 2（2 拍白闪即 Kill）。
+  //  friendly/hostile 双 false ⇒ 敌我两命中面整段不进（Damage_PVE :12576 / Damage_EVP
+  //  :14847 双 damage 头门,下方 damage-0 早退闸承载）;无发射音（ConfettiGun 音在
+  //  物品使用面,弹内零 PlaySound——炮族首帧 Item14 面 162/281 专属）
+  confetti: { w: 10, h: 10, color: '#F0F0F0', grav: 0, proj: 'vanilla/Projectile_178.png',
+    fw: 10, fh: 10, friendly: false, life: 2, kb: 0, additive: true },
   // 166 雪球（SetDefaults Projectile.cs:2282-2289）：14×14 aiStyle2 friendly ranged coldDamage；
   // AI（:21862-21892）：玩家射出（ai1==1）时命中城镇 NPC 即消散清伤；20 tick 直线后
   // vy+=0.3/vx*=0.98（专属分支，勿改默认档 0.4/0.97——166 不落 else）；终端 32
@@ -130,15 +142,15 @@ export const TRAP_SHOT_STYLE: Record<string, {
   portalbolt: { w: 10, h: 10, color: '#B069FF', grav: 0, kb: 0,
     proj: 'vanilla/Projectile_601.png', fw: 20, fh: 19, friendly: true, life: 3600 },
   // ---- 烟花三件套 + 马桶水花（Wiring.cs:1492-1553；WorldGen.LaunchRocket/LaunchRocketSmall）----
-  // 167-170 烟花火箭（SetDefaults Projectile.cs:2291-2300）：14×14 aiStyle34 friendly ranged
-  // timeLeft45，damage 150 / kb 7（WorldGen.cs:62197-62199）；AI（:25677-25739）无重力直线 + 尾烟；
-  // Kill（:73435-73921）：Item14 + 按色爆尘 + 192×192 Damage()。贴图 14×28 = 2 帧 14×14（取帧 0）
+  // 167-170 烟花火箭（SetDefaults Projectile.cs:2560-2571）：14×14 aiStyle34 friendly ranged
+  // timeLeft45，damage 150 / kb 7（WorldGen.cs:62661-62665）；AI_034（:27519-27579）无重力直线 + 尾烟；
+  // Kill（:78125-78557）：Item14 + 按色爆尘 + 192×192 Damage()。贴图 14×28 = 2 帧 14×14（取帧 0）
   fireworkRocket: { w: 14, h: 14, color: '#FF8066', grav: 0, friendly: true, blast: 96, life: 45, kb: 7,
     projs: ['vanilla/Projectile_167.png', 'vanilla/Projectile_168.png',
       'vanilla/Projectile_169.png', 'vanilla/Projectile_170.png'],
     fw: 14, fh: 14, rotOff: Math.PI / 2 },
-  // 415-418 烟花盒火箭（SetDefaults Projectile.cs:4669-4676）：14×14 aiStyle34 friendly timeLeft45
-  // damage 0（WorldGen.cs:62213-62215）——纯视觉弹，Kill 同样 192×192 Damage() 但伤害为 0
+  // 415-418 烟花盒火箭（SetDefaults Projectile.cs:4944-4951）：14×14 aiStyle34 friendly timeLeft45
+  // damage 0（WorldGen.cs:62675-62689）——纯视觉弹，Kill 同样 192×192 Damage() 但伤害为 0
   fireworksBoxRocket: { w: 14, h: 14, color: '#66FF99', grav: 0, friendly: true, blast: 96, life: 45, kb: 0,
     projs: ['vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
       'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png'],
@@ -147,13 +159,13 @@ export const TRAP_SHOT_STYLE: Record<string, {
   // 终值 = NewProjectile 内联 per-Type 表钳 600（Projectile.cs:11035-11050；发射点
   // Player.cs:32619 传 whoAmI=本地玩家 → Owner==Main.myPlayer 表生效）——喷 10 秒
   // 非 60 秒（发射点覆写审计批 2026-09-03；SetDefaults≠终值，见 Arrow.ts 寿命处注）。
-  // 锚点 tile 338 消失即 Kill（AI :29369-29377）
+  // 锚点 tile 338 消失即 Kill（AI_073 :30982-30986）
   fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 600, kb: 0,
     projs: ['vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
       'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png'],
     fw: 8, fh: 8 },
-  // 733 马桶水花（SetDefaults Projectile.cs:7434-7441）：2×2 aiStyle153 tileCollide=false alpha=255
-  // ——全隐形纯发射器；AI_153_ToiletPop（:49278-49314）ai[0]==0 → 6 尘 + 1 gore，
+  // 733 马桶水花（SetDefaults Projectile.cs:7718-7727）：2×2 aiStyle153 tileCollide=false alpha=255
+  // ——全隐形纯发射器；AI_153_ToiletPop（:53114-53152）ai[0]==0 → 6 尘 + 1 gore，
   // ai[0] 1..10 → 2 尘 + 1/5 gore，ai[0]>10 → Kill
   toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true, kb: 0 },
   // 1049 霰石/冰雹（dontStarve×FTW 风暴臂 WorldGen.cs:72292 发射；SetDefaults
@@ -186,7 +198,12 @@ export function prefetchTrapProjectiles(): void {
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
 export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'venomdart' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt' | 'hail'
-  | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop';
+  | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop'
+  /** ★BJ704-G14 件1：178 彩带弹（confetti cannon 手动/导线发射,WorldGen.cs:51043
+   *  ammo3 → type 178）——10×10 aiStyle1 无重力直线,timeLeft 2,α255(GetAlpha A=255−
+   *  α=0 → XNA 预乘纯加算白闪) 纯视觉弹,friendly/hostile 双 false（Damage_PVE/
+   *  Damage_EVP 均不进）,Kill=85×d139-142 彩带尘（Game.onProjectileDeath 178 支既有） */
+  | 'confetti';
 
 /** TrapShot kind → 原版 projectile id（反射门禁用：Projectile.CanBeReflected 按
  *  type/aiStyle 查表——162 炮弹 aiStyle2 / 166 雪球 aiStyle2 可反射，烟花族
@@ -270,6 +287,9 @@ export class TrapShot extends Entity {
   projId: number;
   /** 巨石 ai[0] 落地旗(:24666 置 1 后恒 1;转角踢门 :24578 的 ai[0]≠0 条件) */
   boulderLanded = false;
+  /** ★BJ704-G11：281 爆炸兔落定旗（碰撞响应 :18951-18960 ReleaseNPC(614)+ai0=-3
+   *  ——次拍 AI 头静默 Kill;存续一拍=原版落定拍接触结算照跑） */
+  bunnyLanded = false;
   /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门）；
    *  烟花族 = 色变体（167-170 / 415-418 / 419-422 减基址） */
   form = 0;
@@ -379,6 +399,9 @@ export class TrapShot extends Entity {
     if (!ctx) return;
     const st = TRAP_SHOT_STYLE[this.kind];
     if (st.invisible) return; // 733 alpha=255：隐形纯发射器（SetDefaults :7440）
+    // ★BJ704-G11（件2①）：281 出膛隐身窗（AI_049 :28688-28690——SetDefaults α=255
+    //  （:3685）,ai0>2 才 alpha=0 ⇒ 出生拍+拍 1/2 全隐,拍 3 起可见+poof（update 侧））
+    if (this.kind === 'bunny' && this.age < 3) return;
     // 烟花族按 form 选色变体贴图；单贴图 kind 走 proj。
     // ★ensureVImage 触发懒加载(VANILLA_MISC 瘦身后弹幕表不再预载,直取会永久色块)
     const tex = st.projs?.[this.form] ?? st.proj;
@@ -394,6 +417,9 @@ export class TrapShot extends Entity {
       if (st.fadeIn) ctx.globalAlpha = Math.min(1, Math.max(0.04, this.age * st.fadeIn / 255));
       // SetDefaults scale 缩绘（1049 scale=0.8,Projectile.cs:9946——36px 贴图 → 28.8px）
       const ds = st.drawScale ?? 1;
+      // ★BJ704-G14 件1：A=0 加算族（178）切 'lighter'（XNA 预乘 source.rgb 全额
+      //  加 dest=alpha 通道 0 只衰减 dest,rgb 贡献不衰减——'lighter' 逐项相等）
+      if (st.additive) ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(img, 0, 0, st.fw, st.fh, -st.fw * ds / 2, -st.fh * ds / 2, st.fw * ds, st.fh * ds);
       ctx.restore();
       return;
@@ -405,6 +431,10 @@ export class TrapShot extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ★BJ704-G11（件2①）：281 落定静默灭——ai0=-3 次拍 AI 头 Kill（AI_049 :28656-
+    //  59;Kill case 281 ai0==-3 门=零 FX 零伤害）。落定拍照常走接触结算（原版
+    //  Damage() 在 active 弹逐拍跑）,次拍头即灭=原版同拍序。
+    if (this.bunnyLanded) { this.dead = true; return; }
     // 烟花三件套 + 马桶水花：独立 AI 族（aiStyle 34/73/153），不走陷阱弹通用位移/命中链
     if (this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket'
       || this.kind === 'fireworkFountain' || this.kind === 'toiletPop') {
@@ -500,6 +530,16 @@ export class TrapShot extends Entity {
     if (this.life <= 0) {
       // 炮弹族 timeLeft 耗尽同样走 Kill 爆炸（Projectile.Kill 由 timeLeft 归零触发）
       if (this.kind === 'hail') this.hailKill(game);   // 1049 同型（600 拍到点亦爆,:75282）
+      else if (this.kind === 'confetti') {
+        // ★BJ704-G14 件1：178 彩带 Kill（:76062-76085）=85×d139-142 彩带尘（初速
+        //  三重扰动）——Dart 载体不路由 onProjectileDeath（Game.ts:554 注）,本口
+        //  显式走 Game 178 分支（Arrow 载体同组面同款单点直调）
+        this.dead = true;
+        (game as unknown as { onProjectileDeath?: (id: number, x: number, y: number,
+          w?: number, h?: number, ovx?: number, ovy?: number, dmg?: number) => void })
+          .onProjectileDeath?.(178, this.x, this.y, this.w, this.h, this.vx, this.vy, this.damage);
+        return;
+      }
       else if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
       else this.dead = true;
       return;
@@ -617,7 +657,78 @@ export class TrapShot extends Entity {
     } else {
       this.vy += st.grav;
     }
-    if (this.kind !== 'spiky' && this.kind !== 'boulder') {
+    // ---- ★BJ704-G11（件2①）：281 出膛 poof + 前 2 拍隐身（AI_049 :28688-28740）——
+    //      ai0>2 才 alpha=0（SetDefaults α=255 :3685 → 拍 1/2+出生拍全隐）,ai0==3
+    //      出膛尘+gore：10×d31（α100 s1.5,vel×0.5+v×0.1）+5×(d6 s2 noGravity vel×3+
+    //      v×0.2; d6 s1 vel×2+v×0.3)+1×gore 61-63（位−(10,10)+v×1.25,scale1.5,
+    //      vel=(newGore 扰动+v×0.5)×0.02）。隐身面=draw 侧 age<3 跳画。----
+    if (this.kind === 'bunny' && this.age === 3) {
+      for (let i = 0; i < 10; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+        if (d) { d.vx = d.vx * 0.5 + this.vx * 0.1; d.vy = d.vy * 0.5 + this.vy * 0.1; }
+      }
+      for (let i = 0; i < 5; i++) {
+        const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 2, true);
+        if (dA) { dA.vx = dA.vx * 3 + this.vx * 0.2; dA.vy = dA.vy * 3 + this.vy * 0.2; }
+        const dB = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+        if (dB) { dB.vx = dB.vx * 2 + this.vx * 0.3; dB.vy = dB.vy * 2 + this.vy * 0.3; }
+      }
+      const gP = GorePiece.newGore(61 + Math.floor(Math.random() * 3),
+        this.x - 10, this.y - 10, 0, 0);
+      if (gP) {
+        gP.x += this.vx * 1.25; gP.y += this.vy * 1.25;      // :28736 position += v×1.25
+        gP.scale = 1.5;                                       // :28737
+        gP.vx = (gP.vx + this.vx * 0.5) * 0.02;               // :28738-40 (扰动+v×0.5)×0.02
+        gP.vy = (gP.vy + this.vy * 0.5) * 0.02;
+      }
+    }
+    // ---- ★BJ704-G11（件2①,[刀5 边界「弹药面」登记债清偿]）281 爆炸兔 撞块响应
+    //      （Projectile.cs:18942-18970 type 281 专属块——AI_049 活兔态 ai0≥0）：
+    //      碰撞（TileCollision 清轴）后 flag14=|vx|+|vy|<2（读【碰后】速度,被挡轴
+    //      已 0;ai0==-1 尸态支无原版写位=不可达）→ 落定放兔：ReleaseNPC(Center.X,
+    //      Bottom.Y−4,614,Style 3|4,owner)（:18951-18960——Style=(vx>0?1:2)+2 含 0→4,
+    //  →  ReleaseNPC case 614 NPC.cs:80957-80977 方向强制±1+SpawnedFromStatue=true
+    //  =死亡爆弹 0 伤）+ai0=-3 → 次拍 AI 头静默 Kill（无爆无 FX）;else 被挡轴
+    //  反弹 = −lastV×0.5。旧仓=撞块即爆（blastKill）——活兔在原版从不撞块爆炸,
+    //  弹跳衰减至缓速落定化兔,爆只在 timeLeft 600 耗尽（Kill case 281,blastKill
+    //  保留）或释放兔 614 死亡（Enemy 死亡支 ai0=-2 已落）。
+    //      ★BJ704-G14（2026-10-21）G11 登记债①②已清偿：①idStatic 免疫窗已换轨
+    //  全场共享桶（idStaticCheck(281,…,10) 单源,直击环+blastDamage 两消费位——
+    //  见下方命中环/寿命爆注）;②CanReleaseNPCs 释放限流门已建模（Game.canReleaseNpcs
+    //  双门=TryStartUse/ReleaseNPC 内门;本支 spawnNpcByVanilla released=true 走内门）。----
+    //      ★G11 件2③残项（281 timeLeft 尽爆 Kill FX 精确面）亦随 G14 blastKill 分支
+    //  清偿（Sound4+gore76/77+尘恰数+128 盒 idStatic 窗）。----
+    if (this.kind === 'bunny') {
+      const dfB2 = projWaterDragFactor(this);
+      const lvx2 = this.vx, lvy2 = this.vy;                  // lastVelocity（:17696）
+      this.x += this.vx * dfB2;
+      let hitX2 = shotBoxSolid(game, this.x, this.y, this.w, this.h);
+      if (hitX2) { this.x -= this.vx * dfB2; this.vx = 0; }  // TileCollision 清被挡轴
+      this.y += this.vy * dfB2;
+      let hitY2 = shotBoxSolid(game, this.x, this.y, this.w, this.h);
+      if (hitY2) { this.y -= this.vy * dfB2; this.vy = 0; }
+      // ★BJ704-G14（G11 件2① 附带回归修复,域回归 cannon-projectiles 定谳）：原版
+      //  本块在 `if (flag)`（:18015——TileCollision/SlopeCollision 实际发生位/速度
+      //  变更才置位）门内=【碰撞拍专属】;旧无碰撞门=空中缓速兔（竖直上抛过顶点
+      //  vy≈0 / 静止出生）误落定放兔。落定门=碰撞拍 ∧ 碰后 |v|<2（:18947 flag14）。
+      if ((hitX2 || hitY2) && Math.abs(this.vx) + Math.abs(this.vy) < 2) {   // flag14（:18945 碰后速度）
+        const style614 = (this.vx > 0 ? 1 : 2) + 2;          // :18954-18955 → 3|4
+        // ★BJ704-G14（件2②）：released=true → ReleaseNPC 内门 CanReleaseNPCs
+        //  （NPC.cs:80930）在 spawnNpcByVanilla 释放域生效（超限返 null=原版
+        //  ReleaseNPC -1 同相;ai0=-3 置位在外=落定灭弹照走,原版同拍序）
+        const spawned614 = game.spawnNpcByVanilla?.(614,
+          Math.trunc(this.cx), Math.trunc(this.y + this.h) - 4, undefined, true);
+        if (spawned614) {
+          spawned614.releasedFromItem = true;                // releaseOwner=owner（myPlayer 不变式）
+          spawned614.spawnedFromStatue = true;               // Style>2 档（:80966-68,死亡爆弹 0 伤）
+          spawned614.facing = style614 === 3 ? 1 : -1;       // 方向强制（:80971-76）
+        }
+        this.bunnyLanded = true;                             // ai0=-3（:18959）→ 次拍静默灭
+      } else {
+        if (hitX2) this.vx = -lvx2 * 0.5;                    // :18963-18966 反弹 ×−0.5
+        if (hitY2) this.vy = -lvy2 * 0.5;                    // :18967-18970
+      }
+    } else if (this.kind !== 'spiky' && this.kind !== 'boulder') {
       // extraUpdates 位移倍步（1049 extraUpdates=1 :9949 → 2 步/拍；其余表项单步）。
       // 步间不重查块——陷阱弹碰撞模型维持拍末中心点单查（类头注既有简化）
       // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）——逐子步位移同削
@@ -658,7 +769,9 @@ export class TrapShot extends Entity {
     }
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (game.world.store.isSolid(tx, ty)) {
+    // ★BJ704-G11（件2①）：281 活兔碰撞已全权在上方分轴支承载（反弹/落定）——
+    //  中心格整爆检查对 bunny 整支跳过（原版撞块从不爆炸,blastKill 仅 timeLeft 尽）
+    if (this.kind !== 'bunny' && game.world.store.isSolid(tx, ty)) {
       // 传送门弹撞块（Projectile.cs:16672-16686）：落门后消亡（音效 Item115/114 按 form）
       if (this.kind === 'portalbolt') {
         game.placePortal?.(this.x, this.y, this.vx, this.vy, this.form);
@@ -673,7 +786,7 @@ export class TrapShot extends Entity {
         return;
       }
       if (st.blast) {
-        // 炮弹/兔兔炮撞块 → Kill 落点爆炸（Projectile.cs:72768-72831 / 72704-72758）
+        // 炮弹/兔兔炮撞块 → Kill 落点爆炸（Projectile.cs:77391-77453 / 77327-77389;★G22 勘正旧混代锚）
         this.blastKill(game);
         return;
       } else {
@@ -687,7 +800,10 @@ export class TrapShot extends Entity {
     // 敌对陷阱：伤害走 damagePlayer(防御减算/受击音/iframes 去重);除巨石外命中即碎。
     // 读实例 hostile 而非 style.friendly——反射后弹体转 hostile 需改为伤玩家
     if (this.hostile) {
-      if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
+      // ★BJ704-G14 件1：Damage_EVP 头门 damage<=0 整退（Projectile.cs:14847）——
+      //  178 彩带/733 马桶族 0 伤纯视觉弹不再进玩家判定（旧 hurt(0) 空击=非 1:1）
+      if (this.damage > 0
+        && projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
         hitPlayer(this, game, this.damage, !this.reflected); // trap 标（反射弹非陷阱）
         // 巨石 99 / 冰雹 1049 penetrate=-1（SetDefaults）——命中玩家不碎,继续飞行
         // （原版由 immune 窗/撞块/timeLeft 收口）;其余机关弹单发档命中即碎
@@ -709,9 +825,17 @@ export class TrapShot extends Entity {
       this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y;
     /** 可结算？（immune[owner]>0 时 Damage 头门早退,不消耗任何效果） */
     const windowOpen = (k: object): boolean => !this.windowGate || ((this.hitCdT.get(k) ?? 0) <= 0);
-    /** 成功命中尾：写 10t 免工件窗 + Penetrate 计数递减;返回 false = 应 Kill */
+    // ★BJ704-G14 件2①：281 usesIDStaticNPCImmunity=10 共享桶（SetDefaults :3686-3687;
+    //  Projectile.cs:12595 头门 IsNPCIndexImmuneToProjectileType + :14031-14037 命中尾
+    //  perIDStaticNPCImmunity[281]=GameUpdateCount+10 写行）——全场所有 281（TrapShot
+    //  活兔直击/寿命爆 + Arrow 爆弹态）共用一张表（idStaticCheck 单源）,多兔同敌
+    //  10t 一跳;私表 hitCdT 对 bunny 停用。iframes 前置读门=dealContacts :444 同位
+    //  （拒收不落桶账,原版写行在 StrikeNPC 后 :14031）。
+    const bunnyIdStatic = this.kind === 'bunny';
+    /** 成功命中尾：写 10t 免工件窗 + Penetrate 计数递减;返回 false = 应 Kill
+     *  （★G14 件2①：bunny 的窗已由 idStaticCheck 共享桶在门位写,私表停笔） */
     const afterHit = (k: object): boolean => {
-      if (this.windowGate) this.hitCdT.set(k, 10);
+      if (this.windowGate && !bunnyIdStatic) this.hitCdT.set(k, 10);
       return --this.pierceLeft > 0;
     };
     // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）。
@@ -728,6 +852,17 @@ export class TrapShot extends Entity {
       //  162/166 两 friendly 型;陷阱镖族虽 vanilla friendly+hostile 双旗,但
       //  penetrate=-1（pierceLeft=Infinity）恒不经死亡位,零扰面。
       if (!this.hostile) cutTilesBox(game, this.x, this.y, this.w, this.h);
+      // ★BJ704-G14 件1：Damage_PVE 头门 damage<=0 整退（Projectile.cs:12576-12579）——
+      //  0 伤弹（178 彩带/733 马桶/415-418 烟花盒/601 传送门弹）敌怪/小动物/城镇判定
+      //  整段不进（原版连 StatusNPC/穿透计数都不触;旧 hurt(0) 空击+免工件窗空写=
+      //  非 1:1）。CutTiles 在 Damage_CanDealDamage 门内先于 PVE（:12516-12523）——
+      //  本 return 置割草【后】= friendly 0 伤弹（烟花盒/传送门弹）割面保持。
+      // ★BJ704-G14 件1：Damage_PVE 头门 damage<=0 整退（Projectile.cs:12576-12579）——
+      //  0 伤弹（178 彩带/733 马桶/415-418 烟花盒/601 传送门弹）敌怪/小动物/城镇判定
+      //  整段不进（原版连 StatusNPC/穿透计数都不触;旧 hurt(0) 空击+免工件窗空写=
+      //  非 1:1）。CutTiles 在 Damage_CanDealDamage 门内先于 PVE（:12516-12523）——
+      //  本 return 置割草【后】= friendly 0 伤弹（烟花盒/传送门弹）割面保持。
+      if (this.damage <= 0) return;
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——拒收命中不得耗穿透/免工件窗/snapStrike，最终清零补）
         if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
@@ -739,8 +874,12 @@ export class TrapShot extends Entity {
         if (trapProjId !== undefined && tryReflectProjectile(this, trapProjId, e, game)) return;
         // 免工件窗门（Damage 头 :12635-12638 同构：窗口未到期=整体早退,
         // StatusNPC/焰爆石/幽灵头/伤害/击退全部不触发）
+        // ★BJ704-G14 件2①：281 换轨全场共享桶（peek 即写=绝对到期,Arrow 同源）
         const targetKey = e as unknown as object;
-        if (!windowOpen(targetKey)) continue;
+        if (bunnyIdStatic) {
+          if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // dealContacts :444 同位（拒收不落桶账）
+          if (!idStaticCheck(281, (e as unknown as { id?: number }).id ?? -1, 10)) continue;
+        } else if (!windowOpen(targetKey)) continue;
         // StatusNPC 命中 debuff（Projectile.cs:10555 表驱动——毒飞镖 98 掷中必染
         // Poison 600t / 超级镖 184 900t :11041/:11045;矛/尖球/巨石/喷泉等表内无条目
         // 天然空掷）。曾整类漏接 = 飞镖陷阱永不上毒（2026-08-19 补）
@@ -892,28 +1031,119 @@ export class TrapShot extends Entity {
     }
   }
 
-  /** 落点爆炸（Projectile.Kill：type162=Projectile.cs:72768-72831 / type281=72704-72758）：
-   *  纯范围伤害（162/281 均不在 ExplodeTiles 判定表 Projectile.cs:75260 → 不破坏地形）；
-   *  原版两段伤害盒 162 为 64×64→144×144、281 为 128×128，此处按 blast 半宽合并一段；
-   *  friendly 弹不伤玩家（hostile 伤害仅在 getGoodWorld 下对玩家生效，Main.getGoodWorld） */
+  /** 落点爆炸（Projectile.Kill 专属支逐型分派）：
+   *  · 281 爆炸兔（:77327-77389 ★BJ704-G14 件2③ 精确面清偿——ai0≠-3 门由
+   *    bunnyLanded 早灭支前置承载）：PlaySound(4)+gore76/77（初速 rand(−20..20)×0.2
+   *    −v×0.5）+Item14+尘31×20（s1.5 vel×1.4）+尘6×10 双档（s2.5 noG vel×5 /
+   *    s1.5 vel×3）+gore61-63×4（vel×0.4+象限 ±1）+damage>0 门 128×128 Damage()
+   *    （idStatic 共享桶窗）。
+   *  · 162 炮弹（:77391-77453 同刀精确面）：Item14+64×64 Damage()+尘31×20（vel×2.5）
+   *    +尘6×50（s2.5 noG vel×Next(50,151)×0.1）+尘6×10（s1.5 vel×3 vy−1）+
+   *    gore61-63×4（vel×0.4+象限 ±1.5）+144×144 再 Damage()（两段间 immune[owner]=10
+   *    窗=私表 hitCdT 承载,内盒敌不二结算——净命中集与单段 144 等价,窗为两段间语义）。
+   *  · 162/281 均不在 ExplodeTiles 判定表（Projectile.cs:75260）→ 不破坏地形;
+   *    friendly 弹不伤玩家（281 hostile 形态在 Arrow 爆弹支,勿混）。
+   *  · 烟花火箭 167-170/415-418 不入本口（fireworkUpdate 早退路由 :436-441,死
+   *    亡位=timeLeft/撞块/接触杀 → explodeFirework 专支）。 */
   private blastKill(game: GameHooks): void {
     this.dead = true;
     const st = TRAP_SHOT_STYLE[this.kind];
     const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    if (this.kind === 'bunny') {
+      game.playSfx('killed', 1, cx, cy);   // PlaySound(4)（:77330——legacy 4=Killed,Arrow 281 爆弹同款）
+      const gvelB = () => (Math.floor(Math.random() * 41) - 20) * 0.2;   // Next(-20,21)×0.2
+      const gB76 = GorePiece.newGore(76, this.x, this.y, gvelB(), gvelB());
+      if (gB76) { gB76.vx -= this.vx * 0.5; gB76.vy -= this.vy * 0.5; }  // :77332-77336 −v×0.5
+      const gB77 = GorePiece.newGore(77, this.x, this.y, gvelB(), gvelB());
+      if (gB77) { gB77.vx -= this.vx * 0.5; gB77.vy -= this.vy * 0.5; }
+      game.playSfx('explosion', 1, cx, cy);   // Item14（:77341）
+      for (let i = 0; i < 20; i++) {          // :77342-77347 尘 31×20（α100 s1.5 vel×1.4）
+        const dB31 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+        if (dB31) { dB31.vx *= 1.4; dB31.vy *= 1.4; }
+      }
+      for (let i = 0; i < 10; i++) {          // :77348-77358 尘 6 双档×10（s2.5 noG vel×5 / s1.5 vel×3）
+        const dA6 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 2.5, true);
+        if (dA6) { dA6.vx *= 5; dA6.vy *= 5; }
+        const dB6 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100, null, 1.5);
+        if (dB6) { dB6.vx *= 3; dB6.vy *= 3; }
+      }
+      for (const [kxB, kyB] of [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {   // :77359-77373 gore 61-63 四象限
+        const gQ = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.x, this.y, 0, 0);
+        if (gQ) { gQ.vx = gQ.vx * 0.4 + kxB; gQ.vy = gQ.vy * 0.4 + kyB; }
+      }
+      if (this.damage > 0) this.blastDamage(game, cx, cy, 64, 281);   // :77374-77384（128×128,Damage_EVP friendly 早退;damage>0 门原版字面 :77375）
+      return;
+    }
+    if (this.kind === 'cannonball') {
+      game.playSfx('explosion', 1, cx, cy);   // Item14（:77392）
+      this.blastDamage(game, cx, cy, 32);     // :77393-77400 第一段 64×64（心保持扩盒）
+      // :77401 起尘/gore 采样盒 = 扩后 64×64（position 已 recenter,尘域=心±32,
+      //  gore 出生点=盒左上角 (cx−32, cy−32)——NewGore position 单点语义）
+      const bx162 = cx - 32, by162 = cy - 32;
+      for (let i = 0; i < 20; i++) {          // :77407-77412 尘 31×20（s1.5 vel×2.5）
+        const dC31 = game.spawnDust?.(bx162, by162, 64, 64, 31, 0, 0, 100, null, 1.5);
+        if (dC31) { dC31.vx *= 2.5; dC31.vy *= 2.5; }
+      }
+      for (let i = 0; i < 50; i++) {          // :77413-77419 尘 6×50（s2.5 noG vel×Next(50,151)×0.1）
+        const dC6 = game.spawnDust?.(bx162, by162, 64, 64, 6, 0, 0, 100, null, 2.5, true);
+        if (dC6) { const fC = (50 + Math.floor(Math.random() * 101)) * 0.1; dC6.vx *= fC; dC6.vy *= fC; }
+      }
+      for (let i = 0; i < 10; i++) {          // :77420-77426 尘 6×10（s1.5 vel×3 vy−1）
+        const dC6b = game.spawnDust?.(bx162, by162, 64, 64, 6, 0, 0, 100, null, 1.5);
+        if (dC6b) { dC6b.vx *= 3; dC6b.vy = dC6b.vy * 3 - 1; }
+      }
+      for (const [kxC, kyC] of [[1, 1], [-1, 1], [1, -1], [-1, -1]] as const) {   // :77427-77444 gore 61-63 四象限（±1.5）
+        const gQ = GorePiece.newGore(61 + Math.floor(Math.random() * 3), bx162, by162, 0, 0);
+        if (gQ) { gQ.vx = gQ.vx * 0.4 + 1.5 * kxC; gQ.vy = gQ.vy * 0.4 + 1.5 * kyC; }
+      }
+      this.blastDamage(game, cx, cy, 72);     // :77445-77452 第二段 144×144（心再扩）
+      return;
+    }
     game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（Projectile.cs:72769/72706）
     game.spawnParticles(cx, cy, '#FFA050', 14, 3.5, { life: 18, damp: 0.93, grav: -0.02 });
     game.spawnParticles(cx, cy, '#FFF0C0', 8, 4.5, { life: 10, damp: 0.9, grav: -0.05 });
     this.blastDamage(game, cx, cy, st.blast!);
   }
 
-  /** 伤害盒结算（炮弹族与烟花火箭共用的 Damage() 语义：friendly 只伤敌怪） */
-  private blastDamage(game: GameHooks, cx: number, cy: number, r: number): void {
+  /** 伤害盒结算（炮弹族与烟花火箭共用的 Damage() 语义：friendly 只伤敌怪）。
+   *  ★BJ704-G14 件2①③：idStaticKey=281（兔爆）走全场共享桶窗（Damage_PVE :12595
+   *  头门 + :14031 写行——与直击环/Arrow 爆弹态同一张表）;0=走私表 hitCdT（162 双
+   *  盒间窗,immune[owner]=10 末档,pen=4≠1）。damage<=0 整退（Damage_PVE :12576）。
+   *  ★BJ704-G21 R8-F2（爆面扩盒 CutTiles 清偿）：Damage() 内建 CutTiles（:12515-
+   *  12518 friendly∧myPlayer∧!npcProj∧!minion——CutTilesAt 吃【已扩】盒,割草/
+   *  碎罐）旧爆面整缺（同役直击环 :852/Arrow 爆弹 :5553 均有,唯此面漏——红队
+   *  按 FX 位清单的漏型判例）。位=damage 头门【前】（Damage() 序 :12516 CutTiles
+   *  先于 :12576 damage<=0 PVE 整退——0 伤烟花盒 415-418 原版 192² Damage() 照割）。
+   *  ★BJ704-G21 R8-F5（dontTakeDamage 外环门补齐）：:12604 直击环 :866 同款——
+   *  ZappingJellyfish{63,64,103,242} 例外在爆族（281/162/1049/烟花全非接触族
+   *  aiStyle∈{19,161,75,140}）=净拒收（原版内层 :12687 return 同净效,无电击面）;
+   *  置 idStatic 写位【前】=充能水母不白耗 10t 共享桶窗（原版写梯 :14031 在受里
+   *  面深位,拒收/电击拍零落账）。
+   *  ★BJ704-G22（g21-fw-idstatic-1t 清偿）：idStatic 身份键参数化——烟花火箭
+   *  167-170 SetDefaults usesIDStaticNPCImmunity+idStaticNPCHitCooldown=1（:2568-
+   *  2570,全场同型共享 1t 窗：同拍同型第二发/接触杀→爆花对同敌不二结算）;窗长
+   *  单源=projectileData(idStaticKey)（json 双闸门管控面,281=10/167-170=1）。
+   *  烟花盒 415-418 无 idStatic 行（:4944-4951）→ 传 0 走私表/门全关（damage=0
+   *  本就无 PVE 面）。immunityIdentity=type（:784 默认）⇒ 键=167+form 逐型分桶
+   *  ≙ 原版 perIDStaticNPCImmunity[type] 逐型一张表。 */
+  private blastDamage(game: GameHooks, cx: number, cy: number, r: number, idStaticKey = 0): void {
     const box = { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r };
+    // ★BJ704-G22：idStatic 窗长数据面单源（json idStaticNPCHitCooldown;281=10/
+    //  167-170=1——缺档兜底 10 与旧字面同值）
+    const idCd = idStaticKey ? (projectileData(idStaticKey)?.idStaticNPCHitCooldown ?? 10) : 0;
+    if (!this.hostile) cutTilesBox(game, box.x, box.y, box.w, box.h);   // R8-F2：先于 damage 门（:12516→:12523 序）
+    if (this.damage <= 0) return;
     for (const ent of game.enemies()) {
+      if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;   // R8-F5：:12604 外环门
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
+      // 免工件窗门（162 两段间 immune 窗 / 281·烟花共享桶——拒收不消耗任何效果）
+      if (idStaticKey) {
+        if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
+        if (!idStaticCheck(idStaticKey, (e as unknown as { id?: number }).id ?? -1, idCd)) continue;
+      } else if (this.windowGate && (this.hitCdT.get(e as unknown as object) ?? 0) > 0) continue;
       // ★焰爆石/拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
       // TRAP_PROJ_ID 兜底查 id（162/281 无类旗原版恒不触发），站位补齐同命中环注；
       // 返回 num14 加伤并入实伤参（无 crit 面,×1）
@@ -927,16 +1157,21 @@ export class TrapShot extends Entity {
       e.hurt(applyBannerDamageDealt(game, e, this.damage)
         + (snapBonusBlast ? Math.trunc(snapBonusBlast * 1) : 0),
         Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
+      // 命中尾免疫梯（GC1 桥——162 末档写 10 / 281 idStatic 写 0+共享桶已写）
+      if (blProjId !== undefined) {
+        noteVanillaProjImmune(game, blProjId, (e as unknown as { id?: number }).id ?? -1);
+      }
+      if (this.windowGate && !idStaticKey) this.hitCdT.set(e as unknown as object, 10);
     }
   }
 
   // ============ 烟花三件套 + 马桶水花（Projectile 167-170 / 415-422 / 733）============
 
   /** 烟花族 AI 主循环。
-   *  火箭（aiStyle34，Projectile.cs:25677-25739）：无重力直线上升 + 尾烟尘 6，
+   *  火箭（aiStyle34，Projectile.cs:27519-27579）：无重力直线上升 + 尾烟尘 6，
    *  timeLeft 45 到点或撞块 → Kill 爆花；
-   *  喷泉（aiStyle73，:29369-29510）：静态发射器，锚点 338 消失即 Kill，每 tick 2 粒火花；
-   *  马桶（aiStyle153，:49278-49314）：11 帧水花后自杀 */
+   *  喷泉（aiStyle73，:30978-31125）：静态发射器，锚点 338 消失即 Kill，每 tick 2 粒火花；
+   *  马桶（aiStyle153，:53114-53152）：11 帧水花后自杀 */
   private fireworkUpdate(game: GameHooks): void {
     const isRocket = this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket';
     // ---- ★通用湿段（:16903-17113,共享体;tick 头口径同 fixedUpdate 字段块注）----
@@ -947,8 +1182,15 @@ export class TrapShot extends Entity {
     const wetIdFw = trapWetProjId(this.kind, this.form);
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       wetIdFw, !!projectileData(wetIdFw)?.ignoreWater);
+    // ★BJ704-G22（烟花域扫面清偿）：Damage() 内建 CutTiles（:12515-12518 friendly∧
+    //  myPlayer——CanCutTiles :15407-15418 黑名单制,aiStyle 34/73 不在排除表=可割）
+    //  逐拍随 Damage() 跑;烟花族 fireworkUpdate 早退路由（:436-441）旧整缺=飞行
+    //  火箭/喷泉弹不割草。位=life 检查前（死亡拍小盒照割,vanilla Damage() :17184
+    //  在 timeLeft Kill :17307 前）;马桶 733 vanilla 无 friendly 行（=false）→ 本仓
+    //  hostile=true 同相不割。
+    if (!this.hostile) cutTilesBox(game, this.x, this.y, this.w, this.h);
     if (--this.life <= 0) {
-      if (isRocket) this.explodeFirework(game); // timeLeft 45 到点 → Projectile.Kill（:73435）
+      if (isRocket) this.explodeFirework(game); // timeLeft 45 到点 → Kill()（:17307-17310）→ aiStyle34 爆段（:78125-78557）
       else this.dead = true;                    // 喷泉 3600 自然耗尽（马桶由下方 age 分支自杀）
       return;
     }
@@ -960,12 +1202,35 @@ export class TrapShot extends Entity {
       const dfFw = projWaterDragFactor(this);
       this.x += this.vx * dfFw;
       this.y += this.vy * dfFw;
-      // 尾烟（AI_034 :25724-25739）：167-170 每帧 1 粒尘 6；415-418 自 ai[0]>4 起（:25722-25733）
-      //（引擎粒子 2 tick 一发节流，视觉近似）
+      // 尾烟（AI_034 :27559-27570）：167-170 每帧 1 粒尘 6；415-418 自 ai[0]>4 起（:27559-27569）
+      //（引擎粒子 2 tick 一发节流，视觉近似——1:1 尘数=45/t 对引擎粒子成本翻倍,维持登记近似）
       const trailOk = this.kind === 'fireworkRocket' || this.age > 4;
       if (trailOk && (this.life & 1) === 0) {
         game.spawnParticles(this.x + this.w / 2, this.y + this.h, '#A8A8A0', 1, 0.6,
           { life: 18, damp: 0.95, grav: -0.02 });
+      }
+      // ★BJ704-G22（烟花域扫面清偿·接触面整缺）：vanilla Damage() 逐拍跑（:17184;
+      //  aiStyle34 不在 Damage_CanDealDamage 排除表 :12463）→ 飞行火箭对敌接触
+      //  friendly 直击（伤 150/kb7）,penetrate 1 耗尽 → :17312-17315 Kill()=aiStyle34
+      //  爆段（爆花+192² 盒）。旧仓烟花走 fireworkUpdate 早退路由=接触面整缺（火箭
+      //  穿敌不伤不爆,时间到才原地爆）。直击写 iframes（Enemy.hurt 8t）→ 爆盒对同
+      //  敌经 idStatic 臂 iframes 门拒收 ≙ 原版 1t idStatic 窗同净效（接触+爆不双
+      //  结算,窗长面另见 blastDamage 注）。烟花盒 415-418 damage=0 → 本门恒闭
+      //  （Damage_PVE :12576 同相,穿敌不触不发——vanilla 亦无接触死）。掷面省略
+      //  登记同 Dart 直击环（crit/snapStrike 陷阱族专属,烟花非 trap 无 snap 面;
+      //  crit 面随 TrapShot blast 族既有近似,不单侧开新面）。
+      if (this.damage > 0) {
+        for (const ent of game.enemies()) {
+          if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+          if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892 同位）
+          const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+            hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean };
+          if (e.dead || !(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+          e.hurt(applyBannerDamageDealt(game, ent, this.damage),
+            Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);
+          this.explodeFirework(game);   // penetrate==0 → Kill()（:17312-17315）
+          return;
+        }
       }
       // tileCollide=true → 撞实心块同样 Kill 爆花
       const tx = Math.floor(cx / TILE), ty = Math.floor(cy / TILE);
@@ -993,31 +1258,31 @@ export class TrapShot extends Entity {
       const burst = game.spawnBurst?.bind(game);
       if (!burst) return;
       if (this.form === 0) {
-        // 419 黄（:29385-29406）：尘 222，±PI/4 散布，vy×2
+        // 419 黄（:30994-31018）：尘 222，±PI/4 散布，vy×2
         burst(cx, cy, FW_DUST.d222_yellow, 2, sp, -Math.PI / 2, Math.PI / 4, { yMul: 2, life: 30, damp: 0.96 });
       } else if (this.form === 1) {
-        // 420 红（:29408-29431）：尘 219（每粒 1/5 → 222，此处逐帧取色近似），vx×0.5 vy×2
+        // 420 红（:31019-31049）：尘 219（每粒 1/5 → 222，此处逐帧取色近似），vx×0.5 vy×2
         burst(cx, cy, Math.random() < 0.2 ? FW_DUST.d222_yellow : FW_DUST.d219_red, 2, sp,
           -Math.PI / 2, Math.PI / 4, { xMul: 0.5, yMul: 2, life: 30, damp: 0.96 });
       } else if (this.form === 2) {
-        // 421 蓝（:29433-29452）：尘 221，±PI/8 窄散布，vy×2.5
+        // 421 蓝（:31050-31073）：尘 221，±PI/8 窄散布，vy×2.5
         burst(cx, cy, FW_DUST.d221_blue, 2, sp, -Math.PI / 2, Math.PI / 8, { yMul: 2.5, life: 30, damp: 0.96 });
-        // timeLeft%10==0 再补 9 粒尘 222 扇面（:29455-29475：x=(i-4)/5 均布）
+        // timeLeft%10==0 再补 9 粒尘 222 扇面（:31074-31097：x=(i-4)/5 均布）
         if (this.life % 10 === 0) {
           burst(cx, cy, FW_DUST.d222_yellow, 9, sp * (0.85 + Math.random() * 0.2),
             -Math.PI / 2, Math.PI / 5, { yMul: 2, life: 30, damp: 0.96 });
         }
       } else {
-        // 422 彩虹（:29494-29510）：尘 219 + rand(5)，±PI/4，vy×2
+        // 422 彩虹（:31099-31125）：尘 219 + rand(5)，±PI/4，vy×2
         burst(cx, cy, FW_RAINBOW[Math.floor(Math.random() * FW_RAINBOW.length)]!, 2, sp,
           -Math.PI / 2, Math.PI / 4, { yMul: 2, life: 30, damp: 0.96 });
       }
       return;
     }
-    // ---- 马桶水花 733（AI_153_ToiletPop :49278-29314）----
+    // ---- 马桶水花 733（AI_153_ToiletPop :53114-53152）----
     // age 1 ↔ 原版 ai[0]==0（首帧 6 尘 216 + 1 gore）；age 2..11 ↔ ai[0] 1..10（2 尘 + 1/5 gore）；
-    // age 12 ↔ ai[0]=11 > 10 → Kill。尘向上（speedY -2，velX×0.5，:49299-49305）；
-    // gore 580-582（:49308-49312）以 2 粒亮水珠近似
+    // age 12 ↔ ai[0]=11 > 10 → Kill。尘向上（speedY -2，velX×0.5，:53139-53146）；
+    // gore 580-582（:53147-53151）以 2 粒亮水珠近似
     if (this.age > 11) {
       this.dead = true;
       return;
@@ -1036,14 +1301,17 @@ export class TrapShot extends Entity {
     }
   }
 
-  /** 烟花爆花（Projectile.Kill aiStyle==34，Projectile.cs:73435-73921）：
-   *  SoundID.Item14 + 按弹种彩色尘（数量/速度档 1:1）+ 192×192 伤害盒 Damage()（:73912-73920）。
+  /** 烟花爆花（Projectile.Kill aiStyle==34，Projectile.cs:78125-78557）：
+   *  SoundID.Item14（:78131）+ 按弹种彩色尘（数量/速度档 1:1）+ 192×192 伤害盒
+   *  Damage()（Kill 尾段 :78549-78556——Resize(192)+penetrate=-1+Damage() 无 damage
+   *  门;★G21 登记债 [g21-fw-anchor] 勘正：旧注 ":73435-73921/:73912-73920" 系
+   *  混代锚漂移 ~4700 行,R8-N3 族）。
    *  尘速档 = 原版各循环的径向速度（尘自带 0.5 系数初速并入档位）；noGravity 尘按
    *  Dust.cs:2227-2230 velocity*=0.93 / fadeIn 缓胀 → damp 0.93 + 45t 存活近似 */
   private explodeFirework(game: GameHooks): void {
     this.dead = true;
     const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
-    game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（:73437）
+    game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（:78131）
     // ★BJ306 同上（烟花爆花 explodeFirework 站；radial 闭包内消费 burst=闭包传递,
     // 必 bind）——原 detach 形态在 Kill 拍（timeLeft 45 到点/撞块）即抛 TypeError
     const burst = game.spawnBurst?.bind(game)
@@ -1054,49 +1322,49 @@ export class TrapShot extends Entity {
       burst(cx, cy, color, count, speed, 0, Math.PI, { life: 45, damp: 0.93, ...opts });
     const rand = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));
     if (this.kind === 'fireworkRocket') {
-      // 167-170（:73439-73661）
+      // 167-170（:78132-78350）
       if (this.form === 0) {
-        // 红 167（:73439-73473）：400 尘 130，四档速度 4/8/12/16 各 100
+        // 红 167（:78132-78168）：400 尘 130，四档速度 4/8/12/16 各 100
         radial(FW_DUST.d130_red, 100, 4); radial(FW_DUST.d130_red, 100, 8);
         radial(FW_DUST.d130_red, 100, 12); radial(FW_DUST.d130_red, 100, 16);
       } else if (this.form === 1) {
-        // 绿 168（:73475-73518）：400 尘 131；0-100 档 0→2 渐增（取均值 1）、
+        // 绿 168（:78169-78212）：400 尘 131；0-100 档 0→2 渐增（取均值 1）、
         // 101-250 档 10（150 粒）、251-399 档 13 且 x×1.25/y×0.75（149 粒）
         radial(FW_DUST.d131_green, 101, 1); radial(FW_DUST.d131_green, 150, 10);
         radial(FW_DUST.d131_green, 149, 13, { xMul: 1.25, yMul: 0.75 });
       } else if (this.form === 2) {
-        // 蓝 169（:73520-73612）：双圈 Lerp 曲线（各 2×num843×20 尘 133）+ 中心 100 尘 132；
+        // 蓝 169（:78213-78280）：双圈 Lerp 曲线（各 2×num843×20 尘 133）+ 中心 100 尘 132；
         // num843 = rand(5,9) 臂、num844 = rand(12,17) 外速、value10 = rand(3,7) 内速
         const arms = rand(5, 9), outer = rand(12, 17), inner = rand(3, 7);
         radial(FW_DUST.d133_yellow, 80 * arms, outer);
         radial(FW_DUST.d133_yellow, 80 * arms, outer / 2);
         radial(FW_DUST.d132_blue, 100, outer);
       } else {
-        // 黄 170（:73614-73661）：400 尘 133/134 交替，四档 16/11/8/5 各 100，轴压 0.7 交替
+        // 黄 170（:78281-78350）：400 尘 133/134 交替，四档 16/11/8/5 各 100，轴压 0.7 交替
         radial(FW_DUST.d133_yellow, 100, 16, { yMul: 0.7 }); radial(FW_DUST.d134_gold, 100, 11, { xMul: 0.7 });
         radial(FW_DUST.d133_yellow, 100, 8, { yMul: 0.7 }); radial(FW_DUST.d134_gold, 100, 5, { xMul: 0.7 });
       }
     } else {
-      // 415-418 烟花盒（:73663-73898）
+      // 415-418 烟花盒（:78351-78548）
       if (this.form === 0) {
-        // 红 415（:73663-73710）：30×num868 臂尘 130（速度 num870→num869 渐增，取均值）+
+        // 红 415（:78351-78400）：30×num868 臂尘 130（速度 num870→num869 渐增，取均值）+
         // 100 尘 130 补充；num868 = rand(5,9)、num869 = rand(10,15)×0.66、num870 = rand(4,7)/2
         const arms = rand(5, 9), sp = rand(10, 15) * 0.66, sp0 = rand(4, 7) / 2;
         radial(FW_DUST.d130_red, 30 * arms, (sp0 + sp) / 2);
         radial(FW_DUST.d130_red, 100, sp);
       } else if (this.form === 1) {
-        // 绿 416（:73712-73760）：num883=20 步 × num882 = rand(3,6)×2 臂螺旋尘 131，
+        // 绿 416（:78401-78435）：num883=20 步 × num882 = rand(3,6)×2 臂螺旋尘 131，
         // 速度 1→8 渐增（取均值 4.5），奇偶臂 scale 0.9
         radial(FW_DUST.d131_green, 20 * rand(3, 6) * 2, 4.5);
       } else if (this.form === 2) {
-        // 蓝 417（:73762-73801）：150 尘三段（各 50）132/133/132，
+        // 蓝 417（:78436-78491）：150 尘三段（各 50）132/133/132，
         // 外圈 num894 = max(rand(4,7),rand(4,7))（x×0.5 旋转）、中段 num893（y×0.5 旋转）、内圈 num892
         const sp2 = 4 + Math.random() * 3, sp1 = 4 + Math.random() * 3;
         radial(FW_DUST.d132_blue, 50, Math.max(sp1, sp2), { xMul: 0.5 });
         radial(FW_DUST.d133_yellow, 50, Math.min(sp1, sp2), { yMul: 0.5 });
         radial(FW_DUST.d132_blue, 50, Math.min(sp1, sp2));
       } else {
-        // 黄 418（:73803-73898）：2×num899×15 臂尘 134（SmoothStep num900→num901）+
+        // 黄 418（:78492-78548）：2×num899×15 臂尘 134（SmoothStep num900→num901）+
         // 120 补充尘（前 80 尘 133 慢速、后 40 尘 131 外速）
         const arms = rand(5, 12), sp = rand(9, 14) * 0.66, sp0 = rand(2, 4) * 0.66;
         radial(FW_DUST.d134_gold, 2 * arms * 15, (sp + sp0) / 2);
@@ -1104,9 +1372,13 @@ export class TrapShot extends Entity {
         radial(FW_DUST.d131_green, 40, sp);
       }
     }
-    // 192×192 伤害盒 Damage()（:73912-73920）：烟花火箭 damage 150 结算，
-    // 烟花盒 damage 0 = 纯视觉（hurt(0) 无意义，直接跳过）
-    if (this.damage > 0) this.blastDamage(game, cx, cy, 96);
+    // 192×192 伤害盒 Damage()（Kill 尾段 :78549-78556 无 damage 门）：
+    //  ★BJ704-G22（g21-fw-box-cut 清偿）：烟花盒 415-418 damage 0 亦入盒——
+    //  blastDamage 头 damage<=0 早退（Damage_PVE :12576 同相,PVE no-op）但
+    //  CutTiles 先行照割（:12516 序）=0 伤盒原版 192² 照割（旧调用位 damage>0
+    //  门把割面一并拦死=登记债本体）。火箭 167-170 传 idStatic 键（1t 共享窗,
+    //  blastDamage 注）;烟花盒 415-418 无 idStatic 行（:4944-4951）→ 0。
+    this.blastDamage(game, cx, cy, 96, this.kind === 'fireworkRocket' ? this.projId : 0);
   }
 }
 
@@ -1150,12 +1422,15 @@ export class Dart extends Entity {
   private subIsHead = false;
   /** 记录位=dartStep/oracleOrbStep 尾（位移后;原版 UpdateTrails :17198=Damage 后同序。
    *  命中杀拍 dartStep 内 dead=true 时仍记一段=原版 Damage 杀弹仍记录同相,撞块杀弹
-   *  原版不记——本仓两种杀共用 dead 位,1 子步粒度偏差登记） */
+   *  原版不记——本仓两种杀共用 dead 位,1 子步粒度偏差登记。
+   *  ★BJ703-B D1 dir=1 恒值（登记①收编）:Dart 载体 mode2/3/4 全员（811/814）原版
+   *  AI_001 全程无 spriteDirection 写 → oldSpriteDirection 恒 1;旧 sign(vx) 记录
+   *  =左飞幽灵假镜像（811 贴图 54% 非对称）,本刀归位。 */
   recordGhostTrail(): void {
     if (this.ghostRing === undefined) {
       this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
     }
-    this.ghostRing?.record(this.x, this.y, this.rot, this.dir || 1, this.subIsHead);
+    this.ghostRing?.record(this.x, this.y, this.rot, 1, this.subIsHead);
   }
   /** 537 激光束长 Lerp 值（原版 localAI[1]，LaserScan→0.5/t Lerp） */
   private beamLen = 0;
@@ -1203,8 +1478,14 @@ export class Dart extends Entity {
       this.life = st.life ?? 600;
       this.alpha = st.alpha0 ?? 0;
       this.scale = st.scale ?? 1;
+      // 首拍姿态（出膛即对齐,首 update 前 draw 兜底同式）:a45=同 :26911 字面（F3）/
+      // align90=同 :58733 字面 1.57（★G10/R2-F13,旧 π/2）/rightPi=同 :58640-58647
+      // （★G10/R2-F6,436——direction=出生符号,首 update 起 dartStep 逐拍重评）
       this.rot = st.rot === 'align90' || st.rot === 'a45'
-        ? Math.atan2(vy, vx) + (st.rot === 'a45' ? 0.785 : Math.PI / 2) : 0; // a45=同 :26911 字面（F3,首拍近似同式）
+        ? Math.atan2(vy, vx) + (st.rot === 'a45' ? 0.785 : 1.57)
+        : st.rot === 'rightPi'
+          ? Math.atan2(vy, vx) + Math.PI + ((Math.sign(vx) || 1) === -1 ? Math.PI : 0)
+          : 0;
       this.dir = Math.sign(vx) || 1;
       if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
     } else if (vh) {
@@ -1363,6 +1644,9 @@ export class Dart extends Entity {
     // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)——不画本体
     if (st.noTex) return;
     // ★BJ219 残影（原版残影块先于本体绘制段）——573/811/814（ghostRing 无记录式=短路）
+    //  ★G10/R2-F6：436 ghost 面 mirror 随 direction（mode0 ghost 恒吃本体当前翻转
+    //  Main.cs:31334——dartStep 'rightPi' 逐拍重评 this.dir;其余 Dart 员原版零
+    //  spriteDirection 写（BJ703-B D1 恒 1）不传维持现状）
     if (this.ghostRing) {
       const gimg = projSprite(this.projId);
       if (gimg && gimg.width > 0) {
@@ -1376,6 +1660,7 @@ export class Dart extends Entity {
           opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
           vxLen: Math.hypot(this.vx, this.vy),
           spriteDirection: this.dir || 1,
+          mirror: st.rot === 'rightPi' && this.dir === -1,
         });
       }
     }
@@ -1412,6 +1697,9 @@ export class Dart extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
+    // ★G10/R2-F6：436 RIGHT 族变体左飞水平镜像（canvas rotate→scale(-1,1) 合成 =
+    // XNA R(θ)∘FlipHorizontally,Arrow 408 同式;θ=ang+2π≡ang 数值同相）
+    if (st.rot === 'rightPi' && this.dir === -1) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
     const gaDart = this.netPuppet ? 1
       : is596 ? Math.max(0, (128 - effAlpha / 2) / 255)                      // A=128−α/2
@@ -1604,7 +1892,9 @@ export class Dart extends Entity {
     }
     // ---- 旋转（各 aiStyle 权威语义,见 DART_STYLE 头注）----
     switch (st.rot) {
-      case 'align90': this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2; break;
+      // 1.57=原版字面 1.57f（AI_001 通用尾 :58733,★G10/R2-F13 字面纪律——非 π/2
+      // ≈1.5708,残差 0.0008rad;旧注 :54868 系陈号已重锚）
+      case 'align90': this.rot = Math.atan2(this.vy, this.vx) + 1.57; break;
       // 0.785=原版字面 0.785f（:26911,★F3 清偿 2026-10-14——非 π/4≈0.785398,残差
       // 0.0004rad 视觉无感但字面 1:1 纪律;旧注 :24839 系 1456 世代残号已重锚）
       case 'a45': this.rot = Math.atan2(this.vy, this.vx) + 0.785; break;
@@ -1612,13 +1902,23 @@ export class Dart extends Entity {
       case 'spin': this.rot += st.spinRate! * this.dir; break;
       case 'tilt': this.rot = this.vx * 0.125; break;          // 836 蒲公英籽 :43312
       case 'vxSpin': this.rot += this.vx * 0.1; break;         // aiStyle16 炸弹族 :48444
+      // ★G10/R2-F6：436 火星弹 RIGHT 族变体（AI_001 尾分派 :58640-58647 +
+      // 专属块 :55107-55119 spriteDirection=direction）——direction 逐拍重评
+      // （vx<0?-1:1,AutomaticallyChangesDirection :17122-17130,aiStyle1 在管）,
+      // rot=ToRotation()+π+(direction==−1?π:0);draw/ghost 消费 this.dir 镜像。
+      // 注:'roll'/'spin'/'nail' 的 this.dir=出生符号不复评语义不变（各型原文如此）。
+      case 'rightPi': {
+        this.dir = this.vx < 0 ? -1 : 1;
+        this.rot = Math.atan2(this.vy, this.vx) + Math.PI + (this.dir === -1 ? Math.PI : 0);
+        break;
+      }
       case 'nail':
         // 498 铁钉（P.cs:58485-58492）：ai[0]<50 恒对齐速度方向（else 支 atan2+1.57）；
         // ≥50 与摩擦/重力【同一分支】改自旋 rotation += direction*0.5——翻转点复用
         // gravDelay 表值(49)即与重力门同拍；direction=出生速度符号（原版 NewProjectile
         // 语义，本仓 ctor 处 Math.sign(vx) 同式，飞行中不复评）
         if (this.age > (st.gravDelay ?? 0)) this.rot += this.dir * (st.spinRate ?? 0.5);
-        else this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+        else this.rot = Math.atan2(this.vy, this.vx) + 1.57;
         break;
       case 'none': this.rot = 0; break;
     }
@@ -2897,7 +3197,7 @@ export class Dart extends Entity {
         22 * this.scale, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10(第4=knockback 位,opts 第5)
+        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10(第4=knockback 位,opts 第5)
     }
   }
 
@@ -2965,7 +3265,7 @@ export class Dart extends Entity {
       && projOverlap(this.x, this.y, this.w, this.h, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true });   // ★R-B-F10
+        this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10
     }
   }
 
@@ -3130,9 +3430,16 @@ function laserScanTiles(game: GameHooks, cx: number, cy: number, dxu: number, dy
 /** 敌怪弹幕样式表——每条对应原版 Projectile 的 SetDefaults(Projectile.cs) + AI 行为。
  *  射击怪→弹型映射（NPC.cs 发射点行号见 Enemy.ts 各调用点注释）。
  *  旋转语义（画布与 XNA 同为顺时针正,直接套用原版公式）:
- *   align90 = rotation = atan2(vy,vx)+π/2 每更新（AI_001 通用尾 :54868,贴图静止朝上）
+ *   align90 = rotation = atan2(vy,vx)+1.57 每更新（AI_001 通用尾 :58733 字面 1.57f,
+ *             贴图静止朝上——★G10/R2-F13 字面纪律:旧 π/2 残差 0.0008rad;旧锚
+ *             :54868 系陈号,1457 该行落 item 代码域）
  *   a45     = atan2+0.785 字面（115 三叉戟 AI_027 :26910-26911 原版 0.785f,非 π/4
  *             ——★F3 清偿 2026-10-14;旧锚 :24839 系 1456 世代残号）
+ *   rightPi = rotation = ToRotation()+π+(direction==-1?π:0)+spriteDirection=direction
+ *             每更新（AI_001 尾分派 :58640-58647 + 专属块 :55107-55119——RIGHT 族
+ *             变体:基底多 π,贴图朝左本相;direction 逐拍 vx<0?-1:1 重评
+ *             （AutomaticallyChangesDirection :17122-17130,aiStyle1 不在豁免表）,
+ *             左飞绘制水平镜像。★G10/R2-F6:436 火星弹（曾 align90=恒 90° 偏+永不镜像））
  *   roll    = += (|vx|+|vy|)*0.03*direction（aiStyle2 :21519:471 骨头/909 岩石/300 圣锤）
  *   spin    = += rate*direction（44 魔镰 AI_018 :23814 rate 0.8 / 96 诅咒焰 AI_008 :22669 rate 0.3 /
  *             31 沙球 AI_010 :55158 rate 0.1）
@@ -3158,7 +3465,7 @@ const SHATTER_SET = new Set(SHATTER_VANILLA);
 interface DartStyle {
   w: number; h: number;                  // 碰撞盒(SetDefaults width/height)
   scale?: number;                        // 绘制缩放(SetDefaults scale)
-  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none' | 'vxSpin' | 'nail';
+  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none' | 'vxSpin' | 'nail' | 'rightPi';
   spinRate?: number;
   alpha0?: number;                       // 出生 alpha(255=渐入)
   fade?: 'speed' | number;               // 渐入速率
@@ -3337,9 +3644,16 @@ export const DART_STYLE: Record<number, DartStyle> = {
   920: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
     sfx: ['Item_154'], frameRand: 3, fallback: '#5888FF' },
   // 436 火星弹（脑洗器 381,RANGED_TABLE :6086 proj:436 → spawnHostileProj）：
-  //    SetDefaults :5066-5072 10×10 aiStyle1 hostile ignoreWater（α 缺省 0=本体常显）;
-  //    AI :55106-55128 首拍 Item12 + 4 帧动画(每 3 update 步进)+AddLight——EU=0
-  436: { w: 10, h: 10, rot: 'align90', sfx: ['Item_12'], animEvery: 3, frames: 4,
+  //    SetDefaults :5066-5072 10×10 aiStyle1 hostile ignoreWater（α 缺省 0=本体常显
+  //    ——AI 块 α−40/t 对 0 值恒钳 0=no-op,渐入面不存在）;
+  //    AI :55106-55128 首拍 Item12 + 4 帧动画(每 3 update 步进)+AddLight——EU=0。
+  //    ★G10/R2-F6 姿态勘误：rot 'rightPi'——AI_001 专属块 :55107-55119
+  //    `spriteDirection=direction` + 尾分派 :58640-58647 `rotation=ToRotation()
+  //    +π+(direction==-1?π:0)`（RIGHT 族变体,基底多 π,贴图朝左本相）——旧
+  //    'align90'=恒 90° 偏+永不镜像。ghost 面（TrailingMode=0）mirror 随
+  //    direction（draw 消费位）。BJ703-B D2 扫族只收 435/682,本刀补 436 活体
+  //    （459/709 无 spawner=休眠,台账 F7 维持）。
+  436: { w: 10, h: 10, rot: 'rightPi', sfx: ['Item_12'], animEvery: 3, frames: 4,
     fallback: '#B0F0A0' },
   // 438 火星激光（射线枪手 382,RANGED_TABLE :6090 proj:438）：SetDefaults :5083-5090
   //    8×8 aiStyle1 hostile α255 extraUpdates=3 ignoreWater;fade = |v|×0.9 积分式
@@ -3406,7 +3720,10 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    距玩家中心<40px 即 Kill(:47809-47820);首帧 PlaySound(66)=★legacy type66=
   //    Zombie_121/122/123 随机小丑笑声（LSP case66 Next(121,124),×0.45 音量±0.15
   //    音调——★BJ692 复核普查第二只活体:旧译 'Item_66' 系整数编号域误读同族;
-  //    本表 sfx 消费口(:1562)固定 vol0.8 无逐条目音量面,×0.45 差=登记近似债）;
+  //    音量面=BJ693 债④ sfxVol 0.45 已接（旧注「固定 vol0.8 无音量面」系 sfxVol
+  //    落地前残文,勘误）;±0.15 音调=PITCH_CASE[case66] 表档（Sfx.ts:342,0c186b4c
+  //    2026-08-24 起在位）+三重 already-playing 拒重=★G10 GROUP_BUSY 门（Sfx.ts,
+  //    BJ291 残留清偿）;
   //    Kill 爆炸=Item14 + 128×128 伤害盒伤 60 kb8(:80116-80122)+尘 31/6+Gore 61-63
   75: { w: 22, h: 22, rot: 'vxSpin', grav: 0.2, gravDelay: 5, life: 300,
     bomb: true, proxKill: 40, rocket: 64, rocketDmg: 60, sfxVol: 0.45,

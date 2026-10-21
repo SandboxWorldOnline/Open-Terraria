@@ -58,12 +58,20 @@ import { playerArmorPenOf } from '../src/entities/MountCombat';
 import { npcCheckArmorPenetration } from '../src/entities/projStatus';
 
 /** 消费面 5 文件（equipStats 源 armorPen 读的全集——普查 2026-09-19，
- *  data/vanilla* 为生产面、其余实体文件为弹幕自身字段面（类缺省 0+汇截断），不在闸内） */
+ *  data/vanilla* 为生产面、其余实体文件为弹幕自身字段面（类缺省 0+汇截断），不在闸内）
+ *  ★BJ703-F 钉复核对账（2026-10-21,存量红分诊=钉陈旧,守卫面 unguarded/unparened
+ *  两断言全空=纯钉漂移零新裸站）：
+ *    Game.ts 97→98：新站=runModModifyHitNpc mod 钩参（D2 独立结算面,mods 平台批
+ *      2026-10-12/13,`(eq.armorPen ?? 0) + this.player.meleeArmorPen` 全括号习语过闸）。
+ *    MinionProj 5→4：BJ684 批（2026-10-15）阿比盖尔臂两单源站收编 ai156Strike
+ *      共享结算体（两源=玩家 AP+弹幕 AP,StrikeNPC :12068/:12852 原序）+BJ703-D4
+ *      （2026-10-21）946 城镇臂 flatPen 同改两源——5−2+1=4,逐站亲读合法读位
+ *      （身份锁=tests/bj491-critroll-tail2-three.test.ts ③3b）。 */
 const FILES: Array<[string, number]> = [
-  ['src/core/Game.ts', 97],      // 87 eq 形 + 10 this.player.equipStats 直读形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2,见头注逐站清单）
+  ['src/core/Game.ts', 98],      // 88 eq 形 + 10 this.player.equipStats 直读形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2;★BJ703-F 97→98=D2 runModModifyHitNpc mod 钩参站）
   ['src/entities/WhipProj.ts', 2],   // ★BJ491③ 1→2：:756 Y2 城镇 settle flatPen（:13686 num6 玩家通用 armorPen 透传）+ :851 敌怪环 hurt 参（原 :626 三元臂,行漂）
   ['src/entities/MountCombat.ts', 1], // :646 playerArmorPenOf 唯一桶
-  ['src/entities/MinionProj.ts', 5],  // ★BJ491③ 3→5：:3266/:3299/:3431（946 体触+城镇+阿比盖尔臂,BJ453-467 域主清偿连带）+ :4921/:5021（StrikeNPC :12068/:12852 玩家 AP+弹幕 AP 两源）
+  ['src/entities/MinionProj.ts', 4],  // ★BJ491③ 3→5→★BJ703-F 5→4（BJ684 ai156Strike 收编+BJ703-D4 946 两源,见上注）：946 城镇/ai156Strike/contactTown 三两源站+contact 敌怪环单源站
   ['src/entities/Arrow.ts', 0],       // 仅注释提及；读面=弹幕自身字段（缺省 0）
 ];
 
@@ -112,7 +120,7 @@ function scan(): ScanResult {
 }
 
 describe('BJ184 armorPen 桩面 NaN 防御判别网', () => {
-  it('①静态站闸：105 站全防御（?? 紧随）、Game.ts 97 刀站全括号习语、站数钉死', () => {
+  it('①静态站闸：105 站全防御（?? 紧随）、Game.ts 98 刀站全括号习语、站数钉死', () => {
     const res = scan();
     expect(res.unguarded).toEqual([]);
     expect(res.unparened).toEqual([]);
