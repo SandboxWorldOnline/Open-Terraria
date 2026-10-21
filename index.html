@@ -4,7 +4,41 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" type="image/png" href="/favicon.png" />
-  <title>SandboxWorld</title>
+  <title>Open Terraria 1.4.5.8</title>
+  <meta name="description" content="Terraria 1.4.5.8 re-engineered for the Web." />
+  <link rel="canonical" href="https://sandboxworld.online/" />
+  <!-- Open Graph(微信/Twitter/Discord/Telegram 分享卡) -->
+  <meta property="og:site_name" content="Open Terraria" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sandboxworld.online/" />
+  <meta property="og:title" content="Open Terraria — 泰拉瑞亚 1.4.5.8 网页版" />
+  <meta property="og:description" content="零安装,浏览器直接玩。支持 mod、材质包、原版存档导入。Terraria 1.4.5.8 re-engineered for the Web." />
+  <meta property="og:image" content="https://sandboxworld.online/og-image.png" />
+  <meta property="og:locale" content="zh_CN" />
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Open Terraria — 泰拉瑞亚 1.4.5.8 网页版" />
+  <meta name="twitter:description" content="零安装,浏览器直接玩。支持 mod、材质包、原版存档导入。" />
+  <meta name="twitter:image" content="https://sandboxworld.online/og-image.png" />
+  <!-- 结构化数据:VideoGame 富摘要(搜索引擎结果页) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "VideoGame",
+    "name": "Open Terraria 1.4.5.8",
+    "alternateName": "泰拉瑞亚网页版",
+    "description": "Terraria 1.4.5.8 re-engineered for the Web — no-install browser remake with mod and resource pack support, vanilla save import, and 120fps canvas rendering.",
+    "url": "https://sandboxworld.online/",
+    "image": "https://sandboxworld.online/og-image.png",
+    "operatingSystem": "Web Browser",
+    "applicationCategory": "Game",
+    "genre": ["Sandbox", "Action-Adventure", "2D", "Pixel Graphics"],
+    "playMode": ["SinglePlayer", "MultiPlayer"],
+    "inLanguage": ["zh-CN", "en"],
+    "author": { "@type": "Organization", "name": "SandboxWorldOnline", "url": "https://github.com/SandboxWorldOnline" },
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <!-- PWA/主屏 web app 双端 meta:Android 用 manifest(display fullscreen + landscape
        由 WebAPK/TWA 遵守);iOS 不读 manifest 的 display/orientation,靠 apple-* meta
        进 standalone 并以 black-translucent 让状态栏融进画面(viewport-fit=cover
@@ -132,5 +166,20 @@
   <div id="game-root"></div>
   <div id="sw-boot-static"><div class="sb-flower"></div></div>
   <script type="module" src="/src/main.ts"></script>
+  <!-- ★SEO:canvas 游戏唯一被爬虫索引的正文(SPA 的 game-root 为空 div);
+       同时是无 JS 用户/极老浏览器的门面。文案与 head meta 同源,改动须同步。 -->
+  <noscript>
+    <div style="max-width:640px;margin:0 auto;padding:40px 24px;color:#e8e4f0;background:#1a2440;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;line-height:1.7;">
+      <h1 style="margin:0 0 8px;font-size:28px;color:#ffe8a0;">Open Terraria</h1>
+      <p style="margin:0 0 16px;color:#8a90b8;font-size:14px;">泰拉瑞亚 1.4.5.8 网页版 · Terraria 1.4.5.8 in Your Browser</p>
+      <p style="margin:0 0 16px;">本站是一个完全运行在浏览器里的泰拉瑞亚1.4.5.8复刻。
+      支持移植 mod、材质包,可导入原版 <code>.wld</code> 世界与 <code>.plr</code> 角色存档。
+      A complete re-engineering of Terraria 1.4.5.8 for the Web: no install,
+      with mod support, resource packs and vanilla save import.</p>
+      <p style="margin:0 0 8px;font-size:14px;"><strong>游戏需要启用 JavaScript</strong> — 请在浏览器设置中开启后刷新本页。</p>
+      <p style="margin:0;font-size:14px;color:#8a90b8;">源码与开发日志:
+      <a href="https://github.com/SandboxWorldOnline/Open-Terraria" style="color:#59c8ff;">github.com/SandboxWorldOnline/Open-Terraria</a></p>
+    </div>
+  </noscript>
 </body>
 </html>
