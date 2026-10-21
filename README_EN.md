@@ -63,6 +63,19 @@ Also supports importing vanilla `*.wld` world saves and `*.plr` characters
 
 ![shot-respack-view](docs/screenshots/shot-respack-view.png)
 
+## AI Agent Engineering
+
+**→ [AGENTS.md](AGENTS.md)**
+
+This entire project was built through AI-agent-driven iteration. If you want an AI agent
+(Claude Code / Codex / Cursor, etc.) to contribute to this project, point it at
+[AGENTS.md](AGENTS.md) — the onboarding guide covering: the truth hierarchy (decompiled
+sources → extracted data tables → wiki), the three-layer test structure and golden-gate
+discipline, diagnostic probe methodology (F5 debug reports / performance trace analysis),
+the iteration methodology (adjudicate first, then cut / red-blue adversarial review), and
+a routing table into the full 70-day development log and adjudication archive. An agent
+needs no session memory to iterate on this project following its proven workflow.
+
 ## Getting Started
 
 ```bash
