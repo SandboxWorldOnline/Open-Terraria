@@ -659,15 +659,24 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F5': {
-      // 长按 F5 = 行为录制窗开关（按下计时，keyup 判时长——见文件尾 keyup 监听）；
+      // 长按 F5 = 行为录制窗开关（★BJ706-C：按住满 F5_LONGPRESS_MS 当场触发——
+      //   旧「keyup 结算」形态玩家不知道要按多久/何时松，长按意图到达即动作，
+      //   松手无动作;短按（阈值内松开）仍是一键调试报告）。
       // 短按仍是一键调试报告（报告尾部带 behaviorTail 最近 2000 条事件）。
       // Shift+F5 = 方块标注模式：点击画面直接标记问题格（红圈+序号），再按关闭；
       // 标注会随 F5 报告 tiles.marks 自动带出（含格明细+邻域链）。
       // e.repeat 过滤：长按系统重发 keydown 不重置计时锚
       e.preventDefault();
       if (e.repeat) break;
-      if (e.shiftKey) { toggleAnnotate(); break; }  // 不设 f5DownAt → keyup no-op
+      if (e.shiftKey) { toggleAnnotate(); break; }  // 不设 f5DownAt → 无定时器,keyup no-op
       f5DownAt = performance.now();
+      // 阈值到达即触发（keyup 侧只兜后台标签 setTimeout 节流滞后的情况）
+      clearTimeout(f5LongpressTimer);
+      f5LongpressTimer = setTimeout(() => {
+        if (!f5DownAt) return;        // 已被 keyup 短按结算/blur 取消
+        f5DownAt = 0;                 // 消费：后续 keyup no-op（长按已当场动作）
+        triggerF5Longpress();
+      }, F5_LONGPRESS_MS);
       break;
     }
     case 'F6':
@@ -736,30 +745,22 @@ window.addEventListener('wheel', (e) => {
   e.stopPropagation();
 }, { capture: true, passive: true });
 
-// ---- F5 长按判时长（keydown 只记锚，keyup 结算）----
+// ---- F5 长按/短按结算（★BJ706-C：长按=按住满阈值当场触发;keyup 只剩短按结算
+//      + 后台标签 setTimeout 节流兜底）----
 let f5DownAt = 0;
+/** 挂起的长按定时器（keydown 起、keyup/blur 清）——防 blur 期意外触发 */
+let f5LongpressTimer = 0 as unknown as ReturnType<typeof setTimeout>;
 /** 长按阈值 ms：≥ 此值视为长按（行为录制窗开关），否则短按（调试报告） */
 const F5_LONGPRESS_MS = 500;
-window.addEventListener('keyup', (e) => {
-  const game = flow?.game;
-  if (!inGame || !flow || !game || e.code !== 'F5' || !f5DownAt) return;   // ★SW-BJ5：+!flow 收窄（cumulativePlayMs 直读）
-  const held = performance.now() - f5DownAt;
+// 长按手势中途失焦=手势打断,取消挂起定时器（防后台期阈值到达意外开关录制）
+window.addEventListener('blur', () => {
+  clearTimeout(f5LongpressTimer);
   f5DownAt = 0;
-  if (held < F5_LONGPRESS_MS) {
-    // 短按：一键调试报告（机器优先 JSON）——尾部带 behaviorTail（常开环形最近
-    // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
-    // + audioTail（音效/BGM 播放序列,sfx 800 / bgm 200 条——错误音效排查时间线）
-    const r = downloadDebugReport(game, {
-      // SW-BJ5 2026-09-07：累计口径（与世界列表/存档头同义）——旧值=会话净时长,两口径混写曾致排查误判"疑似单会话值"
-      playTimeMs: flow.cumulativePlayMs,
-      behaviorTail: game.recorder.snapshotTail(2000),
-      audioTail: game.audioRec?.tail(800, 200) ?? null,
-      tileFrames: tileFrameCapture.exportLight(),
-    });
-    ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
-    return;
-  }
-  // 长按：录制窗开关。关窗 = 导出开窗以来全部事件并下载（复用 debug-report 下载机制）
+});
+/** F5 长按动作：录制窗开关。开=清窗起录;关=导出开窗以来全部事件并下载 */
+const triggerF5Longpress = (): void => {
+  const game = flow?.game;
+  if (!inGame || !flow || !game) return;   // ★SW-BJ5：+!flow 收窄（cumulativePlayMs 直读）
   const rec = game.recorder;
   const recording = rec.toggle();
   game.audioRec?.toggle();   // 音效/BGM 双通道窗同步开合（与主行为窗同 tick 边界）
@@ -786,6 +787,30 @@ window.addEventListener('keyup', (e) => {
   ui.toast(triggered
     ? `行为录制已保存：${filename}（${dump.meta.eventCount} 事件${au}）${tr}`
     : `行为录制 ${dump.meta.eventCount} 事件${au}${tr}（下载被拦截，可从 __swRec.export() 取）`);
+};
+window.addEventListener('keyup', (e) => {
+  const game = flow?.game;
+  if (!inGame || !flow || !game || e.code !== 'F5' || !f5DownAt) return;   // ★SW-BJ5：+!flow 收窄；f5DownAt=0=长按已被定时器当场消费
+  clearTimeout(f5LongpressTimer);   // 阈值内松开：撤长按定时器
+  const held = performance.now() - f5DownAt;
+  f5DownAt = 0;
+  if (held < F5_LONGPRESS_MS) {
+    // 短按：一键调试报告（机器优先 JSON）——尾部带 behaviorTail（常开环形最近
+    // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
+    // + audioTail（音效/BGM 播放序列,sfx 800 / bgm 200 条——错误音效排查时间线）
+    const r = downloadDebugReport(game, {
+      // SW-BJ5 2026-09-07：累计口径（与世界列表/存档头同义）——旧值=会话净时长,两口径混写曾致排查误判"疑似单会话值"
+      playTimeMs: flow.cumulativePlayMs,
+      behaviorTail: game.recorder.snapshotTail(2000),
+      audioTail: game.audioRec?.tail(800, 200) ?? null,
+      tileFrames: tileFrameCapture.exportLight(),
+    });
+    ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
+    return;
+  }
+  // 长按节流兜底：后台标签 setTimeout 被浏览器节流滞后,keyup 先到且 held 已过阈值
+  // → 当场结算长按（前台常态不达此——定时器已在阈值拍触发并清 f5DownAt）
+  triggerF5Longpress();
 });
 
 function downloadText(filename: string, text: string) {

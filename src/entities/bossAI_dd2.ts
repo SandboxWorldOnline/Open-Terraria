@@ -1419,13 +1419,17 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (e.ai0 === 0) {
     // ---- 悬空逼近（:66138-66186）;悬空态击退 = 族档（:66140） ----
     e.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(p.kbMult, e.difficulty);
-    // 原版：vector = normalize(Δ)*num（逼近速:飞龙 3/小妖魔 4）;vector2 = normalize(vector-(0,num2))*num
+    // 原版：vector = normalize(Δ)*num（逼近速:飞龙 3/小妖魔 4）;vector2 = normalize(Δ-(0,num2))*num
+    // ★BJ706-A 定谳：num2 上抬偏移在【原差域 Δ】上施加（cs:66296-66300 vector2 =
+    //   vector − UnitY×num2 先于 Normalize）——曾错写成 normalize(Δ)*num − UnitY×num2
+    //   （单位向量域减 400）→ 任意目标距 >4px 时悬空向量恒近垂直（400≫水平分量）
+    //   = 小妖魔滑翔怪出传送门后直上不下（用户实报,574/575 与 558-560 飞龙同链）。
     const num = e.vanillaId === 574 || e.vanillaId === 575 ? 4 : 3;
     const dx = txc - e.cx, dy = tyc - e.cy;
     const dist = Math.hypot(dx, dy);
     const ux = dist > 0 ? dx / dist : 0, uy = dist > 0 ? dy / dist : 0;
     const vx1 = ux * num, vy1 = uy * num;
-    let hvx = vx1, hvy = vy1 - p.hoverUp;
+    let hvx = dx, hvy = dy - p.hoverUp;           // Δ − UnitY×num2（:66297 原差域）
     const hl = Math.hypot(hvx, hvy) || 1;
     hvx = (hvx / hl) * num;
     hvy = (hvy / hl) * num;

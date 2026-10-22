@@ -2264,6 +2264,17 @@ export class Enemy extends Entity {
    *  无界增长——拖尾 maxValue 阶梯 60/180/300/600 的驱动源 :68713-68727）。 */
   koboldFrameY = 0;
   koboldFC = 0;
+  /** ★BJ706-A DD2 walker 族（AI_107 竖条帧条,552-557/561-563/566-573）帧档态
+   *  ——FindFrame 各专属 case（NPC.cs:67793-68608）的 frame.Y/frameCounter 侧写。
+   *  dd2WalkFrame ≙ frame.Y/num（当前帧行）,dd2WalkFC ≙ frameCounter（单计数器
+   *  全相位共用：攻击带内 ++ 推进、行走 += |vx|、腾空/站定清零——原版同字段
+   *  NPC.frameCounter 跨相位携带,本字段 1:1 承接）。修前：Renderer vanillaFrameIdx
+   *  通用 fighter 档（ai===107 → 行走 2..frames-1/站定 0/腾空 frames-1）把各族
+   *  攻击帧行当行走帧播——枯萎兽 568 走路播灵气带 7-16（60% 帧）、德拉肯 570
+   *  播喷吐带 10-15（43% 帧）+ 腾空/站定帧全错（原版 4/6 与 1/9,通用档 16 与 0）
+   *  = 用户实报「一直倒着走」（贴图姿态错乱）。 */
+  dd2WalkFrame = 0;
+  dd2WalkFC = 0;
   /** ★BJ588 FindFrame case 48..664 死区档 15 型族（FF_VXSDIR_GROUP）的显示面
    *  spriteDirection（NPC.cs:75648-75655 if/if 死区档——vx==0 不写=保前值）。
    *  缺省 -1 ≙ 原版 Entity.spriteDirection 字段缺省（:6522,NewNPC 不复位）。
@@ -3517,6 +3528,12 @@ export class Enemy extends Entity {
     const vid = this.vanillaId ?? 0;
     if (vid === 616 || vid === 617 || vid === 625) this.turtleFindFrameStep();   // ★BJ700b 龟族帧机（无 rotation 写点,只推进计数器）
     if (vid === 153 || vid === 154 || vid === 496 || vid === 497) this.tortoiseFindFrameStep();   // ★BJ704 陆龟族帧机+态 0 rotation 复位
+    // ★BJ706-A DD2 walker 族帧机（FindFrame 专属 case 逐字,无 rotation/sdir 写点——
+    //  显示镜像仍走通用 facing 门,与原版 sdir=direction 同极性）。customFrameIdx 落
+    //  位后 Renderer 通用 fighter 档（ai===107 → 2..frames-1/0/frames-1）对这 14 型
+    //  不再生效（vanillaFrameIdx 顶部直读优先）——修前走路播攻击带 = 用户实报
+    //  枯萎兽/德拉肯「一直倒着走」。620 地精鲨（wet 档）与 576/577（网格）不入。
+    if ((vid >= 552 && vid <= 557) || (vid >= 561 && vid <= 563) || (vid >= 566 && vid <= 573)) this.dd2WalkerFindFrame();
     if (vid === 75) this.visAngle = this.vx * 0.1;                    // 精灵 :74820
     else if (vid === 122) this.visAngle = this.vx * 0.05;             // 蜗牛怪 :74307
     else if (vid === 330) {
@@ -3751,6 +3768,103 @@ export class Enemy extends Entity {
       }
       this.customFrameIdx = this.koboldFrameY;
     }
+  }
+
+  /** ★BJ706-A DD2 walker 族帧机（FindFrame 专属 case 逐字,NPC.cs:67793-68608）——
+   *  AI_107 竖条帧条族 552-557/561-563/566-573（576/577 食人魔=网格路径 drawDd2OgreGrid、
+   *  620 地精鲨=通用 fighter 档,均不入）。单计数器 dd2WalkFC ≙ frameCounter 跨相位
+   *  携带（攻击 ++ 推进/行走 += |vx| wrap 64|56/腾空·逆行·站定清零）;输出
+   *  customFrameIdx（vanillaFrameIdx 顶部直读,不再走通用 fighter 档）。
+   *  逆行门 = vy!=0 || (facing 与 vx 反号)（原版 direction 与 velocity.X 反号,
+   *  cs:68244/68286/68310 等）→ 各族腾空帧;帧表（帧行,walkWrap/步长 8px·|vx|）:
+   *  · 552-554 哥布林（:68222-68262）:攻(ai0>0)10-13@6t[ai1==29 复位]/腾 8/站 9/走 0-7·64
+   *  · 555-557 投弹手（:68568-68608）:攻(ai1>0&&ai0>0)10-16@6t[41]/腾 1/站 0/走 2-9·64
+   *  · 561-563 标枪手（:68527-68567）:攻同上 10-13@6t[89]/腾 8/站 9/走 0-7·64
+   *  · 566/567 骷髅（:68329-68353）:无攻/腾 8/站 0/走 0-7·64
+   *  · 568/569 枯萎兽（:67793-68025）:攻(ai0>0)梯 7+(fc/5%4)×5 轮→8..14 钳持,
+   *    fc>=270 持 14[带外 5-16 复位]/腾 4/站 6/走 0-6·56
+   *  · 570/571 德拉肯（:68482-68526）:攻(ai1>0&&ai0>0)10-15@5t[14 持 35t,59]/腾 1/站 9/走 2-9·64
+   *  · 572/573 小妖精地面型（:68263-68328）:点火(ai0>0&&ai1==0)恒 8;冲锋(ai1==1)
+   *    腾 17/站 8/走 8-15·64;常态 腾 16/站 0/走 0-7·64
+   *  [aiN]==N 复位 = 攻击循环里 ai[1] 递减至该值当拍重排帧行（各族字面量）。
+   *  未实装（登记债）:①572/573 点火带 EmoteBubble(3) 一闪（:68273-68277,本仓
+   *  敌怪 emote 面未建）;②spriteDirection=direction 仅 vy==0/攻击态写（腾空保
+   *  前值,:68240 等）——本仓显示镜像走 AI facing 恒随重瞄,腾空瞬态极性差（低暴露）。 */
+  private dd2WalkerFindFrame(): void {
+    const id = this.vanillaId ?? 0;
+    // 逆行/腾空门（原版 vy!=0 || (direction==-1&&vx>0)||(direction==1&&vx<0)）
+    const backslide = this.vy !== 0
+      || (this.facing === -1 && this.vx > 0) || (this.facing === 1 && this.vx < 0);
+    let f = this.dd2WalkFrame;
+    let fc = this.dd2WalkFC;
+    const walk = (wrap: number, base: number): void => {
+      fc += Math.abs(this.vx);
+      if (fc >= wrap || fc < 0) fc = 0;              // 原版 frameCounter wrap（64/56）
+      f = Math.floor(fc / 8) + base;
+    };
+    if (id >= 552 && id <= 557) {
+      if (id <= 554) {                               // 哥布林（:68222-68262）
+        if (this.ai0 > 0) {
+          if (f < 10 || f > 13 || this.ai1 === 29) { f = 10; fc = 0; }
+          if (++fc >= 6 && f < 13) { fc = 0; f++; }
+        } else if (backslide) { fc = 0; f = 8; }
+        else if (this.vx === 0) { fc = 0; f = 9; }
+        else walk(64, 0);
+      } else {                                       // 投弹手（:68568-68608）
+        if (this.ai1 > 0 && this.ai0 > 0) {
+          if (f < 10 || f > 16 || this.ai1 === 41) { f = 10; fc = 0; }
+          if (++fc >= 6 && f < 16) { fc = 0; f++; }
+        } else if (backslide) { fc = 0; f = 1; }
+        else if (this.vx === 0) { fc = 0; f = 0; }
+        else walk(64, 2);
+      }
+    } else if (id >= 561 && id <= 563) {             // 标枪手（:68527-68567）
+      if (this.ai1 > 0 && this.ai0 > 0) {
+        if (f < 10 || f > 13 || this.ai1 === 89) { f = 10; fc = 0; }
+        if (++fc >= 6 && f < 13) { fc = 0; f++; }
+      } else if (backslide) { fc = 0; f = 8; }
+      else if (this.vx === 0) { fc = 0; f = 9; }
+      else walk(64, 0);
+    } else if (id === 566 || id === 567) {           // 骷髅（:68329-68353）
+      if (backslide) { fc = 0; f = 8; }
+      else if (this.vx === 0) { fc = 0; f = 0; }
+      else walk(64, 0);
+    } else if (id === 568 || id === 569) {           // 枯萎兽（:67793-68025）
+      if (this.ai0 > 0) {
+        if (f < 5 || f > 16) fc = 0;                 // 带外复位（:67799-67802,fc 清零）
+        fc++;
+        const q = Math.floor(fc / 5);                // 反编译梯（5t/档）:7,8,9,10×5 轮→8..14
+        f = q < 20 ? 7 + (q % 4) : Math.min(14, 8 + (q - 20));
+        if (fc >= 270) { f = 14; fc -= 10; }         // :67995-67999 终态持 14
+      } else if (backslide) { fc = 0; f = 4; }
+      else if (this.vx === 0) { fc = 0; f = 6; }
+      else walk(56, 0);                              // 56 wrap = 7 帧行走带 0-6
+    } else if (id === 570 || id === 571) {           // 德拉肯（:68482-68526）
+      if (this.ai1 > 0 && this.ai0 > 0) {
+        if (f < 10 || f > 15 || this.ai1 === 59) { f = 10; fc = 0; }
+        const hold = f === 14 ? 35 : 5;              // 帧 14 长持（:68492-68496）
+        if (++fc >= hold && f < 15) { fc = 0; f++; }
+      } else if (backslide) { fc = 0; f = 1; }
+      else if (this.vx === 0) { fc = 0; f = 9; }
+      else walk(64, 2);
+    } else if (id === 572 || id === 573) {           // 小妖精地面型（:68263-68328）
+      if (this.ai0 > 0 && this.ai1 === 0) {
+        if (f !== 8 || fc > 2) { f = 8; fc = 0; }    // 点火帧行恒 8（emote 债见组注）
+      } else if (this.ai1 === 1) {                   // 冲锋态
+        if (backslide) { fc = 0; f = 17; }
+        else if (this.vx === 0) { fc = 0; f = 8; }
+        else walk(64, 8);
+      } else {
+        if (backslide) { fc = 0; f = 16; }
+        else if (this.vx === 0) { fc = 0; f = 0; }
+        else walk(64, 0);
+      }
+    } else {
+      return;                                        // 非 DD2 walker（防御门,不应到达）
+    }
+    this.dd2WalkFrame = f;
+    this.dd2WalkFC = fc;
+    this.customFrameIdx = f;
   }
 
   /** 环境声三表（UpdateNPC IdleSounds :91184-91246 + AI_003 闲话 :57914-57945 +
