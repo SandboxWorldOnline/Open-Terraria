@@ -105,20 +105,33 @@ function armDash(p: Player, w: World): void {
 }
 
 /** 滑行参数模拟（与实现同序同运算——JS double 逐位一致）：
- *  返回触发拍后的【阻尼拍数】与终止拍判定值（终止拍 dashDelay=num17、vx=±num15） */
-function glideSim(v0: number, num13: number, num14: number, num15: number, num16: number): number {
+ *  返回触发拍后的【阻尼拍数】与终止拍判定值（终止拍 dashDelay=num17、vx=±num15）。
+ *  ★BJ705-G26（[g25-glide-else-friction] 清偿随迁,2026-10-22）:每阻尼拍前叠 HM else
+ *  摩擦（原版 :20187/:20202 else 链不闸 dashDelay——HM:26889 先摩擦、DM:26958 后阻尼）。
+ *  fr=每滑行拍摩擦值（number 恒值;number[] 逐拍序列尾值续航;0=纯阻尼旧口径）。 */
+function glideSim(v0: number, num13: number, num14: number, num15: number, num16: number,
+  fr: number | number[] = 0): number {
+  const seq = Array.isArray(fr) ? fr : null;
+  const frAt = (i: number): number => (seq ? seq[Math.min(i - 1, seq.length - 1)] : (fr as number));
   let vx = v0; let n = 0;
-  while (Math.abs(vx) > num13) { vx *= num14; n++; }
-  while (Math.abs(vx) > num15) { vx *= num16; n++; }
-  return n;   // 触发后第 n+1 拍落冷却档
+  for (;;) {
+    const f = frAt(n + 1);
+    if (vx > f) vx -= f; else if (vx < -f) vx += f; else vx = 0;
+    if (Math.abs(vx) > num13) { vx *= num14; n++; continue; }
+    if (Math.abs(vx) > num15) { vx *= num16; n++; continue; }
+    return n;   // 触发后第 n+1 拍落冷却档
+  }
 }
 
 // 克盾 dash2 裸装钉值：14.5 起步、12/0.985、num15=3、0.94、冷却 30
 const DASH2_V0 = 14.5, NUM13 = 12, NUM14 = 0.985, NUM15 = 3, NUM16 = 0.94, COOL2 = 30;
-const DASH2_GLIDE = glideSim(DASH2_V0, NUM13, NUM14, NUM15, NUM16);
+// ★BJ705-G26 摩擦时间线:干/越帽全程接地 −0.2（裸装 runSlowdown）=21 拍;①a 池内
+// 发起=出生 6px 沉降尾(湿重力 0.05+位移×0.5)滑行前 9 拍悬空 −0.1、t9 落池底转接地。
+const DASH2_GROUND = glideSim(DASH2_V0, NUM13, NUM14, NUM15, NUM16, 0.2);
+const DASH2_POOL = glideSim(DASH2_V0, NUM13, NUM14, NUM15, NUM16, [...Array(9).fill(0.1), 0.2]);
 
 describe('BJ524① 克盾冲刺入水：滑行衰减→冷却→就绪全链照常推进（原版钉值）', () => {
-  it('①a 水中发起冲刺：滑行恰 DASH2_GLIDE+1 拍落冷却档 30、vx 钳回 +3（num15），30 拍回就绪', () => {
+  it('①a 水中发起冲刺：滑行恰 DASH2_POOL+1 拍落冷却档 30、vx 钳回 +3（num15），30 拍回就绪', () => {
     const w = bj524World();
     const p = mkPlayer(w, POOL_FLOOR, 40);            // 站在池中（y=41 地面,40 行水）
     p.inv.armor[3] = { id: iid(3097), stack: 1 };     // Shield of Cthulhu → dashType 2
@@ -131,9 +144,10 @@ describe('BJ524① 克盾冲刺入水：滑行衰减→冷却→就绪全链照�
     expect(p.vx).toBeCloseTo(14.5, 5);                // :21619 dash2=14.5×dir（水中照发）
     expect(p.dashDelay).toBe(-1);
     expect(p.eocDash).toBe(15);                       // :21627 冲撞窗
-    // 滑行 DASH2_GLIDE 拍阻尼 + 1 拍终止（dashDelay=30、vx=±num15）
+    // 滑行 DASH2_POOL 拍阻尼+摩擦（沉降尾 9 拍空中 0.1,余接地 0.2——G26 随迁）
+    // + 1 拍终止（dashDelay=30、vx=±num15）
     injectDash(p, false);
-    for (let i = 1; i <= DASH2_GLIDE; i++) {
+    for (let i = 1; i <= DASH2_POOL; i++) {
       tick(p, w);
       expect(p.dashDelay, `滑行第 ${i} 拍须保持 -1`).toBe(-1);
     }
@@ -158,11 +172,11 @@ describe('BJ524① 克盾冲刺入水：滑行衰减→冷却→就绪全链照�
     injectDash(p, false);
     // 滑行全程（跨干/湿两域）+ 冷却 + 1 拍裕量——dashDelay 必须走到 0（病灶=湿段冻结恒 -1）
     let recovered = -1;
-    for (let i = 0; i < DASH2_GLIDE + 1 + COOL2 + 40; i++) {
+    for (let i = 0; i < DASH2_GROUND + 1 + COOL2 + 40; i++) {
       tick(p, w);
       if (p.dashDelay === 0) { recovered = i; break; }
     }
-    expect(recovered, '入水后冲刺状态机须推进到就绪（滑行 DASH2_GLIDE+终止+冷却 30 拍内,0 基计数）').toBe(DASH2_GLIDE + COOL2);
+    expect(recovered, '入水后冲刺状态机须推进到就绪（滑行 DASH2_GROUND+终止+冷却 30 拍内,0 基计数;G26 摩擦时间线:跨缘步降拍同拍落地=全程接地档）').toBe(DASH2_GROUND + COOL2);
     // 恢复面：持右先到稳态再测窗。★原版两段模型全速段本相 = branch2(+0.08) 与
     // 摩擦支(−0.2) 振荡收敛（干地稳态均值 ≈2.91,实测）——水中 vx 不打折（Run 段
     // 无水因子,原版 :25694-25695 乘区链无 wet）,位移打半（WetCollision :23157-23172
@@ -198,7 +212,7 @@ describe('BJ524② 干地冲刺不回归（提取搬运零行为差）', () => {
     expect(p.vx).toBeCloseTo(14.5, 5);
     expect(p.dashDelay).toBe(-1);
     injectDash(p, false);
-    for (let i = 1; i <= DASH2_GLIDE; i++) {
+    for (let i = 1; i <= DASH2_GROUND; i++) {
       tick(p, w);
       expect(p.dashDelay, `干地滑行第 ${i} 拍`).toBe(-1);
     }
@@ -236,7 +250,7 @@ describe('BJ524③ 其他 dashType 湿态同构抽验', () => {
     expect(p.dashDelay).toBe(-1);
     expect(p.eocDash).toBe(0);                        // dash1 无冲撞窗
     injectDash(p, false);
-    const glide1 = glideSim(16.9, 12, 0.992, 3, 0.96);   // 基础档
+    const glide1 = glideSim(16.9, 12, 0.992, 3, 0.96, [...Array(9).fill(0.1), 0.2]);   // 基础档+池沉降尾摩擦（G26）
     for (let i = 1; i <= glide1; i++) { tick(p, w); expect(p.dashDelay).toBe(-1); }
     tick(p, w);
     expect(p.dashDelay).toBe(20);                     // num17 基础档
@@ -263,7 +277,7 @@ describe('BJ524③ 其他 dashType 湿态同构抽验', () => {
     injectDash(p, false);
     // 日耀套 moveMult=1.15（vanillaArmorSets 全套聚合）→ num15=max(accRun, 3×1.15)=3.45
     //（原版 num15 = Math.Max(accRunSpeed, maxRunSpeed) :21429,maxRunSpeed 已吃 moveSpeed 乘区）
-    const glide3 = glideSim(21.9, 14, 0.985, 3.45, 0.94);   // dash3 覆写档 num13=14
+    const glide3 = glideSim(21.9, 14, 0.985, 3.45, 0.94, [...Array(9).fill(0.1), 0.2]);   // dash3 覆写档 num13=14+池沉降尾摩擦（G26）
     for (let i = 1; i <= glide3; i++) { tick(p, w); expect(p.dashDelay).toBe(-1); }
     tick(p, w);
     expect(p.dashDelay).toBe(20);

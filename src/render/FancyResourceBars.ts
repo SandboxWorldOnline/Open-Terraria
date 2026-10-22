@@ -16,11 +16,13 @@ import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { PixelText } from '../vui/draw/PixelText';
 import { Lang } from '../i18n/Lang';
+import { lateImageRetry } from '../assets/lateImageRetry';
 
 function loadTex(name: string): HTMLImageElement {
   const img = new Image();
   img.onload = () => upgradeToBitmap(img, (b) => { TEX_UPGRADES[name]?.forEach((s) => s(b)); });
   img.src = `sprites/vanilla-ui/${name}.png`;
+  lateImageRetry(img, `sprites/vanilla-ui/${name}.png`);   // ★BJ705-G26 件4:迟到单发重试
   return img;
 }
 /** name → 持有者替换回调(t 对象字段升级为 bitmap) */

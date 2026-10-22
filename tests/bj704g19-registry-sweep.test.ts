@@ -173,11 +173,14 @@ describe('BJ704-G19 A 瓶族跳 run 加速（:26779-26801）', () => {
     expect(sailEnd).toBeGreaterThan(cloudEnd + 0.7);   // 2.28 vs 0.88 量级
   }, 30000);
 
-  it('A4 结构锁:三瓶加速线+窗口/挂爪/上绳门+jumpOpts 实时门（变异恰红锚;★BJ705-B 迁移:mulPreAdd 化+非叠加骑乘灭门 mntWipeBoost——未骑乘面 add=0 退化恒等）', () => {
+  it('A4 结构锁:三瓶加速线+窗口/挂爪/上绳门+jumpOpts 实时门（变异恰红锚;★BJ705-B 迁移:mulPreAdd 化+非叠加骑乘灭门 mntWipeBoost;★BJ705-G23 迁移:boostBase 补丁基底退役——cap 1:1 只抬 accRunSpeed,boost 直接乘 maxRun=vanilla :26778-812 原句）', () => {
     expect(playerSrc).toContain("if (this.performingJump === 'Blizzard' && eqM.jumpOpts.includes('Blizzard')) { runAcc = mulPreAdd(runAcc, 3, additiveAcc); maxRun = mulPreAdd(maxRun, 1.5, additiveRun); }");
     expect(playerSrc).toContain("else if (this.performingJump === 'Fart' && eqM.jumpOpts.includes('Fart')) { runAcc = mulPreAdd(runAcc, 3, additiveAcc); maxRun = mulPreAdd(maxRun, 1.75, additiveRun); }");
     expect(playerSrc).toContain("else if (this.performingJump === 'Sail' && eqM.jumpOpts.includes('Sail')) { runAcc = mulPreAdd(runAcc, 1.5, additiveAcc); maxRun = mulPreAdd(maxRun, 1.25, additiveRun); }");
     expect(playerSrc).toContain('if (this.jumpHold > 0 && !this.grappling[0] && !this.pulley && !mntWipeBoost) {');
+    // ★BJ705-G23:翼档 cap 1:1 锚（:29550-52 只抬 accRun/maxRun 不动——防 maxRun 回潮变异）
+    expect(playerSrc).toContain('} else if (ws.accSpeed !== -1 && ws.accSpeed > accRun - additiveDash) {');
+    expect(playerSrc).toContain('accRun = ws.accSpeed + additiveDash;   // :29550-52 只抬不压;maxRun 不动');
   });
 
   it('A5 坐骑加速撤线锁:骑乘期死码定谳——旧 mountJumpPerforming 消费线绝迹', () => {

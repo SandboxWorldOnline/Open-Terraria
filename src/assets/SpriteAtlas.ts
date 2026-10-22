@@ -63,6 +63,78 @@ export interface DrawRect { img: ImageBitmap | ImageBitmap | HTMLImageElement | 
 // 月总手与光之女皇部件(vmisc)/Misc_Perlin——消费方全部每帧活画,ensureVImage
 // 未就绪跳帧、下帧自愈。注意 NPC_Head 此前 121 张盲扫 id 0-120,其中 81-120
 // 磁盘上不存在(真文件 0-80 + 独立命名的 NPC_Head_Boss_N)= 每次进图 40 个 404。
+/** ★BJ705-C(2026-10-22)敌怪/城镇 NPC 绘制路径部件散件全集(用户问「BJ705-A 是否
+ *  代表其它独立加载贴图都有同问题」的家族普查收口)。判别锁探针
+ *  scripts/_bj705c-nullwindow-census.mjs 六员实证(强制失败窗,采样区部分变化=
+ *  本体仍在):WoF 墙身 0.42/Prime 臂骨 0.56/光女翼 0.37/月总头 0.04/鹿角怪雾
+ *  0.25/蚁狮下体 0.39——「部件缺/本体在」不对称假体与 BJ705-A 同根:
+ *  · 机制=NPC 本体(NPC_{id}.png 主表,BJ636 预载+BJ705-A 回扫)与部件散件
+ *    (Extra_/Glow_/Chain_/专属 png,首绘懒加载)走【两条重试钟】——发布形态
+ *    SW/CDN 空窗内逐文件命中态漂移=任意混搭的假体窗(有眼无墙/飘臂/无翼)。
+ *  · 本表=敌怪绘制路径消费的部件差集(Renderer.drawEnemy 树+npcExtraParts+
+ *    NPC_GLOW/ORBIT 表逐位提取,vs 预载面);弹幕/尘/gore/玩家配饰/UI 域不收
+ *    (本体亦懒=同钟双缺 BJ636 类,判语销案见 memory/bj705c-asset-window-census.md)。
+ *  · 全部已在 SW P2 暖存面(miscVanilla)——入 P1 只改取件时序,零增量流量;
+ *    本体域 3.17MB,本表 ~0.55MB(+17%)。经 VANILLA_MISC 自动进 BJ705-A 回扫集。 */
+export const VANILLA_ENEMY_PARTS: readonly string[] = [
+  // — 链族/臂骨(本体门前独立门:本体缺席窗内链照画=「断链/飘臂」假体) —
+  'vanilla/Arm_Bone_2.png',    // Prime 部件臂骨 127-131(Main.cs:22633-22675,与 BJ705-A 四员同构)
+  'vanilla/Chain4.png', 'vanilla/Chain5.png', 'vanilla/Chain14.png', // aiStyle13 藤蔓(通用/56/175)
+  'vanilla/Chain10.png', 'vanilla/Chain11.png',   // Clinger 101 交替链
+  'vanilla/Chain12.png',       // 双子互连 125/Mechdusa 蛇发/WoF 肌腱链+狂卷之舌
+  'vanilla/Chain21.png',       // 石巨人拳链 247/248
+  'vanilla/Chain24.png', 'vanilla/Chain25.png',   // 259/260 亮彩藤(含 drawBrightVines 光照后通道)
+  'vanilla/Chain26.png', 'vanilla/Chain27.png',   // 世纪之花钩蔓/触须 263/264
+  // — NPC_{id} 主表派生集之外的「本体」贴图(失败窗=本体级假体) —
+  'vanilla/WallOfFlesh.png',   // WoF 墙身(113 头/114 饥饿者在主表——窗=「有眼无墙」)
+  'vanilla/AntlionBody.png',   // 蚁狮 69 下体(门在 if(r) 内:头在体缺)
+  'vanilla/Ninja.png',         // 史莱姆王 50 体内忍者
+  'vanilla/DukeFishron.png',   // 猪鲨 370 二阶段金身叠层(npcExtraParts)
+  'vanilla/Chaos.png',         // 混沌元素 120 残影(npcExtraParts)
+  // — 专属绘制支部件(drawEnemy 早退分支内的独立门) —
+  'vanilla/Extra_157.png', 'vanilla/Extra_158.png', 'vanilla/Extra_159.png',
+  'vanilla/Extra_160.png', 'vanilla/Extra_187.png', 'vanilla/Extra_188.png', // 光女 636 双翼/施法臂/冠
+  'vanilla/Extra_13.png', 'vanilla/Extra_14.png', 'vanilla/Extra_15.png',
+  'vanilla/Extra_16.png', 'vanilla/Extra_17.png', 'vanilla/Extra_18.png',
+  'vanilla/Extra_19.png', 'vanilla/Extra_25.png', 'vanilla/Extra_26.png',
+  'vanilla/Extra_29.png',      // 月总 396 头/397 手/398 核心/400 游离眼
+  'vanilla/Extra_40.png', 'vanilla/Extra_41.png', 'vanilla/Extra_42.png',
+  'vanilla/Extra_43.png', 'vanilla/Extra_44.png', 'vanilla/Extra_45.png', // 荷兰飞盗船 491 旗/桨/帆
+  'vanilla/Extra_177.png', 'vanilla/Extra_185.png', 'vanilla/Extra_186.png', // 史后 657 王冠/水晶核
+  'vanilla/Extra_245.png',     // 鹿角怪 668 红雾环/前雾
+  'vanilla/Extra_39.png',      // 史莱姆王 50 金冠
+  'vanilla/Extra_76.png',      // 546 怒滚草亮核
+  'vanilla/Extra_27.png', 'vanilla/Extra_30.png', 'vanilla/Extra_55.png',
+  'vanilla/Extra_57.png', 'vanilla/Extra_59.png', 'vanilla/Extra_80.png',
+  'vanilla/Extra_81.png', 'vanilla/Extra_82.png', 'vanilla/Extra_89.png',
+  'vanilla/Extra_129.png', 'vanilla/Extra_289.png', // npcExtraParts 族(探测器束/邪教徒符印/陨石火怪拖尾等)
+  'vanilla/Extra_51.png', 'vanilla/Extra_52.png', 'vanilla/Extra_53.png',
+  'vanilla/Extra_72.png', 'vanilla/Extra_263.png', 'vanilla/Extra_264.png',
+  'vanilla/Extra_265.png',     // 城镇 NPC 部件(施法光环/持枪手 overlay/派对帽/电工头饰/微光变体)
+  'vanilla/Extra_199.png',     // 召唤鞭锁定标记(敌怪身上的目标环)
+  'vanilla/HealthBar1.png', 'vanilla/HealthBar2.png', // boss 血条(实体绘制路径)
+  // — GlowMask 族(NPC_GLOW + NPC_GLOW_ORBIT 表 + 特定位;门在 if(r) 内=缺件仅亮度衰减) —
+  'vanilla/Extra_20.png', 'vanilla/Extra_56.png', 'vanilla/Extra_98.png',
+  'vanilla/Bone_Laser.png', 'vanilla/Dest1.png', 'vanilla/Dest2.png', 'vanilla/Dest3.png',
+  'vanilla/Eye_Laser.png', 'vanilla/Probe.png',
+  'vanilla/Glow_11.png', 'vanilla/Glow_31.png', 'vanilla/Glow_32.png', 'vanilla/Glow_33.png',
+  'vanilla/Glow_34.png', 'vanilla/Glow_48.png', 'vanilla/Glow_49.png', 'vanilla/Glow_50.png',
+  'vanilla/Glow_100.png', 'vanilla/Glow_101.png', 'vanilla/Glow_108.png', 'vanilla/Glow_109.png',
+  'vanilla/Glow_110.png', 'vanilla/Glow_132.png', 'vanilla/Glow_133.png', 'vanilla/Glow_134.png',
+  'vanilla/Glow_135.png', 'vanilla/Glow_136.png', 'vanilla/Glow_137.png', 'vanilla/Glow_138.png',
+  'vanilla/Glow_139.png', 'vanilla/Glow_141.png', 'vanilla/Glow_142.png', 'vanilla/Glow_143.png',
+  'vanilla/Glow_144.png', 'vanilla/Glow_145.png', 'vanilla/Glow_146.png', 'vanilla/Glow_147.png',
+  'vanilla/Glow_149.png', 'vanilla/Glow_150.png', 'vanilla/Glow_151.png', 'vanilla/Glow_152.png',
+  'vanilla/Glow_153.png', 'vanilla/Glow_154.png', 'vanilla/Glow_155.png', 'vanilla/Glow_156.png',
+  'vanilla/Glow_157.png', 'vanilla/Glow_158.png', 'vanilla/Glow_159.png', 'vanilla/Glow_160.png',
+  'vanilla/Glow_161.png', 'vanilla/Glow_162.png', 'vanilla/Glow_163.png', 'vanilla/Glow_164.png',
+  'vanilla/Glow_165.png', 'vanilla/Glow_166.png', 'vanilla/Glow_167.png', 'vanilla/Glow_169.png',
+  'vanilla/Glow_170.png', 'vanilla/Glow_171.png', 'vanilla/Glow_172.png', 'vanilla/Glow_224.png',
+  'vanilla/Glow_225.png', 'vanilla/Glow_226.png', 'vanilla/Glow_239.png', 'vanilla/Glow_253.png',
+  'vanilla/Glow_254.png', 'vanilla/Glow_255.png', 'vanilla/Glow_286.png', 'vanilla/Glow_287.png',
+  'vanilla/Glow_288.png', 'vanilla/Glow_290.png', 'vanilla/Glow_360.png',
+];
+
 export const VANILLA_MISC = [
   // ① chunk 烘焙族
   // 开关换 tile 对(全部跨表,开门/开栅态世界生成极罕见→表常未载→重烘跳格=消失~1s;
@@ -84,6 +156,19 @@ export const VANILLA_MISC = [
   'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
   'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png', 'vanilla/Misc_water_14.png',
   'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
+  // ③ boss 部件散件（★BJ705-A 2026-10-22:BJ636 NPC 主表预载的部件漏员）。这些是
+  //    drawEnemy 专绘支的附属贴图（loadBitmapOnly 独立通道,不在 NPC_{id}.png 主表
+  //    派生集内）——首次首见才懒加载,SW/CDN 空窗期失败=部件缺席窗;与本体表
+  //    （主表预载,失败走回扫）不同拍=「本体在/部件缺」或「本体缺/部件在」的
+  //    假体窗。全 4 张均为小散件（≤~10KB）,常驻零成本。
+  //    · 36 骷髅王手两节臂骨 Arm_Bone / Red Hat 族 Arm_Bone_3（Main.cs:22543-22596）
+  //    · 327 南瓜王披风 PumpkingCloak（:22499-22506）/ 328 双刃臂 PumpkingArm
+  //      （:22508-22542）——用户实报「南瓜王被暗黑收割者抽打后头部变透明」
+  //      定谳=资产窗假体（详见 preloadMiscAndNpcs 回扫注）,本批部件侧收口。
+  'vanilla/Arm_Bone.png', 'vanilla/Arm_Bone_3.png',
+  'vanilla/PumpkingCloak.png', 'vanilla/PumpkingArm.png',
+  // ④ 敌怪/NPC 绘制路径部件散件全集(★BJ705-C 2026-10-22 家族普查,表头注判别锁)
+  ...VANILLA_ENEMY_PARTS,
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
@@ -480,6 +565,9 @@ export class SpriteAtlas {
 
   private _iconPending = new Set<string>();
   private _worldPreloaded = false;
+  /** ★BJ705-A(2026-10-22):预载失败件限时回扫定时器句柄(undefined=无回扫在跑;
+   *  见 schedulePreloadRescan 注)。 */
+  private _preloadRescan: ReturnType<typeof setInterval> | undefined = undefined;
   /** 懒加载完成回调(Game 注册 → ChunkCache 全量标脏:晚到的表重新烘焙
    *  已缓存的 chunk,否则 fallback 会永久烤进 canvas) */
   onVImageLoaded: ((file: string) => void) | null = null;
@@ -550,11 +638,53 @@ export class SpriteAtlas {
    *  ★C16c-F5(2026-10-12) 勘正:旧注 ~4.6MB/144 张系未实测估算——盘上实测预载集
    *  3.167MB(696 键派生 NPC_{id}.png ∪ vanilla.json npcs 20 特殊表),Alt_* 22 张。 */
   preloadMiscAndNpcs(): Promise<void> {
-    return this.preloadFiles([
+    const files = [
       ...VANILLA_MISC,
       ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
       ...Object.keys(vanillaNpcFrames).map((id) => `vanilla/NPC_${id}.png`),
-    ]);
+    ];
+    return this.preloadFiles(files).then(() => this.schedulePreloadRescan(files));
+  }
+
+  /** ★BJ705-A(2026-10-22):预载失败件限时自愈回扫(10s 节拍 ×60 轮 ≈10min)。
+   *  定谳链(用户实报「南瓜月打南瓜王,暗黑收割者抽打后头部变透明,小概率」):
+   *  · 机制=资产窗假体——Renderer.drawEnemy 里披风/双刃等部件贴图独立加载、
+   *    先于本体 if (r) 判空绘制;NPC_{id} 主表虽已 BJ636 前置到进世界门槛,
+   *    但门槛期 preloadFiles 失败是【静默】的(发布形态 prune-dist 删光散件,
+   *    SW 未接管/缓存缺件窗恒 404,800ms 单次重试不够穿窗)——失败件之后
+   *    只能等【首绘消费】才走 ensureVImage 10s TTL 重试。南瓜王这类波次 boss
+   *    进世界后数分钟才首见:门槛窗失败的主表在整个前中期无人重试,首见拍
+   *    恰在战斗接触(=用户「抽打后」观察位),本体跳画而部件照画=「头部变
+   *    透明」。探针 scripts/_bj705a-nullwindow.mjs 判别锁:强制 NPC_327.png
+   *    失败窗,头区 orange 1554→240(−85%)而画面其余照常渲染。
+   *  · 回扫=把失败件的重试从「首绘」提前到「进世界后立刻」:每 10s 一发/
+   *    文件(与 ensureVImage 失败 TTL 同节拍=零风暴增量;preloadFiles 自带
+   *    800ms 单发重试同语义),落地即退出(健康会话零额外流量)。60 轮后仍缺
+   *    → console.warn 一发收口(诊断面:后续实报凭此行定位资产域,非渲染域)。
+   *  · 边界:node/worker 无 Image 环境直接不开(测试可注入 globalThis.Image
+   *    + 桩 preloadFiles 驱动);多次进世界幂等(单例回扫,文件集同源)。
+   *  · 登记债(本刀不落):①部件/本体不对称假体在残余窗内仍可见(「宁回退
+   *    不丢精灵」——门控部件会丢更多精灵,且 boss 整体隐形比缺头更不可打);
+   *    ②散件恒失败的根因在 SW/CDN 资产域(部署面),回扫只是缩短暴露窗。 */
+  private schedulePreloadRescan(files: string[]): void {
+    if (this._preloadRescan !== undefined || typeof Image === 'undefined') return;
+    let rounds = 0;
+    const tick = async (): Promise<void> => {
+      const miss = files.filter((f) => !this.vimages.has(f));
+      if (miss.length === 0) {
+        clearInterval(this._preloadRescan);
+        this._preloadRescan = undefined;
+        return;
+      }
+      await this.preloadFiles(miss);   // 每文件每轮一发(已就绪件秒过,零重复)
+      if (++rounds >= 60) {
+        clearInterval(this._preloadRescan);
+        this._preloadRescan = undefined;
+        console.warn(`[SpriteAtlas] BJ705-A 预载回扫 ${rounds} 轮后仍缺 ${miss.length} 件(资产域/SW 缓存面,渲染侧已尽力):`,
+          miss.slice(0, 8).join(', '), miss.length > 8 ? '…' : '');
+      }
+    };
+    this._preloadRescan = setInterval(() => { void tick(); }, 10_000);
   }
 
   /** 预载世界渲染所需原版表(全量,~750 张)。仅调试/兜底用;正常路径走

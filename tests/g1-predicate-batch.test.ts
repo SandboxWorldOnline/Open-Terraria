@@ -163,8 +163,12 @@ describe('(C) StickyTiles 致动不粘（Collision.cs:3402-3405 `!active||inActi
     const p = new Player(20 * 16, 17 * 16, new Inventory());
     p.vy = 8; p.vx = 3; p.jumpHold = 10;
     p.fixedUpdate(1 / 60, mkHooks(w) as never);
-    expect(p.vy).toBeLessThanOrEqual(1 * 0.3 + 0.36);
-    expect(p.jumpHold).toBe(0);
+    expect(p.vy).toBeLessThanOrEqual(1 * 0.3 + 0.36);   // 下落阻尼面（松键拍）
+    // ★BJ705-G23:禁跳面判别迁持键位——松键 release-clear（:21201-08）与网内清零
+    // （:8483）同产 0=松键态掩蔽;持键态网内清零是唯一 0 源
+    p.inputJump = true; p.jumpHold = 10; p.vy = 0.5;
+    p.fixedUpdate(1 / 60, mkHooks(w) as never);
+    expect(p.jumpHold).toBe(0);             // 网内禁跳清零（L22676——持键态）
   });
 
   it('已致动蛛网：不黏滞（正常重力下落,跳不禁）', () => {
@@ -178,7 +182,11 @@ describe('(C) StickyTiles 致动不粘（Collision.cs:3402-3405 `!active||inActi
     p.vy = 8; p.vx = 3; p.jumpHold = 10;
     p.fixedUpdate(1 / 60, mkHooks(w) as never);
     expect(p.vy).toBeGreaterThan(4);        // 未阻尼（修复前 flags 位读 → 误黏滞）
-    expect(p.jumpHold).toBe(9);             // 未清零
+    expect(p.jumpHold).toBe(0);             // ★BJ705-G23:松键即清（:21201-08——无键态预算不存活,非网清）
+    // 禁跳面判别（★BJ705-G23 迁移,对照 Test1 持键位）:持键态无网清=正常流逝
+    p.inputJump = true; p.jumpHold = 10; p.vy = 0.5;
+    p.fixedUpdate(1 / 60, mkHooks(w) as never);
+    expect(p.jumpHold).toBe(9);             // 未清零（致动=网外语义;活网持键=0 对照）
   });
 });
 

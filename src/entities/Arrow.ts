@@ -5159,6 +5159,42 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ★BJ704-G24（[g22-launcher-fw-blast] 清偿——G22 登记,Arrow 争用解禁后落刀）:
+    //  Kill 尾段 192² Damage()（Projectile.cs:78549-78556:position 归心+Resize(192)
+    //  +penetrate=-1+Damage() 无 damage 门）。上方 R35 四式爆尘在而爆面整缺=发射器
+    //  档烟花（3546,本仓 Arrow 载体唯一 167-170 出生面）对敌零伤。范式=Dart
+    //  explodeFirework 尾 blastDamage 同款（G21/G22 定谳面）:
+    //  ①CutTiles 先行（Damage() :12516 先于 damage<=0 整退 :12576——R8-F2 同序;
+    //    本载体 3546 出生恒 damage>0,门保 1:1 形）;
+    //  ②192 盒逐敌——dontTakeDamage/playerCanHitEnemy 外环门（R8-F5/:11892）、
+    //    iframes 门（:12635-12637 immune[owner]==0 读面——接触杀同敌经此拒收≙
+    //    原版接触+爆不双结算,G22 Dart 族同净效）、idStatic 1t 共享桶（167-170
+    //    SetDefaults :2568-2570 usesIDStatic+cd=1,窗长单源 projectileData 同
+    //    Dart.blastDamage 注）;
+    //  ③crit=0.04 路由门（spawn 位 Game.ts BJ-C2/F1）+rollVanillaHitCrit 命中拍
+    //    动态掷（barrel1023Burst/blackBolt661Burst 族约定;Damage_PVE_Inner :12920
+    //    ranged 掷）;kb 向=num40=direction=sign(vx)（:13652,167-170 无覆写支）;
+    //    pen=settlePen（:13683-13685 checkArmorPenetration 面）。
+    if (this.projId >= 167 && this.projId <= 170) {
+      const fwbX = this.cx - 96, fwbY = this.cy - 96;
+      if (!this.hostile) cutTilesBox(game, fwbX, fwbY, 192, 192);
+      if (this.damage > 0) {
+        const fwCd = projectileData(this.projId)?.idStaticNPCHitCooldown ?? 10;
+        for (const ent of game.enemies()) {
+          if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+          if (!playerCanHitEnemy(ent, game)) continue;
+          const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; id?: number;
+            hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean };
+          if (e.dead) continue;
+          if (!(fwbX < e.x + e.w && fwbX + 192 > e.x && fwbY < e.y + e.h && fwbY + 192 > e.y)) continue;
+          if (((ent as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
+          if (!idStaticCheck(this.projId, e.id ?? -1, fwCd)) continue;
+          const critFw = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+          e.hurt(applyBannerDamageDealt(game, e, critFw ? this.damage * 2 : this.damage),
+            Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, critFw, 0, true);
+        }
+      }
+    }
     if (this.projId === 617 && !this.dead) this.arcanumDeathBurst(game);
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
     // ★R29 玛瑙爆破枪黑爆二段（Kill :73493-73540）：Resize(160)→Damage() AoE

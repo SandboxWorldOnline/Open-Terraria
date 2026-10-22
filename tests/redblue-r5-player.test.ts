@@ -66,6 +66,18 @@ const tapJump = (p: Player, w: World): void => {
   p.inputJump = false;
   p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
 };
+/** ★BJ705-G25 迁移（G23 [g19-jump-release-zero] 后 tap 夹具失判别力——松键即清,
+ *  tap 后 jumpHold 恒 0;瓶族窗口算术须【持跳过窗】读数）:按下后持 k 拍读数
+ *  = round(base×mult) − k（瓶族起跳拍 sustain 同拍 −1,jumpStartedThisTick 只封
+ *  首跳门）;读后松 1 拍 arm 下一沿。 */
+const holdJumpRead = (p: Player, w: World, k: number): number => {
+  p.inputJump = true;
+  for (let i = 0; i < k; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+  const v = p.jumpHold;
+  p.inputJump = false;
+  p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+  return v;
+};
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -83,17 +95,17 @@ describe('R5-F9/F10 多段跳高度表+优先序', () => {
     expect(base).toBe(20);                             // 1164 jumpBoost → jumpHeight 20
     p.inputJump = false;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    // tapJump（按 1t+松 1t）后读数 = round(base×mult) − 2（起跳帧后 sustain/松帧各 -1）
-    tapJump(p, w);                                     // 空中 1：Sandstorm ×3
-    expect(p.jumpHold).toBe(Math.round(base * 3) - 2);
-    tapJump(p, w);                                     // 空中 2：Blizzard ×1.5
-    expect(p.jumpHold).toBe(Math.round(base * 1.5) - 2);
-    tapJump(p, w);                                     // 空中 3：Cloud ×0.75（兜底档）
-    expect(p.jumpHold).toBe(Math.round(base * 0.75) - 2);
-    const lastHold = p.jumpHold;
-    tapJump(p, w);                                     // 段耗尽：不再跳
+    // ★BJ705-G25 迁移:tap→holdJumpRead（G23 松键即清后 tap 读数恒 0）;持 2 拍读数
+    //   = round(base×mult) − 2（瓶族起跳拍 sustain 同拍 −1 + 持跳 1 拍 −1）同算术。
+    const s1 = holdJumpRead(p, w, 2);                  // 空中 1：Sandstorm ×3
+    expect(s1).toBe(Math.round(base * 3) - 2);
+    const s2 = holdJumpRead(p, w, 2);                  // 空中 2：Blizzard ×1.5
+    expect(s2).toBe(Math.round(base * 1.5) - 2);
+    const s3 = holdJumpRead(p, w, 2);                  // 空中 3：Cloud ×0.75（兜底档）
+    expect(s3).toBe(Math.round(base * 0.75) - 2);
     expect(p.extraJumps.length).toBe(0);
-    expect(p.jumpHold).toBe(lastHold - 2);             // 只自然衰减,无新段
+    const s4 = holdJumpRead(p, w, 2);                  // 段耗尽：不再跳（无新段=0,
+    expect(s4).toBe(0);                                //  误发第 4 段=s4≠0 必红）
   });
 
   it('屁瓶 1724 ×2（:21023）/ 航行瓶 3201 ×1.25（:20992）——旧表 1.25/1.0 已修', async () => {
@@ -108,8 +120,7 @@ describe('R5-F9/F10 多段跳高度表+优先序', () => {
       expect(base).toBe(PLAYER_JUMP_TICKS);
       p.inputJump = false;
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-      tapJump(p, w);
-      expect(p.jumpHold).toBe(Math.round(base * mult) - 2);
+      expect(holdJumpRead(p, w, 2)).toBe(Math.round(base * mult) - 2);   // ★BJ705-G25 持跳读数（tap 恒 0）
     }
   });
 });
@@ -189,7 +200,9 @@ describe('R5-F13/F14/F15/F17 冲刺', () => {
     doubleTap(p, w);
     expect(p.vx).toBeCloseTo(14.5, 6);
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.vx).toBeCloseTo(14.5 * 0.985, 6);
+    // ★BJ705-G26 [g25-glide-else-friction] 随迁:settle 接地滑行首拍=HM 摩擦 −0.2 先、
+    // 阻尼 ×0.985 后（原版 :20187 else 链不闸 dashDelay;旧钉值=纯阻尼 14.5×0.985）
+    expect(p.vx).toBeCloseTo((14.5 - 0.2) * 0.985, 6);
     p.vx = 2;                                          // 跌破档位
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     expect(p.dashDelay).toBe(30);                      // dash2 num17=30（旧 20）

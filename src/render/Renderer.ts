@@ -5767,6 +5767,7 @@ export class Renderer {
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
+    this._lavaOpacity = player.lavaOpacity;   // ★BJ705-G26 件3:熔岩潜水镜渐变帧快照
     // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface + remix
     renderEnv.wind = world.weather?.windSpeedCurrent ?? 0;
     renderEnv.worldSurface = world.groundLevel;
@@ -8600,7 +8601,7 @@ export class Renderer {
         : null;
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
         world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick, footCtx,
-        bat, liqMode && warpOn);
+        bat, liqMode && warpOn, this._lavaOpacity);   // ★G26 件3
     } else if (warpOn) {
       // ★R1b-8②：批环已溢出（bg 段触发 16384 帽）→ fg 回 canvas gate 原链——
       //  批化支 _fgRuns 空/缺段=gate 缺水主体（足迹子集）≈0,整帧位移场丢。
@@ -8615,7 +8616,8 @@ export class Renderer {
         //  (w over ∅) over scene ≡ w over scene=endFgPass 1:1 合成逐位同,B1 判例）
         //  +同批数据 y 镜像重发射 FBO('liqgate')=obj19 门控纹理（compose 直采）。
         drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick, null, bat, true);
+          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick, null, bat, true,
+          this._lavaOpacity);   // ★G26 件3
         this.emitLiquidGate(this._worldLowW, this._worldLowH);
       } else {
         const fgCtx = this.waterWarp.beginFgPass(this.ctx);
@@ -8624,7 +8626,8 @@ export class Renderer {
         //  纯 canvas 帧 _footQuads 恒空=no-op）
         if (fgCtx) replayLiquidFootQuads2D(fgCtx);
         drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
+          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick,
+          null, null, undefined, this._lavaOpacity);   // ★G26 件3（gateFootprintCtx/bat/gateCapture 缺省填位）
         if (fgCtx) {
           // ★B2b:endFgPass 的 drawImage(fgCanvas) 经 shim 翻 quad——门控面逐帧重画
           //  =动态源（texRefresh 重传;不登记=按 texId+rect 缓存陈旧纹理=水冻结）
@@ -8646,7 +8649,8 @@ export class Renderer {
       //   缺席=escapeVeil 退化直绘,零回归面）。
       const fgCtx = this.waterWarp.beginFgPass(this.ctx);
       drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick,
+        null, null, undefined, this._lavaOpacity);   // ★G26 件3（gateFootprintCtx/bat/gateCapture 缺省填位）
       if (fgCtx) {
         this.waterWarp.endFgPass(this.ctx);
         this._liqVeil = this.waterWarp.gateCanvas();
@@ -8654,7 +8658,7 @@ export class Renderer {
     } else {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
         world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick, null,
-        liqMode ? this.liqBatchHook() : null, false);
+        liqMode ? this.liqBatchHook() : null, false, this._lavaOpacity);   // ★G26 件3
     }
   }
 
@@ -8681,7 +8685,7 @@ export class Renderer {
       // 正交,任一开即传钩,臂内各按本旗判;acc 窗预检同 liqMode 面;rec 入队位=本
       // pass 原位=层序零改动）
       (liqpolish || liqC13b) && liqgl && this._accMode === 'acc' && !this.isCpuRender()
-        ? this.liqBatchHook() : null);
+        ? this.liqBatchHook() : null, this._lavaOpacity);   // ★G26 件3
   }
 
   /** 全屏扭曲管线本帧激活（drawLiquids warpOn 同式抽提——IIIII251 bob 门复用） */
@@ -9543,6 +9547,10 @@ export class Renderer {
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;
+  /** ★BJ705-G26 件3（[g20-buff305-lavavision] 清偿）:玩家 lavaOpacity 帧头快照
+   *  （render() 注入,缺省 1=恒等）——drawLiquids/drawLiquidBehindSolidTiles 六调用
+   *  位穿参消费（LiquidRenderer.cs:659/TileDrawing.cs:4116/:4125 三消费面）。 */
+  private _lavaOpacity = 1;
   /** 群系水色（CalculateWaterStyle，Main.cs:56845；每帧由场景标志+昼夜+深度算出） */
   waterStyle = 0;
   /** 光照引擎引用(Game 创建后回填;岩浆瀑布 AddLight 消费) */
@@ -12893,6 +12901,39 @@ export class Renderer {
             scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
             rot: gRot, mirror: gMirror, frameIdx, frames,
           });
+        }
+        // ★BJ705-G26 件2（2026-10-22,BJ705-A 登记债③清偿）:南瓜王 327/哀木 325
+        //   全亮表情叠画（Main.cs:26044-26063——本体链之后的后绘 extras 区 else-if
+        //   链,本体之上;120/137/138 残影支紧邻同域=本挂点同相）。原版两支同构:
+        //   Color.White 本体帧位 1 笔 + 灰阶抖动残影 9 笔（c=(110−n×10)×4 通道同值,
+        //   jitter=rand.Next(−10,11)×0.2=±2px 双轴独立取）。贴图 PumpkingFace/
+        //   TreeFace 与 NPC_327/NPC_325 逐字节同构（102×1368/248×1880——帧行 r.sy
+        //   直用=表情帧与本体帧同拍）;锚=本体锚（num46=0（108/124/357/467/537 族外）
+        //   /num47=NPCAddHeight=0（表无 327/325）/gfxOffY=0（地面 boss 无悬浮）→
+        //   面锚≡体锚,cx/cy/rot/mirror/scale/by=bodyY 直承）。全亮/恒灰均不读光照色
+        //   =不入实体层（compositeLight 乘光=暗处面灭）→ npcWhiteLiftQueue 7d' 复绘:
+        //   主笔 ga:1（source-over 全亮=XNA Color.White 直绘）;残影 tint=[g,g,g]+
+        //   tintA=g 两步式（dest-out 削底+lighter 全额=XNA 预乘 c=(g,g,g,g) 逐字节
+        //   tex.rgb·tex.a·g/255+bg·(1−tex.a·g/255),BJ551 判例域）;抖动折 cx/cy
+        //   （世界域 ±2px ≙ 原版 position+vector66 未缩放位差）。懒加载经消费侧
+        //   ensureVImage 自愈通道（10s TTL）;VANILLA_MISC 暖存未入=首见迟几拍,
+        //   boss 表情装饰面可接受（BJ705-A 漏员①族防再登记注）。
+        if (e.vanillaId === 327 || e.vanillaId === 325) {
+          const faceTex = e.vanillaId === 327 ? 'vanilla/PumpkingFace.png' : 'vanilla/TreeFace.png';
+          this.npcWhiteLiftQueue.push({
+            vid: e.vanillaId, tex: faceTex, sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale, by: bodyY, ga: 1,
+          });
+          for (let n = 1; n < 10; n++) {
+            const g = 110 - n * 10;   // :26049 (110−num265×10) 通道同值灰阶 100→20
+            this.npcWhiteLiftQueue.push({
+              vid: e.vanillaId, tex: faceTex, sy: r.sy, sw: r.sw, sh: r.sh,
+              cx: e.cx + (Math.floor(Math.random() * 21) - 10) * 0.2,   // rand.Next(−10,11)×0.2
+              cy: e.cy + (Math.floor(Math.random() * 21) - 10) * 0.2,
+              rot: gRot, mirror: gMirror, scale, by: bodyY,
+              tint: [g, g, g], tintA: g,
+            });
+          }
         }
         // 473-476 大宝箱怪拖影（★BJ248 归位：Main.cs:26436-26451 aiStyle 87 后绘
         // extras 区残影支=本体链之后,477/479 :26396 块之后紧邻——同帧 rCurrentNPC

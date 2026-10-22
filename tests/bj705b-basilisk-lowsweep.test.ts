@@ -128,6 +128,21 @@ async function measureArc(p: P, game: unknown, maxT = 260): Promise<number> {
   return peak;
 }
 
+/** ★BJ705-G23 持跳版弧内峰——[g19-jump-release-zero] 清偿后 tap 跳松键即清窗
+ *  （boost 只剩发拍后 1 拍),瓶族 boost 判别面须【持跳过窗】=vanilla 活面
+ *  （controlJump 按住时 jump 不清,:20823 sustain 分支）。 */
+async function measureArcHeld(p: P, game: unknown, maxT = 260): Promise<number> {
+  let peak = 0;
+  for (let t = 0; t < maxT; t++) {
+    p.inputX = 1; p.inputJump = true; p.inputDown = false;
+    p.fixedUpdate(1 / 60, game as never);
+    peak = Math.max(peak, Math.abs(p.vx));
+    if (p.onGround && p.jumpHold === 0 && t > 30) break;
+  }
+  p.inputJump = false;
+  return peak;
+}
+
 /** 落地续跑持续 |vx| 峰（240t 定向跑,无跳） */
 async function sustainedRun(p: P, game: unknown): Promise<number> {
   let peak = 0;
@@ -161,7 +176,9 @@ describe('BJ705-B §0A 骑乘瓶跳 boost 面（63mph 实报路径）', () => {
     await drainWindow(p, game);
     pressJump(p, game);                               // 空中瓶跳（三段——blockExtraJumps=false 放行）
     const pj = (p as unknown as { performingJump: string | null }).performingJump;
-    const arc = await measureArc(p, game);
+    // ★BJ705-G23:持跳版弧（tap 版松键即清窗=boost 1 拍即死无判别力;vanilla 活面=
+    // controlJump 按住时窗不清——沙暴/瓶 boost 骑乘灭门判别须持跳过窗）
+    const arc = await measureArcHeld(p, game);
     const sustained = await sustainedRun(p, game);
     return { arc, sustained, pj };
   }
@@ -265,6 +282,42 @@ describe('BJ705-B §0C 骑乘覆写前乘区（荧光体/暗影套 maxRun×1.15�
 });
 
 // ---------------------------------------------------------------------------
+// §0D 扫描仪第二路径（未骑乘域）：翼档 cap × 瓶族 boost 叠乘。vanilla
+//    WingAirLogicTweaks 只抬 accRunSpeed（:29536-55;未骑乘 CanUseWings 恒真
+//    :574-83）——boost 乘未抬的 maxRunSpeed,顶速经慢爬坡支到 cap（恶魔翼 6.25）。
+//    修前仓内 cap 抬 maxRun 且 boost 在后乘 → 6.25×1.75=10.94px/t≈54.7mph。
+// ---------------------------------------------------------------------------
+describe('BJ705-B §0D 未骑乘翼×瓶 boost 叠乘（扫描仪第二路径）', () => {
+  /** 带初速版:先跑满(≈3px/t)再跳——静止起跳的 29 拍窗口 ×0.24=6.96 恰在 7.0 界下
+   *  无判别力(首版 M8 变异漏红根因);初速 3+0.24×29≈9.96 → 红裕度 3px/t。
+   *  ★BJ705-G23:瓶跳后【持跳】过窗（松键即清窗后 tap 版只剩 1 拍 boost 无判别力）;
+   *  首跳窗耗尽判 jumpHold===0 在松键清零下 1 拍即达（相位无害——瓶跳仍空中沿）。 */
+  async function runningBottleArc(seed: string, bottleVid: number): Promise<number> {
+    const w = makeGroundWorld(seed);
+    const game = fakeHooks(w, null);
+    const p = await mkPlayer(30 * 16, 140 * 16);
+    p.inv.armor[3] = { id: iid(492), stack: 1 };      // 恶魔翼（wing=1,accSpeed 6.25）
+    p.inv.armor[4] = { id: iid(bottleVid), stack: 1 };
+    await settle(p, game);
+    for (let t = 0; t < 120; t++) { p.inputX = 1; p.fixedUpdate(1 / 60, game as never); }   // 跑满 ≈3
+    pressJump(p, game);                               // 首跳（跑动中）
+    for (let t = 0; t < 90; t++) { p.inputX = 1; p.fixedUpdate(1 / 60, game as never); if ((p.jumpHold === 0 && !p.onGround) || p.onGround) break; }
+    pressJump(p, game);                               // 空中瓶跳
+    return await measureArcHeld(p, game);
+  }
+
+  it('D1 恶魔翼(492)+屁瓶(1724)空中瓶跳:弧内峰 ≤7.0（vanilla 顶速 ≈6.25 经 ramp;修前≈10.9=54.7mph）', async () => {
+    const arc = await runningBottleArc('bj705b-d1', 1724);
+    expect(arc).toBeLessThanOrEqual(7.0);
+  }, 30000);
+
+  it('D2 恶魔翼+暴雪瓶(987):同面 ≤7.0（修前 6.25×1.5=9.4≈47mph）', async () => {
+    const arc = await runningBottleArc('bj705b-d2', 987);
+    expect(arc).toBeLessThanOrEqual(7.0);
+  }, 30000);
+});
+
+// ---------------------------------------------------------------------------
 // §1 决定性随机序列扫描（seeded 可复现）。变量：跳键按下/释放拍位与时长、二段/三段
 //    跳时机、方向翻转、湿态（过池）、装备（瓶五型/翼/荧光体/暗影套）、上骑时机
 //    （地面/空中中途上骑/不上骑）。断言：全程 |vx| 峰 ≤8.9 + 落地续跑 240t 峰 ≤8.8
@@ -363,19 +416,24 @@ describe('BJ705-B §1 随机序列扫描（骑 14 状态空间穷举）', () => 
 // §2 结构锁（源文本锚——变异恰红锚 M2/M3/M5/M6 + G19 撤线守卫延续）
 // ---------------------------------------------------------------------------
 describe('BJ705-B §2 结构锁', () => {
-  it('S1 瓶族 boost 线带非叠加骑乘灭门（mntWipeBoost）+ mulPreAdd 加法序', () => {
+  it('S1 瓶族 boost 线带非叠加骑乘灭门（mntWipeBoost）+ mulPreAdd 加法序 + ★BJ705-G23 翼档 cap 1:1（只抬 accRun,maxRun 不动;boostBase 补丁基底已退役）', () => {
     expect(playerSrc).toContain('if (this.jumpHold > 0 && !this.grappling[0] && !this.pulley && !mntWipeBoost) {');
     expect(playerSrc).toContain("this.performingJump === 'Blizzard' && eqM.jumpOpts.includes('Blizzard')");
     expect(playerSrc).toContain('maxRun = mulPreAdd(maxRun, 1.5, additiveRun)');
     expect(playerSrc).toContain('maxRun = mulPreAdd(maxRun, 1.75, additiveRun)');
     expect(playerSrc).toContain('maxRun = mulPreAdd(maxRun, 1.25, additiveRun)');
+    // cap 块 1:1 锚（:26696 门 + :29550-52 只抬不压）——防 maxRun 回潮/门撤除变异
+    expect(playerSrc).toContain('if (eqM.wing && this.vy !== 0 && !this.merman && mntCanWings) {');
+    expect(playerSrc).toContain('} else if (ws.accSpeed !== -1 && ws.accSpeed > accRun - additiveDash) {');
+    expect(playerSrc).toContain('accRun = ws.accSpeed + additiveDash;   // :29550-52 只抬不压;maxRun 不动');
+    expect(playerSrc).toContain('wingCapFired = true;');
   });
 
-  it('S2 覆写前乘区同族三处灭门（翱翔徽章/荧光体/暗影套）+ runSlow 平值复位', () => {
+  it('S2 覆写前乘区同族三处灭门（翱翔徽章/荧光体/暗影套）+ runSlow 平值复位（★BJ705-G25:声明提升出滑行门,let→赋值同式）', () => {
     expect(playerSrc).toContain('if (eqM.empressBrooch && !mntWipeBoost) runAcc = mulPreAdd(runAcc, 1.75, additiveAcc);');
     expect(playerSrc).toContain('if (this.onGround && eqM.magiluminescence && !mntWipeBoost) {');
     expect(playerSrc).toContain('if ((eqM.runAccMul !== 1 || eqM.maxRunMul !== 1) && !mntWipeBoost) {');
-    expect(playerSrc).toContain('let runSlow = mntSlowFlat ? RUN_SLOWDOWN : RUN_SLOWDOWN * eqM.runSlowMul;');
+    expect(playerSrc).toContain('runSlow = mntSlowFlat ? RUN_SLOWDOWN : RUN_SLOWDOWN * eqM.runSlowMul;');
     expect(playerSrc).toContain('mntWipeBoost = !mnt.movementStatsAdditive;');
     expect(playerSrc).toContain('mntSlowFlat = MOUNT_DATA[String(mnt.type)]?.CanUseWings !== true;');
   });

@@ -547,6 +547,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     titleMenu = null;
     ui.game = g;
     ui.initInGame(); // DOM 版游戏内 UI（道具栏/背包/合成/宝箱/Buff）——用户指定 web 技术路线
+    // ★幕布期抬 z（2026-10-22「动态背景早退」修复,机制全注见 MenuBackground.
+    //  setCurtainMode）：c10e 三画布(positioned z-auto,root 末端)同层树序在后
+    //  =画在 z0 幕布之上——首帧即埋掉幕布。z0→5 盖回三画布(HUD z10/DOM 进度
+    //  页 290/VUI 300 照旧在上);stopMenu 销毁画布=复位,showTitle 复用沿兜底复位。
+    menuBg?.setCurtainMode(true);
     g.start();
     audio.play('main');
   }
@@ -1941,6 +1946,9 @@ function makeGame(): Game {
     // ——过渡图阶段时间不再空转,加载密集期零渲染负载(2026-08-27 用户报);
     // 回菜单路径(quitToMenu 等)不传参=立即恢复运镜
     menuBg.setPaused(bgPaused);
+    // ★幕布期 z 复位（「动态背景早退」修复兜底沿：实例复用时回标题必经此处;
+    // 幕布窗内退出(quitToMenu 等)后 z5 若不复位=标题态盖住 legacyShim(z1)）
+    menuBg.setCurtainMode(false);
     titleMenu?.destroy();
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => gateAssetsOrRun(() => showCharacterSelect()),

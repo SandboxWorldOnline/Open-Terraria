@@ -7,6 +7,8 @@
 //  · UITextPanel = UIPanel + 居中文本（菜单按钮形态）
 // DOM 实现：白模 canvas 预染色 → dataURL → CSS 变量 + border-image 12 fill stretch
 // （fill 中段透明露出元素底色；拉伸语义与 DrawPanel 的 bar 拉伸一致）。
+import { lateImageRetry, lateImageRetryDefer } from '../assets/lateImageRetry';
+
 const BORDER_SRC = 'sprites/vanilla-ui/UI_PanelBorder.png';
 
 /** 白模染色（multiply+destination-in，MenuBackground.tinted 同技法）→ dataURL */
@@ -32,6 +34,7 @@ function tintedDataUrl(src: string, color: string): Promise<string> {
       res(url);
     };
     img.src = src;
+    lateImageRetry(img, src);   // ★BJ705-G26 件4:挂起型迟到单发重试（无 onerror=失败永挂）
   });
 }
 
@@ -78,7 +81,8 @@ export function tintedSliceDataUrl(src: string, r: number, g: number, b: number,
         res(cv.toDataURL());
       } catch { res(''); }
     };
-    img.onerror = () => res('');
+    // ★BJ705-G26 件4:终态 onerror 型迟到单发重试（首败不 res(''),重启命中回填）
+    lateImageRetryDefer(img, src, () => res(''));
     img.src = src;
   });
   sliceTintCache.set(key, p);

@@ -159,7 +159,9 @@ describe('MV1① 星旋减益：滑行阻尼照常（原版 vortex 不重定向�
 describe('MV1② 绳格重叠：非 pulley 绳攀滑行照常阻尼（撤 BJ527 this.pulley 门）', () => {
   it('滑行穿过绳带：dashDelay 推进到就绪（修前绳上冻结,漂程随绳宽线性放大）', () => {
     const w = mvRopeWorld();
-    const p = mkPlayer(w, 20);
+    // ★BJ705-G26 迁移:摩擦时间线滑程 ~350→~200px（G26 else 摩擦逐拍叠加）,起点
+    //   20→32 保「滑行中段穿绳带」（绳带 640-992px,新滑程终于 ~712px）。
+    const p = mkPlayer(w, 32);
     p.inv.armor[3] = { id: iid(3097), stack: 1 };
     for (let i = 0; i < 10; i++) tick(p, w);
     dashRight(p, w);
@@ -181,7 +183,9 @@ describe('MV1② 绳格重叠：非 pulley 绳攀滑行照常阻尼（撤 BJ527 
 describe('MV1③ 微光浸没/微光化：滑行阻尼照常（原版 shimmerWet/shimmering 只改重力档）', () => {
   it('滑行冲入微光池：dashDelay 推进到就绪、无恒速漂移段', () => {
     const w = mvShimmerWorld();
-    const p = mkPlayer(w, 26);   // 滑程 ~350px → 入池缘（POOL_X0=46=736px,起 26=416px）
+    // ★BJ705-G26 迁移:摩擦时间线滑程 ~350→~200px,起点 26→38 保「滑行中段入池」
+    //   （池缘 736px,新滑程终于 ~808px;跨缘步降拍同拍落地=全程接地摩擦档）。
+    const p = mkPlayer(w, 38);
     p.inv.armor[3] = { id: iid(3097), stack: 1 };
     for (let i = 0; i < 10; i++) tick(p, w);
     dashRight(p, w);

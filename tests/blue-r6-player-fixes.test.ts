@@ -104,7 +104,9 @@ describe('F1 dash==6 滑行阻尼恒基础档 0.992（骑乘不落配饰档污�
     doubleTap(p, w);
     expect(Math.abs(p.vx)).toBeCloseTo(16, 5);           // :21716 mount 发起档
     const [r] = glideRatio(p, w);
-    expect(r).toBeCloseTo(0.992, 6);                     // num14 基础档(:21428)
+    // ★BJ705-G26 随迁:未 settle（spawn 6px 沉降尾）+dash6 发起不写 vy → 悬空滑行
+    // 首拍=HM else 摩擦 −0.1 先、阻尼 ×0.992 后（旧钉值=纯阻尼比值 0.992）
+    expect(r).toBeCloseTo(((16 - 0.1) * 0.992) / 16, 6);   // num14 基础档(:21428)
   });
 
   it('★修复面：Chillet + 克盾 3097 —— 曾被 eq.dash∈{2,3,4} 污染成 ×0.985/冷却 30；现仍基础档', async () => {
@@ -116,7 +118,7 @@ describe('F1 dash==6 滑行阻尼恒基础档 0.992（骑乘不落配饰档污�
     doubleTap(p, w);
     expect(Math.abs(p.vx)).toBeCloseTo(16, 5);           // 骑乘发起不走克盾 14.5 档
     const [r] = glideRatio(p, w);
-    expect(r).toBeCloseTo(0.992, 6);                     // ★基线红=0.985
+    expect(r).toBeCloseTo(((16 - 0.1) * 0.992) / 16, 6);   // ★基线红=0.985（G26 摩擦随迁,同首测注）
   });
 
   it('回归护栏（治理批 B6②）：滚轴鞋 57 + 克盾 —— 配饰档照常生效 ×0.985', async () => {
@@ -128,7 +130,8 @@ describe('F1 dash==6 滑行阻尼恒基础档 0.992（骑乘不落配饰档污�
     doubleTap(p, w);
     expect(Math.abs(p.vx)).toBeCloseTo(14.5, 5);         // 配饰发起档 :21619
     const [r] = glideRatio(p, w);
-    expect(r).toBeCloseTo(0.985, 6);                     // dash==2 覆写 :21457
+    // ★BJ705-G26 随迁:未 settle 悬空 → 首拍摩擦 −0.1+×0.985（旧=纯阻尼 0.985）
+    expect(r).toBeCloseTo(((14.5 - 0.1) * 0.985) / 14.5, 6);   // dash==2 覆写 :21457
   });
 
   it('★F1 收敛特例补全：滑行中途下鞍 → dashType!=6 半支即刻收敛 vx×0.3 + 30t 冷却（:21521-21527）', () => {
@@ -143,7 +146,9 @@ describe('F1 dash==6 滑行阻尼恒基础档 0.992（骑乘不落配饰档污�
     p.vx = 12; p.vy = 1;
     p.mount.active = false;                               // 中途脱鞍
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.vx).toBeCloseTo(12 * 0.3 * 0.96, 5);         // :21525 收敛后同拍再落 num15 档 ×0.96（原文 return 前式）
+    // ★BJ705-G26 随迁:构造 vy=1 悬空 → 收敛拍先吃 HM else 摩擦 −0.1（:20187/:20202
+    // 不闸 dashDelay）再 ×0.3 收敛、×0.96 落档（旧=纯 12×0.3×0.96）
+    expect(p.vx).toBeCloseTo((12 - 0.1) * 0.3 * 0.96, 5);   // :21525 收敛后同拍再落 num15 档 ×0.96（原文 return 前式）
     expect(p.dashDelay).toBe(30);                         // num17=(dashDelay)=30（:21523）
     expect(p.mountDash6Active).toBe(false);
   });

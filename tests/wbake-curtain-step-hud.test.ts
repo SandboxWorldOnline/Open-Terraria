@@ -24,6 +24,7 @@ import { Lang } from '../src/i18n/Lang';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MAINFLOW = readFileSync(join(ROOT, 'src/mainFlow.ts'), 'utf8');
 const UITS = readFileSync(join(ROOT, 'src/ui/UI.ts'), 'utf8');
+const MBTS = readFileSync(join(ROOT, 'src/render/MenuBackground.ts'), 'utf8');
 
 // 真实 zh-Hans 包注入（worldgen-ui-easter-eggs 同例——RenderingWorld 键文案断言需要）
 beforeAll(() => {
@@ -109,9 +110,34 @@ describe('幕布期修复刃③：UI.setHudSuppressed + sw-hud-suppressed 机制
     expect(UITS).not.toContain('.sw-root.sw-hud-suppressed > *:not(.sw-progress) { display:none; }');
   });
 
-  it('幕布层序定谳锚（注释在位,防后续误判"HUD 在幕布之下"）：menuBg z0 盖游戏画布,VUI 页 z300 透明,HUD .sw-root z10 裸奔面', () => {
+  it('幕布层序定谳锚（注释在位,防后续误判"HUD 在幕布之下"）：HUD .sw-root z10 裸奔于幕布之上,VUI 页 z300 透明（★2026-10-22 勘误:原锚题"menuBg z0 盖游戏画布"在 c10e 转正后不成立——三画布 positioned 同层树序在后=画在 z0 幕布之上,正是刃⑤所修;幕布对游戏画布的覆盖改由幕布期 z5 承担）', () => {
     expect(UITS).toContain('★幕布期 HUD 抑制（2026-09-29 用户报「加载幕布期热键栏/Shift 提示穿透」）');
     expect(MAINFLOW).toContain('盖不住 DOM HUD');
+  });
+});
+
+// ★刃⑤（2026-10-22 用户实报「加载界面渲染世界阶段动态背景早退——进度条与已
+//  进入游戏的画面同屏」定谳修复）：c10e 转正（2026-10-01 缺省开）后 Game 三画布
+//  （sky2D/glCanvas/主画布）全部 position:absolute（z-auto）且 attach() appendChild
+//  到 root 末端——与 menuBg 画布（z-index:0,insertBefore firstChild）同处 z-auto/0
+//  层,CSS 绘制序按 DOM 树序=三画布画在幕布之上,g.start() 首帧即整层埋掉幕布
+//  （wbake 覆盖门要遮的视口空白窗随之重新暴露）。c10e 转正前主画布是 static
+//  in-flow（绘制于全部 positioned 之下）,z0 幕布才盖得住=三开压测批幕布设计的
+//  隐含前提,转正时未随迁。修复=幕布期抬 z 0→5。运行时判据探针：
+//  scripts/_curtain-zorder-probe.mjs（窗内 elementFromPoint 修复前=game-main/
+//  修复后=menuBg,root 层序 dump 全锚）。
+describe('幕布期修复刃⑤：c10e 三画布埋葬修复——幕布期 z 抬升（源锚）', () => {
+  it('机制锚：MenuBackground.setCurtainMode 在位（0↔5 翻转;5>三画布 z-auto,低于 HUD z10/DOM 进度页 z290/VUI z300）', () => {
+    expect(MBTS).toContain("setCurtainMode(on: boolean): void { this.canvas.style.zIndex = on ? '5' : '0'; }");
+    // 默认态仍是 z0（标题屏层序零变化——TitleMenu z15/legacyShim z1 之上语义不动）
+    expect(MBTS).toContain("'position:absolute;inset:0;z-index:0;'");
+  });
+  it('接线锚：enterGame 在 g.start() 前置位（世界首帧起幕布恒在三画布之上）;showTitle 复位（实例复用沿,防幕布窗内退出后 z5 盖住 legacyShim z1）', () => {
+    const raiseAt = MAINFLOW.indexOf('menuBg?.setCurtainMode(true);');
+    expect(raiseAt).toBeGreaterThan(-1);
+    // g.start() 的【本调用点】在置位之后（enterGame 内;同文件 g.start() 唯一）
+    expect(MAINFLOW.indexOf('g.start();')).toBeGreaterThan(raiseAt);
+    expect(MAINFLOW).toContain('menuBg.setCurtainMode(false);');
   });
 });
 

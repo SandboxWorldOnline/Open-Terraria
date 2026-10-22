@@ -10,6 +10,7 @@
 // BestiaryPanel.bstTintCache/弹幕 frameCache/UI.iconCache 经事件或钩子清。
 // 卸载 = 重拉原版 sprites/ 原路径 + 按安装序重放其余 pack(Manager 负责)。
 import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
+import { lateImageRetryDefer } from '../assets/lateImageRetry';
 import { setProjSpriteOverride } from '../entities/Arrow';
 import type { LoadedPack } from './types';
 
@@ -80,7 +81,8 @@ export function loadVanillaSheet(file: string): Promise<ImageBitmap | HTMLImageE
       if (SpriteAtlas.USE_BITMAP) upgradeToBitmap(img, (b) => land(b), () => land(img));
       else land(img);
     };
-    img.onerror = () => resolve(null);
+    // ★BJ705-G26 件4:终态 onerror 型迟到单发重试（首败不 resolve(null),重启命中回填）
+    lateImageRetryDefer(img, `sprites/${encodeURI(file)}`, () => resolve(null));
     img.src = `sprites/${encodeURI(file)}`;
   });
 }

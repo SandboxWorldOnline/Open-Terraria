@@ -14,6 +14,7 @@ import type { SceneFlags } from '../world/SceneMetrics';
 import { atmoOf } from './SkyRenderer';
 import { texReady } from './texId';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
+import { lateImageRetryDefer } from '../assets/lateImageRetry';
 
 // ---- SurfaceBackgroundID（Terraria.ID/SurfaceBackgroundID.cs） ----
 const Forest1 = 0, Corruption = 1, Desert = 2, Jungle = 3, Ocean = 4, CorruptDesert = 5,
@@ -644,7 +645,8 @@ export class BiomeBackground {
         upgradeToBitmap(im, (b) => { this.imgs.set(n, b); resolve(); }, () => { this.imgs.set(n, im); resolve(); });
         if (!SpriteAtlas.USE_BITMAP) { this.imgs.set(n, im); resolve(); }
       };
-      im.onerror = () => resolve();
+      // ★BJ705-G26 件4:终态 onerror 型迟到单发重试（首败不 resolve,重启命中回填）
+      lateImageRetryDefer(im, `sprites/vanilla/Background_${n}.png`, () => resolve());
       im.src = `sprites/vanilla/Background_${n}.png`;
     }))).then(() => undefined);
   }

@@ -122,9 +122,11 @@ describe('BJ533① 云朵瓶水中二段跳', () => {
     expect(p.extraJumps).toEqual([]);             // selection 消费（:20849 else 臂）
     expect(p.performingJump).toBe('Cloud');       // isPerformingJump_Cloud :21168
     expect(p.vy).toBeLessThan(0);                 // 水中上浮（旧仓恒继续下沉）
+    tick(p, w);                                   // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
+    expect(p.jumpHold).toBe(Math.round(30 * 0.75) - 2);   // 21（湿档 lJT=30;×0.75 窗口算术锁）
     p.inputJump = false;
     tick(p, w);
-    expect(p.jumpHold).toBe(Math.round(30 * 0.75) - 2);   // 21（湿档 lJT=30;R5-F9 同款 -2 口径）
+    expect(p.jumpHold).toBe(0);                   // ★BJ705-G23:松键即清（:21201-08;旧耗尽制=21 续跑）
   });
 
   it('水中无瓶：悬空按跳无响应（对照臂——外门 canJumpAgain 臂假则整块不进）', () => {
@@ -169,15 +171,22 @@ describe('BJ533② 脚蹼湿态瓶段保留', () => {
     p.buffs.apply(BuffType.FlipperPotion, 4000);  // 覆盖全程（ignoreWater+accFlipper :10257-59）
     settleToFloor(p, w);
     waitAirborneSinking(p, w);
+    // ★BJ705-G23:release-clear 使 waitAirborneSinking 早出（jumpHold 1 拍即清,旧=30 拍
+    // 耗尽)——首跳拍置的 swimTime=30 尚余 1,泳跳支的 swimTime==0 条件刷新(:20824-28
+    // 原文条件式)不可达;排空 2 拍回到判据态（泳跳行为面不变:fire/jumpHold/瓶保留）
+    for (let t = 0; t < 3 && p.swimTime !== 0; t++) tick(p, w);
+    expect(p.swimTime).toBe(0);
     p.inputJump = true;
     tick(p, w);
     expect(p.swimTime).toBeGreaterThan(0);        // flag4 泳跳支（:20824-20828 swimTime=30）
     expect(p.extraJumps).toEqual(['Cloud']);      // ★!flag2 门：selection 整段跳过=不消费
     expect(p.performingJump).toBe(null);          // 泳跳非瓶支,不置尾迹旗
     expect(p.vy).toBeLessThan(0);
+    tick(p, w);                                   // ★BJ705-G23:持跳 1 拍
+    expect(p.jumpHold).toBe(29);                  // 泳跳 lJT=30（fire 拍 jumpStartedThisTick 不进 sustain,持跳拍 −1）
     p.inputJump = false;
     tick(p, w);
-    expect(p.jumpHold).toBe(29);                  // 泳跳 lJT=30,release 拍 -1
+    expect(p.jumpHold).toBe(0);                   // ★BJ705-G23:松键即清（:21201-08）
   });
 });
 
@@ -196,9 +205,11 @@ describe('BJ533③ 水中消费优先序与湿档跳参', () => {
     tick(p, w);
     expect(p.extraJumps).toEqual(['Blizzard', 'Cloud']);   // Sandstorm 消费（优先序 :20875-20922）
     expect(p.performingJump).toBe('Sandstorm');
+    tick(p, w);                                             // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
+    expect(p.jumpHold).toBe(Math.round(30 * 3) - 2);       // 88（×3 窗口算术锁）
     p.inputJump = false;
     tick(p, w);
-    expect(p.jumpHold).toBe(Math.round(30 * 3) - 2);       // 88
+    expect(p.jumpHold).toBe(0);                             // ★BJ705-G23:松键即清（:21201-08）
   });
 });
 
@@ -224,8 +235,10 @@ describe('BJ533④ 干地二段跳回归', () => {
     tick(p, w);
     expect(p.extraJumps).toEqual([]);
     expect(p.performingJump).toBe('Cloud');
+    tick(p, w);                                            // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
+    expect(p.jumpHold).toBe(Math.round(15 * 0.75) - 2);   // 9（干档 ×0.75 窗口算术锁）
     p.inputJump = false;
     tick(p, w);
-    expect(p.jumpHold).toBe(Math.round(15 * 0.75) - 2);   // 9
+    expect(p.jumpHold).toBe(0);                            // ★BJ705-G23:松键即清（:21201-08）
   });
 });

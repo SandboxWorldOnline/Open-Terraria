@@ -15,6 +15,7 @@ import { ACH_CATEGORY } from '../data/vanillaAchievements';
 import { modAchDefOf } from '../core/Achievements';   // ★成就域:tooltip 字面回退
 import { tintedSliceDataUrl } from './vanillaKit';
 import { mouseTextInnerColor } from '../render/Renderer';
+import { lateImageRetry } from '../assets/lateImageRetry';
 
 const CATEGORY_NAMES: Record<number, string> = {
   [ACH_CATEGORY.Slayer]: 'Achievements.SlayerCategory',
@@ -378,6 +379,7 @@ function achTipBgDataUrl(w: number, h: number): string | null {
   if (!achTipBgImg) {
     achTipBgImg = new Image();
     achTipBgImg.src = 'sprites/vanilla/Inventory_Back13.png';
+    lateImageRetry(achTipBgImg, 'sprites/vanilla/Inventory_Back13.png');   // ★BJ705-G26 件4
   }
   const img = achTipBgImg;
   if (!img.complete || !(img.width > 0)) return null;   // 未就绪(首次悬停竞态)→兜底色,下次悬停现底

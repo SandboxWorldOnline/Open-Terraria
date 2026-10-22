@@ -18,6 +18,7 @@ import { Lang } from '../i18n/Lang';
 import { parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
 import { saveClient } from '../workers/SaveClient';
 import { menuToast } from './menuToast';                // ★BJ691 alert→菜单 toast
+import { lateImageRetryDefer } from '../assets/lateImageRetry';
 
 export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
@@ -339,10 +340,12 @@ export class WorldSelectPanel {
     };
     const timer: ReturnType<typeof setInterval> = setInterval(tick, 1000 / 60);
     // 404/坏图死路自清（不收钟=60Hz 空转;timer 已入 iconTimers,close 侧兜底仍在）
-    img.onerror = () => {
+    // ★BJ705-G26 件4:终态 onerror 型迟到单发重试——首败不收钟（迟到重启命中则
+    // ready=true 起拍）,重启后再败才收钟（原 404 死路语义保留）
+    lateImageRetryDefer(img, BTN_SRC('UI_IconEverythingAnimated'), () => {
       clearInterval(timer);
       this.iconTimers.delete(timer);
-    };
+    });
     this.iconTimers.add(timer);
     return cv;
   }

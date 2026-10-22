@@ -1,11 +1,14 @@
 // ★BJ705（2026-10-21 用户实报「远古号角坐骑二段跳后平地最高速度 41→63mph」）回归锁。
-//  定谳：现盘【无此 bug】——单驱夹具实测骑 14（远古号角 3771→Basilisk）二段跳前后
-//  持续极速均 8.2px/t（≈41mph,8+0.2 振荡过冲）。用户所见 ×1.5（8×1.5=12px/t≈
-//  61-63mph 峰值）与 G19 当日 17:00 撤掉的活码【完全吻合】：旧仓
-//  `if (mnt && mnt.mountJumpPerforming) { runAcc*=3; maxRun*=1.5; }` 在坐骑 stats
-//  覆写【后】乘=特殊跳一次后骑乘期永久 1.5× 极速（vanilla :26803 boost 在覆写
-//  【前】=骑乘期死码,:26852-56 覆写支必走）。G19 撤线后该面由本锁钉死。
-//  ★变异自证：M1 回植 `mnt.mountJumpPerforming→maxRun*=1.5` 于 :6534 后 → §1 红。
+//  ★BJ705-B 勘正（2026-10-22 低概率路径穷举）:本锁首版判语「现盘无此 bug」系
+//  【无瓶装备】单驱面——穷举后发现第二活码面:骑 14 持瓶(Mount.cs:1648-97 无
+//  blockExtraJumps=瓶跳放行)空中第 2 跳耗瓶置 performingJump='Blizzard'/'Fart'/
+//  'Sail',而仓内瓶族 boost 线与 G19 撤掉的坐骑线同在坐骑 stats 覆写【后】(vanilla
+//  :26778-26812 全族在 :26852-54 覆写前=骑乘期被冲掉) → 弧内峰 12.7/14.7/10.35
+//  px/t≈63/73/52mph(用户 41→63 数值吻合)。已修(mntWipeBoost 灭门),判别锁=
+//  tests/bj705b-basilisk-lowsweep.test.ts(§0A 定谳复现+§1 随机扫描+§2 结构锁,
+//  8 变异恰红含 G19 旧形态 M1 回植)。本文件保留无瓶典型流锁:
+//  单驱夹具实测骑 14（远古号角 3771→Basilisk）二段跳前后持续极速均 8.2px/t
+//  （≈41mph,8+0.2 振荡过冲）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';

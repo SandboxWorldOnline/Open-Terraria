@@ -53,6 +53,7 @@ import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
 import { formatCopper } from './NpcDialog';
 import { randomPlayerName } from '../i18n/RandomText';
 import { UISfx } from '../vui/UISfx';
+import { lateImageRetry, lateImageRetryDefer } from '../assets/lateImageRetry';
 
 export interface CharCreationCallbacks {
   onCreate(a: Appearance): void;
@@ -127,7 +128,8 @@ function loadImg(src: string): Promise<Img> {
     p = new Promise((res, rej) => {
       const img = new Image();
       img.onload = () => res(img);
-      img.onerror = () => rej(new Error('img load fail: ' + src));
+      // ★BJ705-G26 件4:终态 onerror 型迟到单发重试（首败不 reject,重启后再败才 reject）
+      lateImageRetryDefer(img, src, () => rej(new Error('img load fail: ' + src)));
       img.src = src;
     });
     imgPromises.set(src, p);
@@ -256,6 +258,7 @@ function invBgEnsure(): Img | null {
   if (!invBgImg) {
     invBgImg = new Image();
     invBgImg.src = VAN_TEX('Inventory_Back13');
+    lateImageRetry(invBgImg, VAN_TEX('Inventory_Back13'));   // ★BJ705-G26 件4
   }
   return invBgImg;
 }

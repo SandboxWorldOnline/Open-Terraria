@@ -93,16 +93,26 @@ function armDash(p: Player, w: World): void {
   expect(p.releaseDash).toBe(true);
 }
 
-/** 滑行参数模拟（与实现同序同运算）：触发后落冷却档前的阻尼拍数（BJ524 同款） */
-function glideSim(v0: number, num13: number, num14: number, num15: number, num16: number): number {
+/** 滑行参数模拟（与实现同序同运算）：触发后落冷却档前的阻尼拍数（BJ524 同款;
+ *  ★BJ705-G26 [g25-glide-else-friction] 清偿随迁:fr=每滑行拍 HM else 摩擦值,
+ *  number[] 逐拍序列尾值续航——绳上滑行=落绳拍(静挂 vy=0)接地 −0.2、余拍悬空 −0.1） */
+function glideSim(v0: number, num13: number, num14: number, num15: number, num16: number,
+  fr: number | number[] = 0): number {
+  const seq = Array.isArray(fr) ? fr : null;
+  const frAt = (i: number): number => (seq ? seq[Math.min(i - 1, seq.length - 1)] : (fr as number));
   let vx = v0; let n = 0;
-  while (Math.abs(vx) > num13) { vx *= num14; n++; }
-  while (Math.abs(vx) > num15) { vx *= num16; n++; }
-  return n;
+  for (;;) {
+    const f = frAt(n + 1);
+    if (vx > f) vx -= f; else if (vx < -f) vx += f; else vx = 0;
+    if (Math.abs(vx) > num13) { vx *= num14; n++; continue; }
+    if (Math.abs(vx) > num15) { vx *= num16; n++; continue; }
+    return n;
+  }
 }
 
 // 克盾 dash2 裸装钉值：14.5 起步、12/0.985、num15=3、0.94、冷却 30（:21455-21459 区）
-const DASH2_GLIDE = glideSim(14.5, 12, 0.985, 3, 0.94);
+// ★BJ705-G26 摩擦时间线:落绳拍接地 0.2+余拍悬空 0.1（纯阻尼 36 → 26 拍）
+const DASH2_GLIDE = glideSim(14.5, 12, 0.985, 3, 0.94, [0.2, 0.1]);
 
 describe('BJ527① 绳上发起冲刺（中段绳柱,branch1 门 this.pulley）', () => {
   it('发起拍 vx=14.5/dashDelay=-1/eocDash=15 且仍钉绳;次拍 :26475 落绳续滑至冷却 30 回就绪', () => {
@@ -127,6 +137,8 @@ describe('BJ527① 绳上发起冲刺（中段绳柱,branch1 门 this.pulley）'
     expect(p.pulley).toBe(false);                     // :26475 velocity.X≠0 → 落绳
     expect(p.dashDelay).toBe(-1);                     // 滑行离绳照常续跑（:26958 支）——
     //                                                本拍已吃滑行阻尼第 1 拍（主移动支同拍接管）
+    expect(p.vx).toBeCloseTo((14.5 - 0.2) * 0.985, 12);   // ★BJ705-G26:落绳拍主移动支
+    //  HM else 摩擦(静挂拍末 vy=0 → 接地 −0.2)+阻尼同拍（发起拍绳支无摩擦=14.5 原值）
     injectDash(p, false);
     for (let i = 2; i <= DASH2_GLIDE; i++) {
       tick(p, w);

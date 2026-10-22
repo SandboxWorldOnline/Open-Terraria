@@ -449,8 +449,8 @@ describe('BJ704-G16 F 结构锁', () => {
     expect(mountsSrc).toContain('case 52:');
     expect(mountsSrc).toContain('if (state === FRAME_SWIMMING) state = FRAME_IN_AIR;');
   });
-  it('F6 债⑥ sandStorm 承载:加速线+两转向门', () => {
+  it('F6 债⑥ sandStorm 承载:加速线+转向门（★BJ705-G25:滑行朝向 else-if 支退役后 1 处——主块 :19963-77 位承载,滑行照跑同语义）', () => {
     expect(playerSrc).toContain('if (sandStormActive) { runAcc *= 1.5; maxRun *= 2; }');
-    expect(playerSrc.match(/&& !sandStormActive\) this\.facing = ix/g)?.length).toBe(2);
+    expect(playerSrc.match(/&& !sandStormActive\) this\.facing = ix/g)?.length).toBe(1);
   });
 });

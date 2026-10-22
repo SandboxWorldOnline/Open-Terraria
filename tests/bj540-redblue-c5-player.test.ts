@@ -358,10 +358,12 @@ describe('C5-B7 湿支暴雪瓶 ×1.5 乘数', () => {
     p.inputJump = true;
     tick(p, w);
     expect(p.performingJump).toBe('Blizzard');
-    p.inputJump = false;
-    tick(p, w);
+    tick(p, w);   // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
     expect(p.jumpHold, '湿表 Blizzard ×1.5：round(30×1.5)-2（旧镜像表 1.5→1.4 变异零判别=本组根断）')
       .toBe(Math.round(30 * 1.5) - 2);
+    p.inputJump = false;
+    tick(p, w);
+    expect(p.jumpHold).toBe(0);   // ★BJ705-G23:松键即清（:21201-08;旧耗尽制=43 续跑）
   });
 });
 

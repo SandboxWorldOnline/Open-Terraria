@@ -95,27 +95,40 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
   });
 
   describe('① RainbowRodHit(5) — Spawn_RainbowRodHit :3462-3512', () => {
-    it('收编本体：六掷双层虹彩 sparkle(life60) + 24×d267 双层尘 noGravity', async () => {
+    it('收编本体：六掷双层虹彩 prettySparkle(ttl60/rot π/2/APF) + 24×d267 双层尘 noGravity', async () => {
       const { rainbowRodHitFx } = await import('../src/fx/orchestraFx');
       const { g, particles, dusts } = mkGame();
       rainbowRodHitFx(g, 100, 90, 2, -4);
-      // 六掷 ×2（彩色 rgb 层 + 白核 rgba）=12 粒调用组,寿命统一 60t（num5 衰减窗）
-      const grouped = particles.filter((p) => p.opts.life === 60);
-      expect(grouped.length).toBeGreaterThanOrEqual(12);
-      expect(particles.some((p) => String(p.color).startsWith('rgb('))).toBe(true);
-      expect(particles.some((p) => String(p.color).startsWith('rgba(255'))).toBe(true);
+      // ★BJ704-G24（件4 族一致性迁移）：sparkle 走 spawnDust prettySparkle 专用档
+      //  （princess/stardust R3 同款）——六掷 ×2（彩色 hsl 层 + 白核）=12 粒,
+      //  Rotation=π/2（:3472）、ttl=60（num5）、APF 角向项活值（:3478,princess
+      //  覆写族不同构）;白核 Color=(255,255,255,0) 无掷（:3488）。
+      const sparkle = dusts.filter((d) => (d.ret as unknown as { prettySparkle?: boolean }).prettySparkle);
+      expect(sparkle.length).toBe(12);
+      expect(sparkle.every((d) => (d.ret as unknown as { ttl: number }).ttl === 60)).toBe(true);
+      expect(sparkle.every((d) => Math.abs((d.ret as unknown as { rotation: number }).rotation - Math.PI / 2) < 1e-9)).toBe(true);
+      expect(sparkle.every((d) => typeof (d.ret as unknown as { ax: number }).ax === 'number')).toBe(true);
+      const colored = sparkle.filter((d) => (d.ret as unknown as { color: { a: number } | null }).color?.a === 255);
+      const white = sparkle.filter((d) => (d.ret as unknown as { color: { r: number; g: number; b: number; a: number } | null }).color?.a === 0);
+      expect(colored.length).toBe(6);          // 彩色层 hsl tint
+      expect(white.length).toBe(6);            // 白核 (255,255,255,0)
+      // 近似档退役：spawnParticles 方块近似零调用（旧 12 粒 life60 面）
+      expect(particles.filter((p) => p.opts.life === 60).length).toBe(0);
       // 尘面：12×d267 + CloneDust 白影 12 = 24,noGravity（Main.dust[num6].noGravity :3509）
-      expect(dusts.length).toBe(24);
-      expect(dusts.every((d) => d.type === 267 && d.ret.noGravity)).toBe(true);
+      const d267 = dusts.filter((d) => d.type === 267);
+      expect(d267.length).toBe(24);
+      expect(d267.every((d) => d.ret.noGravity)).toBe(true);
+      expect(dusts.length).toBe(36);           // 24 尘 + 12 sparkle
     });
 
-    it('type 触发真派发：远端复放同款体（尘面 +24/sparkle 组翻倍）', async () => {
-      const { g, particles, dusts } = mkGame();
+    it('type 触发真派发：远端复放同款体（尘面 +36/prettySparkle +12）', async () => {
+      const { g, dusts } = mkGame();
       const beforeDust = dusts.length;
-      const beforeSparkle = particles.filter((p) => p.opts.life === 60).length;
+      const beforeSparkle = dusts.filter((d) => (d.ret as unknown as { prettySparkle?: boolean }).prettySparkle).length;
       mkApply(g)(ParticleOrchestraType.RainbowRodHit, 100, 90, 2, -4, 0);
-      expect(dusts.length).toBe(beforeDust + 24);
-      expect(particles.filter((p) => p.opts.life === 60).length).toBeGreaterThan(beforeSparkle);
+      expect(dusts.length).toBe(beforeDust + 36);
+      expect(dusts.filter((d) => (d.ret as unknown as { prettySparkle?: boolean }).prettySparkle).length)
+        .toBe(beforeSparkle + 12);
     });
   });
 

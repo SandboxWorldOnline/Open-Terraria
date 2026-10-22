@@ -186,12 +186,29 @@ export function rainbowRodHitFx(
     const offX = off.x * scale, offY = off.y * scale;     //  线性盘,单掷双分量共享（双层 sparkle 同位）
     const life = 60;                                      // num5（:3475 衰减窗=寿命）
     const px = x + offX, py = y + offY;
-    // 彩色层（:3476-3489）+ 白色核（:3490-3500，scale×0.6）
-    game.spawnParticles?.(px, py, orchestraHslCss((hueBase + rng() * 0.33) % 1, 1,
-      0.4 + rng() * 0.25), 1, Math.abs(spd),
-      { life, vx, vy, size: 2.4 * scale });
-    game.spawnParticles?.(px, py, 'rgba(255,255,255,0.85)', 1, Math.abs(spd),
-      { life, vx, vy, size: 1.44 * scale });              // ×0.6 白影
+    // 彩色层（:3476-3484）+ 白色核（:3485-3492，scale×0.6）
+    // ★BJ704-G24（件4,G2 登记「族一致性」清偿）：spawnParticles 单标量方块近似
+    //  退役 → spawnDust prettySparkle 专用档（princess/stardust R3 已迁,本站随族；
+    //  update 早退=APF+TTL,drawSparkleArms 双轴星芒承载）。原版 PrettySparkle：
+    //  Velocity=f̂×vector3+vector（终值）、APF=f̂×−(vector3/num5)−vector/60
+    //  （:3478——角向项【不】被二次连写覆写=活值,princess :3376 覆写族不同构）、
+    //  ColorTint=hsl A=0/白核 (255,255,255,0)、Rotation=π/2、Scale=vector2
+    //  （白核 ×0.6）、TTL 池缺省 60。掷序不变（jit/scale/ang/circ2/彩 tint2
+    //  =7/k,白核零掷=128 掷账不动）。
+    const mkPS = (tint: { r: number; g: number; b: number; a: number } | null, szMul: number): void => {
+      // ★R3 ① 同族：perfect=true——原版 PrettySparkle 不入 Dust 池,
+      //  LocalPosition/Velocity 精确直装（:3477/:3481）→ 消解 NewDust 的
+      //  +4/+4 位偏与 ±2 速抖（prettySparkle 载体分支零掷直写）。
+      const sp = game.spawnDust?.(px, py, 0, 0, 0, vx, vy, 0, tint, scale * szMul, true, true, true);
+      if (!sp) return;
+      sp.prettySparkle = true; sp.ttl = life;
+      sp.scaleX = scale * szMul; sp.scaleY = scale * szMul;
+      sp.rotation = Math.PI / 2;                          // :3472 rotation（双层同值）
+      sp.ax = -(Math.cos(ang) * spd) / life - (moveX * jit) / 60;
+      sp.ay = -(Math.sin(ang) * spd) / life - (moveY * jit) / 60;
+    };
+    mkPS(hexToRgbArr(orchestraHslCss((hueBase + rng() * 0.33) % 1, 1, 0.4 + rng() * 0.25)), 1);
+    mkPS({ r: 255, g: 255, b: 255, a: 0 }, 0.6);          // ×0.6 白影（:3488 无掷）
   }
   // ---- 12 × d267 + CloneDust 白影（:3501-3511）----
   for (let i = 0; i < 12; i++) {

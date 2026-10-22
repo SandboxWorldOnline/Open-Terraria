@@ -23,6 +23,7 @@ import { BiomeBackground } from './BiomeBackground';
 import { menuThemeSnapshot } from '../mods/hooks';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { Clock } from '../world/World';
+import { lateImageRetry } from '../assets/lateImageRetry';
 import {
   colorOfTheSkies, setFrameAurora, setFrameAtmo, setFrameBiome, setFrameCloudDim,
   setFrameLightning, setFrameHorizon,
@@ -208,6 +209,23 @@ export class MenuBackground {
   /** 揭幕前冻结（mainFlow.showTitle(bgPaused)→resumeMenuBg 接线） */
   setPaused(on: boolean): void { this.paused = on; }
 
+  /** ★幕布期 z 抬升（2026-10-22 用户实报「渲染世界阶段动态背景早退」定谳修复）：
+   *  c10e 转正（2026-10-01 缺省开）后 Game 三画布（sky2D/glCanvas/主画布）全部
+   *  position:absolute（z-auto）且 attach() appendChild 到 root 末端——与本画布
+   *  （z-index:0，insertBefore firstChild）同处 z-auto/0 层，CSS 绘制序按 DOM
+   *  树序=三画布画在幕布【之上】，g.start() 首帧即整层埋掉幕布（读档「正在渲染
+   *  世界」期进度条与游戏画面同屏=动态背景「早退」体感；wbake 覆盖门要遮的
+   *  视口空白窗随之重新暴露）。c10e 转正前主画布是 static in-flow（绘制于全部
+   *  positioned 元素之下），z0 幕布才盖得住——三开压测批幕布设计成立的前提
+   *  即此，c10e 转正时未随迁（探针 scripts/_curtain-zorder-probe.mjs 窗内
+   *  elementFromPoint=game-main 坐实）。
+   *  修复=幕布期抬 z 0→5：盖过三画布（z-auto），低于 HUD（.sw-root z10,抑制期
+   *  照旧在上）/DOM 进度页（z290,HUD 抑制豁免件）/VUI（z300）。置位=mainFlow.
+   *  enterGame（g.start() 前——世界首帧起幕布恒在上）；复位=showTitle（实例
+   *  复用沿，防御 quitToMenu 于幕布窗内退出等路径）；stopMenu 销毁画布=天然
+   *  复位。标题态缺省 z0 语义零变化。 */
+  setCurtainMode(on: boolean): void { this.canvas.style.zIndex = on ? '5' : '0'; }
+
   // ---- ★IIIII218 生成屏背景动效（Main.UpdateMenu/DrawMenu 生成期分支 1:1）----
   /** 生成屏种子表现旗标（mainFlow.createWorldFlow 注入；null=标题态全部还原）。
    *  vanilla 语义：以下分支全部判 WorldGen.remixWorldGen / drunkWorldGen /
@@ -351,6 +369,7 @@ export class MenuBackground {
         const im = new Image();
         im.onload = () => { this.themeImgReady = true; };
         im.src = theme.background;
+        lateImageRetry(im, theme.background);   // ★BJ705-G26 件4:迟到单发重试
         this.themeImg = im;
       }
       const ctx = this.ctx;
@@ -373,6 +392,7 @@ export class MenuBackground {
           const im2 = new Image();
           im2.onload = () => { this.themeCinderReady = true; };
           im2.src = theme.cinderTex;
+          lateImageRetry(im2, theme.cinderTex);   // ★BJ705-G26 件4:迟到单发重试
           this.themeCinderImg = im2;
         }
       }

@@ -281,6 +281,25 @@ function fetchShell(req) {
 //     onerror 退避链/warm 轮询重试）自有恢复面,SW 级重试会在黑洞窗把并发 N 图
 //     放大成 2N 发请求风暴;超时 throw 落各分支既有 catch（离线回退/404 兜底）,
 //     缓存策略结构零变化。超时锚 8000 与 fetchShell 双侧同步（改必同改）。
+//   ★BJ704-G24（R12 note 登记 [fetchAsset-no-backoff-consumers] 定谳:维持登记,勿在此加重试）:
+//     R12 普查边界=「消费方自有退避」判语只覆盖高频面（atlas/Sfx/Audio/sky/noise
+//     10-15s TTL 或即重试;mod 纹理经 ensureVImage 继承）;【无退避】=DOM 装饰单发族
+//     ~14 处（MenuBackground 主题/余烬、ResourceBars/Fancy、Achievements、EmoteMenu、
+//     WorldCreation、AssetDownloadUI、CharCreation、Bestiary chrome、WorldSelect zenith、
+//     vanillaKit、RemasterRuntime.loadVanillaSheet、BiomeBackground.loadBg;TileHighlight=
+//     故意永久负缓存）——onerror 即 resolve 终态。风险面=首访+TTFB>8s 慢网（本包装
+//     abort）→ 无重触发消费方会话级空白。维持登记三证:
+//     ① 轻量刀（单发重试仅网络错）不覆盖登记面——TTFB>8s 表现=超时 abort 非
+//        网络错,网络错本身快败（连接拒绝/DNS,毫秒级）重试无收益;
+//     ② 超时重试在 SW 级=本注释 G8 风暴形状（黑洞窗 N→2N 挂死连接,MuG3 判例
+//        「误加重试→恰 1 发断言红」即锁死本形状）;
+//     ③ warm 路径已有单文件 ×3 重试（300/600ms 间隔,同 8s 界,最坏 ~24.8s/文件）
+//        → 慢网下缓存侧可自愈;残余空白面=无自然重触发的会话常驻菜单 × 首访 ×
+//        TTFB>8s 三重交叠,装饰性（非功能失效）,刷新即愈。
+//   ★BJ705-G26 件4（2026-10-22 页侧清偿）:上述「未来刀形状」已落地=页侧共享
+//     迟到单发重试 helper（src/assets/lateImageRetry.ts——15s 后/visibilitychange
+//     触发,重启同 URL 经消费方 onload 回填;挂起型/终态 onerror 型两接入）,本
+//     注记三证的 SW 级结论（勿在此加重试）不变。TileHighlight 仍故意不接入。
 function fetchAsset(req) {
   if (typeof AbortController === 'undefined') return fetch(req);   // 老内核退化=原行为
   const ctl = new AbortController();

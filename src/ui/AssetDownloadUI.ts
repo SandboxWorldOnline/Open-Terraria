@@ -7,6 +7,7 @@
 // 无圆角无渐变。
 import { assetCacheState, assetCacheEnvOff, assetPipelineFailure, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, buildAssetDiagReport, onAssetProgress, readSwTrace, retryAssetCacheInit, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
 import { Lang } from '../i18n/Lang';
+import { lateImageRetry } from '../assets/lateImageRetry';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
 function packedColor(v: number): string {
@@ -171,6 +172,7 @@ function ensurePanelBg(panel: HTMLElement): void {
   if (panelBg) { panel.style.backgroundImage = `url(${panelBg})`; return; }
   if (!panelBgImg && typeof Image !== 'undefined') {
     panelBgImg = new Image();
+    lateImageRetry(panelBgImg, 'sprites/vanilla/Inventory_Back13.png');   // ★BJ705-G26 件4:迟到单发重试
     panelBgImg.onload = () => {
       try {
         const img = panelBgImg!;

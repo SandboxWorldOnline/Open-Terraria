@@ -13,6 +13,7 @@ import type { Player } from '../entities/Player';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { PixelText } from '../vui/draw/PixelText';
 import { Lang } from '../i18n/Lang';
+import { lateImageRetry } from '../assets/lateImageRetry';
 
 /** 生命心排布局（DrawLife L43-56 纯逻辑，供单测） */
 export function classicLifeLayout(statLifeMax: number, statLifeMax2: number): {
@@ -38,6 +39,7 @@ function loadTex(name: string): HTMLImageElement {
   const img = new Image();
   img.onload = () => upgradeToBitmap(img, (b) => { UPG[name]?.forEach((cb) => cb(b)); });
   img.src = `sprites/vanilla-ui/${name}.png`;
+  lateImageRetry(img, `sprites/vanilla-ui/${name}.png`);   // ★BJ705-G26 件4:迟到单发重试
   return img;
 }
 const UPG: Record<string, Array<(b: ImageBitmap) => void>> = {};

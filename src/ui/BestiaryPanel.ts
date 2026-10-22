@@ -161,6 +161,7 @@ import spawnData from '../data/vanilla-bestiary-spawn.json';
 import { UISfx } from '../vui/UISfx';
 import { isBound } from '../core/Keybinds';
 import { bindMouseTextTip, hideMouseTextTip } from './MouseTextTip';   // ★BJ-C4-F3
+import { lateImageRetryDefer } from '../assets/lateImageRetry';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
@@ -949,7 +950,9 @@ function bstLoadImg(src: string): Promise<Img> {
   return new Promise((res, rej) => {
     const img = new Image();
     img.onload = () => res(img);
-    img.onerror = rej;
+    // ★BJ705-G26 件4:终态 onerror 型迟到单发重试（chrome 装饰面;表加载器
+    // bstLoadSheet 有 BST_FAIL_TTL 负缓存自愈——不接入,勿叠)
+    lateImageRetryDefer(img, src, () => rej());
     img.src = src;
   });
 }

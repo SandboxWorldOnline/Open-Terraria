@@ -293,7 +293,10 @@ describe('SW-FX40 域E：mount43 自动弹跳臂（:19909-19921;旧实现退化�
     p.fixedUpdate(1 / 60, game);
     // 拍内链：弹跳 -4.01 → 重力 +0.4 → 松键上升衰减 +0.01（:22435-22446）= -3.6
     expect(p.vy).toBeCloseTo(-3.6, 6);
-    expect(p.jumpHold).toBe(PLAYER_JUMP_TICKS - 1); // :19919 jump=15 → 平台段同拍 -1（:22446 计时器不受 controlJump 门）
+    // ★BJ705-G23 迁移:弹跳臂 :19919 jump=15 后,同拍 JumpMovement(:26945) else 支
+    // （controlJump=false——弹跳门本要求 !controlJump）松键即清 jump=0（:21201-08）
+    // ——纯冲量无平台段=vanilla 净效;旧期望 14 锁的是耗尽制旧面
+    expect(p.jumpHold).toBe(0);
   });
 
   it('E2 gd=-1 倒挂 quirk：num3=js·(-0.5)<2 钳 2 → vy=-2.01（变异=删钳 → 反号 本组红）', () => {

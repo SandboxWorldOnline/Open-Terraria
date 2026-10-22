@@ -23,7 +23,8 @@ const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 
 //  {0.6,0.95,0.95,0.75};1405:25 同前三维）——旧 {0.5,0.9,0.8} 系误抄【复古光照路】
 //  oldDrawWater 的水基 0.5（Main.cs:58528 num17=0.5f,仅 Lighting.NotRetro=false 才走）;
 //  本仓管线 = DrawNormalLiquids（NotRetro 现役路,:650 `num = Opacity × DEFAULT_OPACITY[Type]`,
-//  岩浆另 ×player.lavaOpacity 恒 1——熔岩潜水镜未移植,本文件浸润带注已登记）。
+//  岩浆另 ×player.lavaOpacity——★BJ705-G26 件3 起穿参落地（LiquidRenderer.cs:659
+//  case 1,缺省 1 恒等）。
 const DEFAULT_OPACITY = [0.6, 0.95, 0.95, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——微光 = DrawShimmer val×0.75（LiquidRenderer.cs:707）
 
 // ---- ★IIIII251 斜坡水缘波纹覆盖（用户明示偏差；★IIIII257 转正缺省 true）----
@@ -1624,6 +1625,12 @@ export function drawVanillaLiquids(
   /** ★liqgl gate 采集（warpOn 且批化时 bg/fg 都传 true:bg=足迹四边形收集替代
    *  fgCanvas 足迹画布;fg=水批段登记供 emitVanillaLiquidGate 重发射） */
   gateCapture?: boolean,
+  /** ★BJ705-G26 件3（[g20-buff305-lavavision] 清偿）:玩家 lavaOpacity（缺省 1=
+   *  未骑熔岩鲨/未渐隐恒等零扰动）。岩浆(vt=1) run α ×lavaOpacity ≙ LiquidRenderer
+   *  .cs:648-661 DrawNormalLiquids `num = Opacity × (bg?1:DEFAULT_OPACITY) …
+   *  case 1: num *= lavaOpacity`（bg/fg 两 pass 同乘,Min(1) 后置同式）;glint ADD
+   *  同乘（仓内波光面=液体本体 α 派生,渐隐期不悬挂）;微光/蜂蜜/水不乘。 */
+  lavaOpacity = 1,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -2133,7 +2140,8 @@ export function drawVanillaLiquids(
     if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ });
     // ★liqpolish fg 复用:bg 段登记（k=fg α 系数;溢出帧不录=fg 走构造原链）
     if (polish && isBackground && !_batOverflow && !_addOverflow && frameToken !== undefined) {
-      _bgBaseRuns.push({ img, key: k, start: s0, quads: nQ, k: DEFAULT_OPACITY[vt] ?? 0.6, cols });
+      // ★BJ705-G26 件3:岩浆段 fg α 系数叠 lavaOpacity（fg 复用臂缩放重发射消费）
+      _bgBaseRuns.push({ img, key: k, start: s0, quads: nQ, k: (DEFAULT_OPACITY[vt] ?? 0.6) * (vt === 1 ? lavaOpacity : 1), cols });
       _bgRunsFrame = frameToken;
     }
     runStart = _batN;
@@ -2629,7 +2637,8 @@ export function drawVanillaLiquids(
       if (batOn) {
         if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; runVt = vt; }
         if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height, dx0, dy0, dw, dh,
-          Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6))), null, 0)) {
+          // ★BJ705-G26 件3:岩浆 ×lavaOpacity（LiquidRenderer.cs:659 case 1,bg/fg 同乘,Min 后置）
+          Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)) * (vt === 1 ? lavaOpacity : 1)), null, 0)) {
           batched = true;
           // glint=ADD quad,须在本 tile 批段之后（层序）。★liqpolish 批化支延后收口
           // （ADD 环累积,pass 尾 flushAddRuns2DAndEmit——全基底段先于 ADD 段=重叠序:
@@ -2642,7 +2651,8 @@ export function drawVanillaLiquids(
         }
       }
       if (!batched) {
-        ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
+        // ★BJ705-G26 件3:岩浆 ×lavaOpacity（同批化支式,CPU 原链面）
+        ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)) * (vt === 1 ? lavaOpacity : 1));
         ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dx0, dy0, dw, dh);
       }
       if (doGlint) {
@@ -2651,7 +2661,7 @@ export function drawVanillaLiquids(
         //  'lighter' globalAlpha=ga 逐位同式）。ga≤0 跳过=旧 α=0 fillRect 等价。
         let glintCpu = true;
         if (polish && batOn && !_addOverflow) {
-          const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+          const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6) * (vt === 1 ? lavaOpacity : 1));   // ★G26 件3:岩浆渐隐同乘
           if (gaG > 0) {
             if (!_glOn) { _glOn = true; _glStart = _addN; _glQuads = 0; }
             if (batQuadAdd(0, 0, 1, 1, 1, 1, dx0, dy0, dw, dh, gaG, null, 0)) {
@@ -2665,14 +2675,14 @@ export function drawVanillaLiquids(
         if (glintCpu) {
           if (polish && batched) flushRun();   // shim solid rec 须在基底段后（polish 延后收口序）
           ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+          ctx.globalAlpha = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6) * (vt === 1 ? lavaOpacity : 1));   // ★G26 件3
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(dx0, dy0, dw, dh);
           ctx.globalCompositeOperation = 'source-over';
         }
       } else if (glintRec && glV > 0.03) {
         // ★liqpolish bg glint 记录（fg 复用重发射;ga 公式=fg 支逐字同式）
-        const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+        const gaG = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6) * (vt === 1 ? lavaOpacity : 1));   // ★G26 件3:岩浆渐隐同乘（fg 复用重发射同式）
         if (gaG > 0) {
           if (!_glOn) { _glOn = true; _glStart = _addN; _glQuads = 0; }
           if (batQuadAdd(0, 0, 1, 1, 1, 1, dx0, dy0, dw, dh, gaG, null, 0)) _glQuads++;
@@ -2936,13 +2946,23 @@ export function drawLiquidBehindTilesOnly(
    *  → 顶点色调制 SO quad 入基底环（=drawBand+multiply 的批化同构;偏差族=liqgl
    *  刀2 modulate 单式,AA 边 multiply 补正项缺席 census 登记）。 */
   batBand?: LiqBatchEmit | null,
+  /** ★BJ705-G26 件3（[g20-buff305-lavavision] 清偿）:玩家 lavaOpacity（缺省 1）。
+   *  岩浆基线 alpha=lavaOpacity（TileDrawing.cs:4116 case 1）+地表覆写门 lava
+   *  渐隐例外（:4125——渐隐相地表岩浆保持 fade 值,不强拉 1.0/0.9/0.6）。 */
+  lavaOpacity = 1,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
   //    代价太高,用户裁定保留);②:4171-4182 flag6 多水型混合 DrawPartialLiquid——
   //    依赖 Main.liquidAlpha[] 喷泉水型 crossfade 子系统(±0.2/帧过渡),本仓水型
   //    为瞬时切换无过渡态,该循环恒不触发=与"无喷泉过渡"的原版行为一致;
-  //  ③lavaOpacity(lavaVision 熔岩潜水镜未移植,恒用默认 1f)。
+  //  ③lavaOpacity——★BJ705-G26 件3（2026-10-22）[g20-buff305-lavavision] 清偿:
+  //    状态/斜坡/授予源已落 Player.ts（字段 lavaOpacity + 湿段 UpdateBuffs
+  //    :12140-12153 斜坡锚注,授予=ridingMount && mount.buff===305）;消费已全落
+  //    （本函数基线+地表门 ≙ TileDrawing.cs:4116/:4125;drawVanillaLiquids 岩浆
+  //    run/glint ×lavaOpacity ≙ LiquidRenderer.cs:659 DrawNormalLiquids case 1
+  //    ——现役 NotRetro 路,oldDrawWater :58539 为复古死路不另移植）。G24 强化
+  //    注记任务书就此销账。
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
   // ★liqpolish:旗面+末次查询 memo+每 pass tVis（微光带支逐 tile 读同值）
   const polishBand = liqpolish;
@@ -3429,10 +3449,17 @@ export function drawLiquidBehindTilesOnly(
 
       // ---- 不透明度(:4126-4151) ----
       // 地上=1.0(有墙压 0.6,墙 21→0.9);地下基线 0.5;
-      // 岩浆=lavaOpacity(默认 1f,lavaVision 未移植恒 1)/蜂蜜=max(0.5×1.7,1)=1
+      // 岩浆=lavaOpacity/蜂蜜=max(0.5×1.7,1)=1
+      // ★BJ705-G26（2026-10-22）[g20-buff305-lavavision] 清偿:穿参落地——
+      //  `lt===1 → alpha=lavaOpacity`（基线非 1.0,TileDrawing.cs:4116 case 1）+
+      //  地表覆写门 lava 渐隐例外 `!(lt===1 && lavaOpacity<1)`（:4125——渐隐相
+      //  地表岩浆保持 fade 值,不强拉 1.0/0.9/0.6;G24 强化注记任务书就此销账,
+      //  Player 斜坡/授予源随件3 落地,Renderer 六调用位穿参=本函数+drawVanilla
+      //  Liquids 各调用点）。
       let alpha = 0.5;
-      if (lt === 1 || lt === 2) alpha = 1.0;
-      if (y <= Math.floor(groundLevel)) {
+      if (lt === 1) alpha = lavaOpacity;
+      else if (lt === 2) alpha = 1.0;
+      if (y <= Math.floor(groundLevel) && !(lt === 1 && lavaOpacity < 1)) {
         alpha = 1.0;
         const wi = st.wall[i];
         if (wi === 21) alpha = 0.9;

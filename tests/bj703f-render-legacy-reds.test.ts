@@ -292,7 +292,13 @@ describe('BJ703-F §D 结构锁', () => {
     expect(body).toContain('const tinted = tintedTex(tex as never, [r, g, b], false);');
     expect(body).toContain('ctx.globalAlpha = a / 255;');
     expect(body).toContain("ctx.globalCompositeOperation = 'lighter';");
-    expect(body).toContain('★BJ703-F');
+    // ★BJ705-G26 件5 陈锁重锚（2026-10-22,测试侧,Renderer 代码零改）:并行
+    //   whipLineBatch 批（2026-10-21 万花筒掉帧刀）在 BJ703-F 头注与函数之间插入了
+    //   自带方法+注释块——「紧邻注释含标记」形被推翻一次（BJ705-A 移交件）。批收口
+    //   证据=whip 会话 Renderer 静默 >3h（01:29 后无写）+内容稳定。标记锚放宽为
+    //   函数前 4000 字符窗（BJ703-F 头注与在途批注释共存;勿回缩紧邻形）。
+    const head = src.slice(Math.max(0, i - 4000), i);
+    expect(head).toContain('★BJ703-F');
     // WhipProj 收集侧 1034 线色 = hslToRgb(0.6,1,0.5,20)×0.6 = (0,61,153,12)（:36718-36721）
     const whip = readFileSync(join(process.cwd(), 'src', 'entities', 'WhipProj.ts'), 'utf8');
     expect(whip).toContain('const WHIP_1034_LINE: RGBA = (() => {');

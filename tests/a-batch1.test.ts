@@ -177,13 +177,18 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
 
 // ============ 2 冲刺（DashMovement :20769-21265） ============
 describe('冲刺（DashMovement 1:1）', () => {
-  /** 双击触发序列：按下→松开→再按下（DoCommonDashHandle :21296-21320） */
+  /** 双击触发序列：按下→松开→再按下（DoCommonDashHandle :21296-21320）
+   *  ★BJ704-G24 夹具对齐 MV3 输入模型：双击沿=:9560-9563 单键按下沿
+   *  `inputRight && !prevInputRight`（≙ 原版 controlRight∧releaseRight,:21749）——
+   *  夹具须同拍注 inputRight/inputLeft（Game 注入面同式 inputX=right−left）。
+   *  旧 inputX 合值单注=零单键沿 → 冲刺恒不触发（MV3 2026-10-07 后陈旧夹具 5 红,
+   *  生产行为由 mv3-dual-key-press-edge 17 测守卫=非回归;变异恰红=回退本注即复红）。 */
   const doubleTap = (p: Player, w: World): void => {
-    p.inputX = 1;
+    p.inputX = 1; p.inputLeft = false; p.inputRight = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 0;
+    p.inputX = 0; p.inputLeft = false; p.inputRight = false;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    p.inputX = 1;
+    p.inputX = 1; p.inputLeft = false; p.inputRight = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
   };
   const mkNinja = (): { w: World; p: Player } => {
@@ -235,7 +240,9 @@ describe('冲刺（DashMovement 1:1）', () => {
     doubleTap(p, w);
     p.inputX = 1;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.vx).toBeCloseTo(16.9 * 0.992, 6);   // R5-F14：dash1(977 忍者装备)基础档 0.992,旧 0.985
+    // R5-F14：dash1(977 忍者装备)基础档 0.992,旧 0.985;★BJ705-G26 随迁:持键越帽
+    // 落 HM else 摩擦支（settle 接地 −0.2 先、阻尼 ×0.992 后——旧钉值=纯阻尼）
+    expect(p.vx).toBeCloseTo((16.9 - 0.2) * 0.992, 6);
     expect(p.dashDelay).toBe(-1);   // 仍滑行
   });
 

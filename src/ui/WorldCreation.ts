@@ -6,6 +6,7 @@ import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
 import { UISfx } from '../vui/UISfx';
+import { lateImageRetry } from '../assets/lateImageRetry';
 
 export interface WorldCreationFlow {
   onCreate(cfg: { name: string; seed: string; w: number; h: number; /** 尺寸档 0 小/1 中/2 大（SIZES 下标；GenConfig.size 直传，W/H 与之同源派生） */ size: number; difficulty: number; evil: -1 | 0 | 1 }): void;
@@ -321,6 +322,7 @@ export class WorldCreationPanel {
       const im = new Image();
       im.onload = () => draw();
       im.src = `sprites/vanilla-ui/${key}.png`;
+      lateImageRetry(im, `sprites/vanilla-ui/${key}.png`);   // ★BJ705-G26 件4
       this.previewImgs.set(key, im);
     }
     draw();
@@ -401,6 +403,7 @@ export class WorldCreationPanel {
       const im = new Image();
       im.onload = () => this.drawGlitchFrame();
       im.src = 'sprites/vanilla-ui/UI_WorldCreation_Seed_Everything.png';
+      lateImageRetry(im, 'sprites/vanilla-ui/UI_WorldCreation_Seed_Everything.png');   // ★BJ705-G26 件4
       this.glitchIm = im;
     }
     this.drawGlitchFrame();

@@ -331,7 +331,10 @@ describe('BJ704-G4 H 结构锁（Player.ts/Mounts.ts 源文本锚）', () => {
   it('湿重力段让位门 + 滑翔骑乘门 + 平台钉让位门（三处门表达式逐字）', () => {
     expect(playerSrc).toContain('if (!flying && !mountFlight && (this.rocketDelay === 0 || this.cced)) {');   // ★G16 CCed 平重力放行（vanilla :27005 无湿门）
     expect(playerSrc).toContain('!!eqWet.wing && wingsLogicW > 0 && this.wingTime <= 0');
-    expect(playerSrc).toContain('if (this.inputJump && !mountFlight) {');
+    // ★BJ705-G23 迁移:sustain 块重构后钉让位门=else-if(!inputJump) 松键清零支之后的
+    // 持键支内 `if (!mountFlight)`（inputJump 由分支承载——语义同旧双门合取）
+    expect(playerSrc).toContain('else if (!this.inputJump) {');
+    expect(playerSrc).toContain('if (!mountFlight) {');
   });
 
   it('Mounts.ts 61 飞行帧态门与 56 分立（:3370-3373 vs :3366-3369）', () => {

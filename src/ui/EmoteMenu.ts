@@ -15,6 +15,7 @@
 // Esc 关闭（capture 阶段拦截,防暂停键二次消费）。
 import { Lang } from '../i18n/Lang';
 import { EMOTE_NAMES } from '../data/vanillaEmotes';
+import { lateImageRetry } from '../assets/lateImageRetry';
 import { bindMouseTextTip } from './MouseTextTip';   // ★BJ-C4-F5
 
 /** 世界旗标视图（解锁门输入;hardMode 与 downed_* 双键并集见各门注释） */
@@ -227,6 +228,7 @@ export function openEmoteMenu(parent: HTMLElement, flow: EmoteMenuFlow): void {
       applyBorders();
     };
     borderImg.src = 'sprites/vanilla-ui/UI_EmoteBubbleBorder.png';
+    lateImageRetry(borderImg, 'sprites/vanilla-ui/UI_EmoteBubbleBorder.png');   // ★BJ705-G26 件4
   }
   const applyBorders = () => {
     if (idleUrl) overlay.style.setProperty('--border-idle', `url(${idleUrl})`);

@@ -34569,7 +34569,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (TILE_SOLID_TOP_FAMILY.has(st.type[i]) && !isPlat) return false;  // tileSolidTop 非平台=false
       return true;
     };
-    const fireWalk = p.equipStats.fireWalk || !!p.buffs?.obsidianSkin;   // :9576 黑曜石皮并档
+    const fireWalk = p.equipStats.fireWalk || !!p.buffs?.obsidianSkin   // :9576 黑曜石皮并档
+      // ★BJ704-G24（[g22-fw-conch-mirror] 清偿）：buff305 熔岩鲨第四源（UpdateBuffs
+      //  :9992-9998 fireWalk=true——TeleportHelpers.cs:256 TileIsDangerous→
+      //  Collision.cs:3233 CanTileHurt `TouchDamageHot && !player.fireWalk` 同读,
+      //  骑熔岩鲨+海螺+陨石/狱石地板落点不判危）。Player.fireWalkFx 同款镜像
+      //  （G22 g20-buff305-firewalk 姊妹面,本行=其登记残项）。
+      || (p.ridingMount && p.mount.buff === 305);   // buff305（mount 49）
     const dangerous = (x: number, y: number): boolean => {
       if (!st.inBounds(x, y)) return false;
       const i = st.idx(x, y);
