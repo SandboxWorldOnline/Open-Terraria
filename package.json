@@ -1,7 +1,7 @@
 {
   "name": "sandboxworld",
   "private": true,
-  "version": "0.1.75-beta",
+  "version": "0.1.76-beta",
   "type": "module",
   "scripts": {
     "dev": "node scripts/stamp-build.mjs && vite",
