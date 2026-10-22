@@ -841,6 +841,19 @@ export class VanillaDust {
           chainLink = true;
           break;
         }
+        case 306: {  // :1093-1105 帕鲁尘（Chillet 族坐骑尘）——★BJ707-A 补（BJ704-G18
+          //  doSpawnDust 落 306 发射方时整支缺 → 落 default 吃链 B 兜底,净 −0.05/t
+          //  vs 原版 −0.09/t（本支 −0.04 + 公共老化 −0.01 + 链 B 兜底 −0.04）≈2× 寿命
+          if (!d.noGravity) d.vy += 0.05;                // :1095-1098 自管重力 0.05（替通用 +0.1）
+          d.scale -= 0.04;                               // :1099
+          if (solidBoxAt && d.fadeIn === 0               // :1100-1104 实心格内收缩（SolidCollision(pos−(5,5),10,10)）
+            && solidBoxAt(d.x - 5, d.y - 5, 10, 10)) {
+            d.scale *= 0.9;
+            d.vx *= 0.25; d.vy *= 0.25;
+          }
+          chainLink = true;
+          break;
+        }
         default:
           break;
       }
@@ -1183,9 +1196,13 @@ export class VanillaDust {
       case 301: return { rgb: 0, a: 200 / 255, rgbv: [1, 50 / 255, 125 / 255] };
       case 305: return { rgb: 0, a: 200 / 255, rgbv: [200 / 255, 50 / 255, 200 / 255] };
       case 304: return { rgb: 1, a: num };                                      // :2530 White×num
-      case 306: {                                                               // :2534-2536 this.color×num（四通道）
+      case 306: {   // :2534-2536 this.color×num（四通道）
+        // ★BJ707-A（2026-10-22 用户实报「疾旋鼬坐骑召唤/取消黑粒子」域修：rgbv/a 须
+        //  归一 0-1（曾裸 0-255——dustPremulPair clamp(1) 后 a 顶满 255、rgbv 无人消费
+        //  （Renderer 本体 pass 只吃标量 rgb=0）→ 黑色剪影尘。首活跃发射方=Mount
+        //  doSpawnDust 62-65 支（BJ704-G18）+ dash6 滑行尾尘（本刀接入））
         const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
-        return { rgb: 0, a: c.a * num, rgbv: [c.r * num, c.g * num, c.b * num] };
+        return { rgb: 0, a: (c.a / 255) * num, rgbv: [(c.r / 255) * num, (c.g / 255) * num, (c.b / 255) * num] };
       }
       case 292: return { rgb: 1, a: 1 };                                        // :2538-2539 Color.White
       case 259: return { rgb: 230 / 255, a: 230 / 255 };                        // :2542-2543 (230,230,230,230)（lunar 活发射方）
@@ -1203,9 +1220,9 @@ export class VanillaDust {
         const c157 = Math.min(255, Math.trunc(Math.fround(255 * n7)) + 50);
         return { rgb: c157 / 255, a: Math.trunc(Math.fround(100 * n7)) / 255 };
       }
-      case 284: {                                                               // :2724-2728 newColor×color 四通道,A=color.A
+      case 284: {   // :2724-2728 newColor×color 四通道,A=color.A（★BJ707-A 同族域修:归一 0-1;dormant 零发射方）
         const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
-        return { rgb: 0, a: c.a, rgbv: [c.r, c.g, c.b] };
+        return { rgb: 0, a: c.a / 255, rgbv: [c.r / 255, c.g / 255, c.b / 255] };
       }
       // 270/271/219-223/226/272/228 = Lerp(light,White,x) 仿射光面 → rgb=1 全亮基底
       // 备案（同 229 口径,光色由管线逐像素交付;A 常量精确）。219/220 活发射方
@@ -1232,13 +1249,20 @@ export class VanillaDust {
     }
   }
 
-  /** GetColor（:2773-2817 加性钳位）：second pass 色（尘自定义色与基色的叠加） */
-  static colorPass(d: VDust, baseRgb: number, baseA: number): DustColor | null {
+  /** GetColor（:2773-2817 加性钳位）：second pass 色（尘自定义色与基色的叠加）。
+   *  ★BJ707-A：baseRgbv（alphaOf 逐通道档,306 帕鲁尘首消费）——GetColor 的入参
+   *  newColor=GetAlpha 产物,逐通道档须逐通道减（vanilla :2807-2810 逐通道
+   *  color.ch−(255−newColor.ch)）;标量档缺省 undefined → 三通道同取 baseRgb 零回归。 */
+  static colorPass(d: VDust, baseRgb: number, baseA: number,
+    baseRgbv?: readonly [number, number, number]): DustColor | null {
     if (!d.color) return null;
+    const br = baseRgbv ? baseRgbv[0] : baseRgb;
+    const bg = baseRgbv ? baseRgbv[1] : baseRgb;
+    const bb = baseRgbv ? baseRgbv[2] : baseRgb;
     return {
-      r: clamp255(d.color.r - (255 - baseRgb * 255)) / 255,
-      g: clamp255(d.color.g - (255 - baseRgb * 255)) / 255,
-      b: clamp255(d.color.b - (255 - baseRgb * 255)) / 255,
+      r: clamp255(d.color.r - (255 - br * 255)) / 255,
+      g: clamp255(d.color.g - (255 - bg * 255)) / 255,
+      b: clamp255(d.color.b - (255 - bb * 255)) / 255,
       a: clamp255(d.color.a - (255 - baseA * 255)) / 255,
     };
   }
@@ -1259,11 +1283,15 @@ function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
   // 与 6/15/59-64 同入全亮桶（光照合成后绘制）
   // ★双轴通道（PrettySparkle 编排粒子族）：原版画在 ParticleSystem_World_OverPlayers
   // （光照合成之后的独立加色层,不受 tile 光照）→ 恒入全亮桶
+  // ★BJ707-A：306 帕鲁尘（Chillet 族坐骑/冲刺尘）入全亮桶——GetAlpha :2534-2536
+  //  `return this.color*num` 不读 newColor（光照入参整弃）=自色尘;落 lit 桶会被
+  //  compositeLight 逐像素乘光=暗处双重压黑。首发射方=Mount doSpawnDust 62-65 支。
   // ★D12(2026-10-13):mod 尘 fullbright 声明(400+ 段;原版域先短路,零 mod 零开销)
   // ★D12 余债:mod 尘(modType 在册)=声明 fullbright 唯一权威——运动档重写后的
   //  d.type 原版桶位(6/15/59-64/331)不传染(mod 声明 lit 即 lit)
   const fb = d.modType !== undefined ? modDustFullbright(d.modType)
     : d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64) || d.type === 331
+      || d.type === 306
       || d.scaleX !== undefined || d.scaleY !== undefined
       || (d.type >= 400 && modDustFullbright(d.type));
   return wantFb === fb;

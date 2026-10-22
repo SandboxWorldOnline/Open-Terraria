@@ -10337,7 +10337,10 @@ export class Renderer {
       dbA?.flush();   // ★尘批交错边界（premul 本体段前=A=0 支落空到达处）
       // 本体 pass（GetAlpha 精确通道）——预乘烘焙对（本体+通用拖影共用一份,
       //  拖影只是重画同色;264 ×0.3 档走 mul 参数,不另烘）
-      const pair = this.dustPremulPair(img, d.fx, d.fy, rgb, rgb, rgb, a);
+      // ★BJ707-A：mR/mG/mB 逐通道（rgbv 档=306 帕鲁尘首消费——GetAlpha 返
+      //  this.color×num 逐通道色,标量 rgb(=0) 烘出的黑底曾把坐骑尘画成黑色剪影;
+      //  标量档 mR≡mG≡mB≡rgb 逐位恒等零回归）
+      const pair = this.dustPremulPair(img, d.fx, d.fy, mR, mG, mB, a);
       // 速度拖影链（★2026-08-24 r15 R15-20：M57:39537-39658 if/else-if 六族——
       //   本体绘制前的残影带,通式 i<min(10,(|vx|+|vy|)·0.3·10)、位置−velocity·i、
       //   scale×(1−i/10)、origin(4,4)）：
@@ -10467,8 +10470,13 @@ export class Renderer {
       }
       // 自定义色 pass（GetColor :2773：clamp(color.ch − (255 − base.ch)) 后再乘贴图）
       //  ——GetColor 是第二次独立 SpriteBatch.Draw：同预乘语义,同烘焙对（独立档）
-      const cp = VanillaDust.colorPass(d, rgb, a);
-      if (cp && (cp.a > 0.004)) {
+      // ★BJ707-A：①rgbv 逐通道 base 透传（306 帕鲁尘 GetAlpha=逐通道色,标量 base
+      //  会把 g/b 通道钳成 0=丢加性青光二程）;②门槛补 A=0 纯加性档（vanilla
+      //  :39697 `color.PackedValue != 0` =【任一通道】非零即画——旧 `cp.a > 0.004`
+      //  只看 α,RGB 非零 α=0 档（306 GetColor=(0,145,195,0)）整程漏画;A=0 预乘对
+      //  自身即纯加法语义,dustPremulBake e<0.5 二值档承接——43/66 直绘支同判据）
+      const cp = VanillaDust.colorPass(d, rgb, a, rgbv);
+      if (cp && (cp.a > 0.004 || Math.max(cp.r, cp.g, cp.b) > 0.004)) {
         const cpPair = this.dustPremulPair(img, d.fx, d.fy, cp.r, cp.g, cp.b, cp.a);
         ctx.save();
         ctx.translate(px, py);

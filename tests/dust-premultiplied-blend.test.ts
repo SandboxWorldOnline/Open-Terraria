@@ -427,8 +427,12 @@ describe('BJ342 ND5 GetAlpha 全表补缺金标', () => {
     }
     expect(VanillaDust.alphaOf(nd(269))).toEqual({ rgb: 1, a: 25 / 255 });   // 与 229 同句 :2687
     expect(VanillaDust.alphaOf(nd(259))).toEqual({ rgb: 230 / 255, a: 230 / 255 });
-    expect(VanillaDust.alphaOf(nd(306, { alpha: 100, color: { r: 1, g: 0.5, b: 0.25, a: 1 } })))
-      .toEqual({ rgb: 0, a: num(100), rgbv: [num(100), 0.5 * num(100), 0.25 * num(100)] });   // this.color×num 四通道
+    // ★BJ707-A 域勘误（2026-10-22）：VDust.color 契约=0-255（doSpawnDust 62-65/
+    //  dash6 尾尘/colorPass/331 全消费面同域）——旧夹具误用 0-1 域 color 恰好把
+    //  裸域 bug（rgbv=c.ch×num 未归一）锁成"正确"。夹具订正 0-255 域,期望值
+    //  归一语义不变（rgbv/a=[c.ch/255]×num）。
+    expect(VanillaDust.alphaOf(nd(306, { alpha: 100, color: { r: 255, g: 128, b: 64, a: 255 } })))
+      .toEqual({ rgb: 0, a: num(100), rgbv: [num(100), (128 / 255) * num(100), (64 / 255) * num(100)] });   // this.color×num 四通道
     expect(VanillaDust.alphaOf(nd(263, { color: { r: 255, g: 0, b: 0, a: 64 } })))
       .toEqual({ rgb: 0.5, a: (8 / 255) * 0.5 });   // 与 264 同句 :2558
   });
@@ -458,8 +462,9 @@ describe('BJ342 ND5 GetAlpha 全表补缺金标', () => {
     }
     expect(VanillaDust.alphaOf(nd(71))).toEqual({ rgb: 200 / 255, a: 0 });
     expect(VanillaDust.alphaOf(nd(72))).toEqual({ rgb: 200 / 255, a: 200 / 255 });
-    expect(VanillaDust.alphaOf(nd(284, { color: { r: 0.8, g: 0.6, b: 0.4, a: 0.5 } })))
-      .toEqual({ rgb: 0, a: 0.5, rgbv: [0.8, 0.6, 0.4] });   // newColor×color,A=color.A
+    // ★BJ707-A 域勘误（同 306 条注：夹具 color 订正 0-255 契约域）
+    expect(VanillaDust.alphaOf(nd(284, { color: { r: 204, g: 153, b: 102, a: 128 } })))
+      .toEqual({ rgb: 0, a: 128 / 255, rgbv: [204 / 255, 153 / 255, 102 / 255] });   // newColor×color,A=color.A
     expect(VanillaDust.alphaOf(nd(327))).toEqual({ rgb: 1, a: 1 });   // 夜相面（dormant,isDay 二相判别接线时补）
   });
 });

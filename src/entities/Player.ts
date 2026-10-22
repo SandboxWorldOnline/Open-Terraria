@@ -532,10 +532,19 @@ export function beetleOrbDrawPlan(
  *  无 vy 分支,s1.7、vel×0.1、scale×(1+Next(20)×.01)、noGravity、套染料、
  *  50% fadeIn .5（Next(2)==0））；dash5=2×d68/69/70（num32/num33 同值、vel×0.2、
  *  scale×(1+..)、fadeIn=.5+Next(20)×.01、noGravity、套染料）。
+ *  ★BJ707-A dash6=8×d306（:21529-21548,Chillet 62-65 滑行尾尘——仅在【同向滑行拍】
+ *  发射:收敛拍(反向/下鞍)vanilla 落 dashDelay=30 支零尘;调用位=dashMovement m6
+ *  收敛判定后）。盒=(x+facing×80, y+12)×(w, h−20)、α100 s1、vel×1.5、
+ *  scale×(1+Next(40)×.01)、fadeIn=.5+Next(20)×.01、noGravity、velX+=facing×1.5、
+ *  color=Lerp((229,178,255)→White,f³)（63/65 Ignis=Lerp((255,178,127)→White,f³)）
+ *  ——XNA Color(float) 构造 0.9/0.7/1×255 截断=229/178/255,Lerp 逐通道含 A=255。
+ *  坐骑染料 shader（GetSecondaryShader(cMount)）缺省 cMount=0=null——仓内无坐骑
+ *  染料槽位=缺省相零建模（登记:接线须随 miscDyes[3] 一并）。
  *  其余 dash 档零尘（dash2 循环 m<0/dash4 死支）。返回实发粒数。 */
 export function emitDashSlideDust(
   pool: BJ595DustPool | undefined,
-  p: { x: number; y: number; w: number; h: number; vx: number; vy: number },
+  p: { x: number; y: number; w: number; h: number; vx: number; vy: number;
+    facing?: number; mount?: { type: number } | null },
   dash: number, dyeVid: number, rand: () => number = Math.random,
 ): number {
   if (!pool) return 0;
@@ -586,6 +595,29 @@ export function emitDashSlideDust(
         d.fadeIn = 0.5 + Math.floor(rand() * 20) * 0.01;
         d.noGravity = true;
         d.dyeVid = dyeVid;
+        n++;
+      }
+    }
+    return n;
+  }
+  if (dash === 6) {
+    // ★BJ707-A dash6 Chillet 滑行尾尘（:21531-21548 同向滑行支 8×d306/拍）
+    const facing = p.facing ?? 1;
+    const ignis = p.mount?.type === 63 || p.mount?.type === 65;
+    let n = 0;
+    for (let i = 0; i < 8; i++) {
+      const d = pool.spawn(p.x + facing * 80, p.y + 12, p.w, p.h - 20, 306, 0, 0, 100, null, 1);
+      if (d) {
+        d.vx *= 1.5; d.vy *= 1.5;                       // :21535 velocity *= 1.5f
+        d.scale *= 1 + Math.floor(rand() * 40) * 0.01;  // :21536 Next(40)×0.01
+        d.fadeIn = 0.5 + Math.floor(rand() * 20) * 0.01;   // :21537 .5+Next(20)×.01
+        d.noGravity = true;                             // :21538
+        d.vx += facing * 1.5;                           // :21540
+        const t3 = rand() ** 3;                         // :21541-21542 num38³ Lerp 权
+        // Color.Lerp 逐通道 (int) 截断（XNA Color.Lerp）:a=(229,178,255)/(255,178,127),b=White
+        d.color = ignis
+          ? { r: 255, g: Math.trunc(178 + 77 * t3), b: Math.trunc(127 + 128 * t3), a: 255 }
+          : { r: Math.trunc(229 + 26 * t3), g: Math.trunc(178 + 77 * t3), b: 255, a: 255 };
         n++;
       }
     }
@@ -9595,7 +9627,11 @@ export class Player extends Entity {
       // dash4=原版死支（dashType=4 无赋值面,1457 全树 grep）不落、dash2 循环 m<0 死支
       // 不落）。逐参在 emitDashSlideDust 单源（tests/bj595+tests/bj594 直测）。
       // adjustDashDustMethod（坐骑委托改尘位,:21439 等 6 站）本仓无委托面未建模=登记。
-      emitDashSlideDust(game.vanillaDust, this, this.dashLatched, this.armorSetDyeVid());
+      // ★BJ707-A：dash6（Chillet）不在此位发射——vanilla :21519-21550 dash==6 支
+      // 的尾尘在【收敛判定后】的同向 else 臂（收敛拍落 dashDelay=30 支零尘）,见下方 m6 块。
+      if (this.dashLatched !== 6) {
+        emitDashSlideDust(game.vanillaDust, this, this.dashLatched, this.armorSetDyeVid());
+      }
       // ★606:mod dash 滑行期钩(MidDashEffects 同位)
       if (modDashLatched?.midDash) modDashLatched.midDash(this, (globalThis as { __swGame?: unknown }).__swGame);
       // 滑行阻尼（:20970-21113）：|vx|>12 → ×0.985；否则 |vx|>max(accRunSpeed,
@@ -9638,7 +9674,12 @@ export class Player extends Entity {
           m6Ended = true;
           this.vx *= 0.3;                  // velocity.X *= 0.3f（:21525）
         } else {
-          // 同向滑行：尘/光照段未建模视觉面；dashDelay 保持 -1 继续阻尼
+          // ★BJ707-A 同向滑行尾尘（:21527-21548 else 臂 8×d306/拍——曾整段
+          //  「未建模视觉面」=冲刺零尾焰,用户实报「冷却感觉比原版长」的体感主源
+          //  （时序机本体 1:1:实测全周期 51 拍≈手算 vanilla 52,冷却 20/收敛 30）。
+          //  光照段（:21530 AddLight(0.5,0.1,0.6)/(0.6,0.3,0.1)）在 mountLights
+          //  case 62-65 渲染端承载（p.dash>0∧dashDelay<0 同门同拍）。dashDelay 保持 -1 继续阻尼。
+          emitDashSlideDust(game.vanillaDust, this, 6, this.armorSetDyeVid());
         }
       }
       // ★F1 滑行参数基础档化：覆写表按【滑行发起源的 dash 档】查（原文 num13-17 只认

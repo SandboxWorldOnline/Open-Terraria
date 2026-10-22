@@ -3034,6 +3034,19 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
       }
       break;
     }
+    case 62: case 63: case 64: case 65: {
+      // ★BJ707-A dash6 滑行光晕（Player.cs:21529-21530 DashMovement 同向滑行支逐拍
+      //  AddLight(Center,rgb)——62/64 紫晕 (0.5,0.1,0.6) / 63/65 Ignis 橙晕 (0.6,0.3,0.1)）。
+      //  门=p.dash>0∧p.dashDelay<0（同向滑行拍——收敛拍 dashDelay 已落 30 自然排除,
+      //  ≙原文 dash==6 else 臂;渲染帧采样与 7/23/9/46 同口径）。尾尘在 Player.
+      //  dashMovement m6 块（emitDashSlideDust dash6 支 8×d306/拍）。
+      if ((p.dash ?? 0) > 0 && (p.dashDelay ?? 0) < 0) {
+        const ignis = m.type === 63 || m.type === 65;
+        out.push({ tx: ctxTile, ty: ctyTile,
+          r: ignis ? 0.6 : 0.5, g: ignis ? 0.3 : 0.1, b: ignis ? 0.1 : 0.6 });
+      }
+      break;
+    }
     case 12: {
       // 增益态液色光（:5038-5056）：Colors.CurrentLiquidColor 透明档——11 层
       // liquidAlpha 全 0 → Color.Transparent → 光贡献归零（ctx.liquidColor=null

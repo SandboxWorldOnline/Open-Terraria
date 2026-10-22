@@ -285,7 +285,9 @@ describe('BJ595 面 A1/A3：冲刺滑行拖尘（Player.cs:21440-21452/21501-215
   it('dash 2/4/0 → 零尘（死支 dash2 循环 m<0、dash4 无赋值面；dash3 已由 BJ594 落位移出本锁）', () => {
     // ★BJ594（2026-10-10）：dash3 日耀滑行 4×尘6 落位（:21461-21478）——
     // 原「dash 2/3/4/0 零尘」锁中 3 已移出,判别面归 tests/bj594 直测。
-    for (const dash of [0, 2, 4, 6]) {
+    // ★BJ707-A（2026-10-22）：dash6 Chillet 滑行 8×尘306 落位（:21527-21548）——
+    // 6 移出零尘锁,判别面归 tests/bj707a-chillet-dust-cooldown.test.ts §2 直测。
+    for (const dash of [0, 2, 4]) {
       const pool = stubPool();
       expect(emitDashSlideDust(pool, P, dash, -1, seeded(4)), `dash=${dash}`).toBe(0);
     }
