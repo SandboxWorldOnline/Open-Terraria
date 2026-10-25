@@ -12,7 +12,8 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { BuffType } from '../stats/Buffs';
 import { TILE } from '../core/constants';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { evpDirectDmg, bannerNpcKeyOf } from './projTargets';   // ★BJ710-C：直调站门序单源+发射者旗键（旧 hostileProjectileDamage/mainDifficulty 内联退场）
+import { damageVar } from '../stats/ScaleStats';   // ★BJ712-C：DamageVar 首掷（P.cs:14904,链首先掷后进门序;luck=本地玩家）
 
 const SCREAM = ['deerclops_scream_0', 'deerclops_scream_1', 'deerclops_scream_2'];
 const ICE = ['deerclops_ice_attack_0', 'deerclops_ice_attack_1', 'deerclops_ice_attack_2'];
@@ -101,7 +102,7 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
       // :44905-44911 Boss_CanShootExtraAt(i, num3%3, 3, 1200f)——第二参 hint 是
       // 多人多目标错峰参数非变体选择(变体在 RandomizeInsanityShadowFor 内
       // Next(4));单人 1200px 门近似已足
-      addProj(game, new InsanityShadowProj(p, 10));
+      addProj(game, new InsanityShadowProj(p, 10), e);
     }
     if (idx >= 3) e.lai2 = 0;
   } else {
@@ -245,7 +246,7 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
         game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
         if (p && !p.dead) e.facing = p.cx > e.cx ? 1 : -1;
         // :44855-44861 六连各独立 RandomizeInsanityShadowFor(Next(4) 逐只重掷)
-        for (let i = 0; i < 6; i++) addProj(game, new InsanityShadowProj(p, DMG_HANDS));
+        for (let i = 0; i < 6; i++) addProj(game, new InsanityShadowProj(p, DMG_HANDS), e);
       }
       e.ai1 += 1; halt = true;
       if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
@@ -310,7 +311,7 @@ function tryMakingSpike(
   const px = x * TILE + 8, py = y * TILE - 8;
   const ang = -Math.PI / 2 + whichOne * dir * 0.7 * (Math.PI / 4 / howMany);
   addProj(game, new DeerclopsSpikeProj(px, py, ang, DMG,
-    0.1 + Math.random() * 0.1 + (xOffset * 1.1) / howMany));
+    0.1 + Math.random() * 0.1 + (xOffset * 1.1) / howMany), e);
 }
 
 /** AI_123_Deerclops_TryMakingSpike_FindBestY（:44900-44955）：目标侧向找最近可行走面,
@@ -360,7 +361,7 @@ function shootRubbleUp(
     // ai[1]：原文两行连写(:44768-44769)，第二行覆盖第一行 → frame = 6 + rand(6)
     //（rand(12) 首行是死码；3×4 网格只取下两行 6..11）
     addProj(game, new DeerclopsRubbleProj(x * TILE + 8, y * TILE - 8,
-      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, 6 + Math.floor(Math.random() * 6)));
+      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, 6 + Math.floor(Math.random() * 6)), e);
     break;
   }
 }
@@ -461,6 +462,9 @@ function deerclopsStepSound(e: Enemy, game: GameHooks): void {
 export class DeerclopsSpikeProj extends Entity {
   w = 32; h = 32;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（Deerclops 668 无旗 → 恒 null 零行为；发射位冻结，
+   *  接线保直调站门序单源）。null=未冻结。 */
+  bannerNpcId: number | null = null;
   private ai0 = 0;
   private readonly ai1: number;
   private opacity = 0;      // Opacity（0-1 语义）
@@ -498,7 +502,10 @@ export class DeerclopsSpikeProj extends Entity {
     if (p && !p.dead && this.opacity > 0.05
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 961 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ716-A（R15-P2-3，2026-10-25）：尾参 projVid=961——evpDirectDmg 补 resistCold
+      //  门（Projectile.cs:14909-14912 温暖(124) ×0.7,banner 后/难度缩放前;961/962
+      //  coldDamage=true P.cs:9089/:9100 亲证,曾直调站无此门=温暖药水下冰伤 ~1.43×）
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId, false, 961), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 961 });   // ★BJ710-C：banner→缩放→×2 门序单源   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
     void game.world;
   }
@@ -534,6 +541,8 @@ export class DeerclopsSpikeProj extends Entity {
 export class DeerclopsRubbleProj extends Entity {
   w = 32; h = 32;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（Deerclops 668 无旗 → 恒 null 零行为；发射位冻结）。 */
+  bannerNpcId: number | null = null;
   life = 220;
   /** ★BJ294 敌射侧拒割位：962 Rubble SetDefaults hostile（型录 hostile:true,aiStyle 1）→
    *  原版 CutTiles 调用点 friendly 门（P.cs:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
@@ -555,7 +564,8 @@ export class DeerclopsRubbleProj extends Entity {
     if (p && !p.dead
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 962 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ716-A（R15-P2-3）：尾参 projVid=962（coldDamage=true,resistCold 门同 961）
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId, false, 962), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 962 });   // ★BJ710-C：banner→缩放→×2 门序单源   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
@@ -586,6 +596,8 @@ export class DeerclopsRubbleProj extends Entity {
 export class InsanityShadowProj extends Entity {
   w = 40; h = 40;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（Deerclops 668 无旗 → 恒 null 零行为；发射位冻结）。 */
+  bannerNpcId: number | null = null;
   life = 300;   // Projectile.cs:8833 timeLeft=300(曾 480,终审修)
   /** ★BJ294 敌射侧拒割位：965 敌对影手 SetDefaults hostile（型录 hostile:true,
    *  aiStyle 187;964 玩家侧镜像 InsanityShadowFriendly 才 friendly）→ 原版
@@ -713,7 +725,7 @@ export class InsanityShadowProj extends Entity {
     if (p && !p.dead && this.alpha < 250
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
       // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 965 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 965 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op);★BJ710-C:banner→缩放→×2 门序单源
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
@@ -755,7 +767,10 @@ function wrapAngle(a: number): number {
 }
 
 /** 弹幕入桶（与 duke 系同款：hostile 类自管运动,dead 由桶清理） */
-function addProj(game: GameHooks, p: Entity): void {
+function addProj(game: GameHooks, p: Entity, bannerFrom?: Enemy): void {
+  // ★BJ710-C：发射者旗冻结（原版 FindBannerToAssociateTo P.cs:11106-11119——
+  // Deerclops 668 无旗 → bannerNpcKeyOf=null 零行为,接线保门序单源）
+  if (bannerFrom) (p as { bannerNpcId?: number | null }).bannerNpcId = bannerNpcKeyOf(bannerFrom);
   (game as unknown as { entities: { add(e: Entity, bucket: string): void } })
     .entities.add(p, 'projectiles');
 }

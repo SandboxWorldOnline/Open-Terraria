@@ -1,0 +1,9 @@
+[dbg] start
+[boot] Initialize done
+[boot] world: /private/tmp/bj717-oracle/bin/sw-rig.wld
+[boot] world loaded; spawn=(2105,231) surface=337
+[boot] player spawned at {X:33678 Y:3654}
+[setup] flat spot col=2105 groundRow=231 worldSurface=337 maxTilesY=1200 groundPos={X:33688 Y:3654}
+[S1] fullhold apex=98.07px = 6.13 tiles
+basin filled at rows 237..281
+[done] wrote sim-out.tsv

@@ -350,6 +350,22 @@ export class TileStore {
       TILE_DEFS[this.type[this.idx(x, y)]]?.vanilla?.sheet ?? -1);
   }
 
+  /** ★BJ715-A-③（2026-10-25）原版裸 `TileID.Sets.Platforms[type]`——**纯 type 谓词**
+   *  （TileID.cs:243 CreateBoolSet(19,427,435-439)）:不看 active/致动/frameY——致动
+   *  平台照算地板、家具顶（桌椅砧等 tileSolid=false）永不算。锚=CultistRitual.
+   *  CheckFloor 柱判定第二臂（CultistRitual.cs:117 `TileID.Sets.Platforms[
+   *  Framing.GetTileSafely(num2,num3).type]`——GetTileSafely 只取 tile 对象读 type,
+   *  active 位不进门）,单源消费=RuntimeEvents.cultistCheckFloorPts（bossAI_lunar_misc
+   *  ritualCheckFloor 委托同源）。OOB → GetTileSafely 空 tile type 0 ∉ 七件集 = false
+   *  同式。★勿与 isPlatform（TileCollision 可站顶宽谓词:active+致动门+家具 frameY==0
+   *  顶）/isSolidOrSlopedTileOrPlatform（七件集+active 门）混用——三者皆非本式
+   *  （isPlatform 会漏致动平台、多算家具顶,恰是 R18 定谳的域错方向）。 */
+  isPlatformsType(x: number, y: number): boolean {
+    if (!this.inBounds(x, y)) return false;
+    return TileStore.TILE_ID_PLATFORMS.has(
+      TILE_DEFS[this.type[this.idx(x, y)]]?.vanilla?.sheet ?? -1);
+  }
+
   onTileChanged(fn: (x: number, y: number) => void) {
     this.listeners.push(fn);
   }

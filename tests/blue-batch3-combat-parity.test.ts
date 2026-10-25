@@ -56,11 +56,15 @@ describe('F9 DamageVar 单源（Main.cs:67097-67123 三要素）', () => {
     expect(damageVarRoll(37, -1, seqMin)).toBe(31);
   });
 
-  it('bannerDamageDealtSample（ItemID.cs:1072 BannerStrength）：普通族 1.5/2 与 DD2 族 1.1/1.2、大师外推', () => {
+  it('bannerDamageDealtSample（ItemID.cs:1072 BannerStrength）：普通族 1.5/2 与 DD2 族 1.1/1.2、★BJ716-A 大师钳界', () => {
     expect(bannerDamageDealtSample(2090, 1)).toBeCloseTo(1.5);
     expect(bannerDamageDealtSample(2090, 2)).toBeCloseTo(2);
     expect(bannerDamageDealtSample(3837, 2)).toBeCloseTo(1.2);
-    expect(bannerDamageDealtSample(2090, 3)).toBeCloseTo(2.5);   // 越尾外推
+    // ★BJ716-A（R15-P1-1）改判史:旧锁 2.5「越尾外推」系误读——Sample 循环尾
+    //  key=key2=末键→num=0 早退=末键值（GameDifficultyData.cs:35-55）;大师恒 ×2.0/DD2 ×1.2
+    expect(bannerDamageDealtSample(2090, 3)).toBe(2);
+    expect(bannerDamageDealtSample(2090, 4)).toBe(2);
+    expect(bannerDamageDealtSample(3837, 3)).toBe(1.2);
   });
 });
 
@@ -303,7 +307,8 @@ describe('三批结构锚', () => {
     //  false, 0, true); // kb=0` 已被 BJ436 写梯档位（818=usesLocal+cd=-1 → pierce=-3
     //  清窗档 :14175-14179）+BJ452 N2 crit 色位+BJ455③ banner 乘区包入三刀改形
     //  （MinionProj 818 臂现役行），引语随现役定谳面刷新——kb=0 双门不进意图不变。
-    expect(m.includes('en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? res.dmg * 2 : res.dmg), 0, 0, game, 0, critPounce, -3, true)')).toBe(true);
+    // ★BJ716-A（R18-F2）锁随刀走:818 臂补 DamageVar 首掷（dmgVPounce）——kb=0 双门不进意图不变
+    expect(m.includes('en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? dmgVPounce * 2 : dmgVPounce), 0, 0, game, 0, critPounce, -3, true)')).toBe(true);
   });
 
   it('F14：PvP 两伴生支就位（血舌球 3211 ×0.7 / 蜂王 1123 num/3）', () => {

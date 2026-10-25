@@ -255,7 +255,7 @@ describe('③ 6176 accGolemSentryBackpack：sentry/SentryShot 命中 1/10 强制
     const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
     s.fixedUpdate(1 / 60, hooks);
     rnd.mockRestore();
-    expect(en.hurtLog).toEqual([20]);                      // dmgOf=10 → crit ×2
+    expect(en.hurtLog).toEqual([18]);                  // 10×2;DV(10,−14 档)=9（BJ716-A R18-F2 首掷）                      // dmgOf=10 → crit ×2
     expect(en.critLog).toEqual([true]);
   });
   it('挂件+掷未中（mock 0.95 → 9）→ 不强制（crit=false、伤原值）', () => {
@@ -267,7 +267,7 @@ describe('③ 6176 accGolemSentryBackpack：sentry/SentryShot 命中 1/10 强制
     const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
     s.fixedUpdate(1 / 60, hooks);
     rnd.mockRestore();
-    expect(en.hurtLog).toEqual([10]);
+    expect(en.hurtLog).toEqual([11]);                  // DV(10,+14 档)=11（BJ716-A R18-F2 首掷;crit=false 保持）
     expect(en.critLog).toEqual([false]);
   });
   it('未挂件 → 掷中亦不强制（:12962 accGolemSentryBackpack 门）', () => {

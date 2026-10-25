@@ -432,8 +432,11 @@ describe('BJ704-G16 F 结构锁', () => {
     expect(playerSrc).toContain('!mountJumpFired && !downDashFired && !jumpStartedThisTick');
     expect(playerSrc).toContain('!mountJumpFired && !jumpStartedThisTick && vyAtJumpGate !== 0');
   });
-  it('F2 债① 坐骑链门（干+湿）', () => {
-    expect(playerSrc.match(/if \(mnt2 && !this\.cced\) \{/g)?.length).toBe(2);
+  it('F2 债① 坐骑链门（干+湿;★BJ717-A F10 迁移:+rocketDelay 互斥项）', () => {
+    // ★BJ717-A F10（2026-10-25,R13 清偿）:原版 :27158 else-if（rocketDelay>0 推力
+    //   else 坐骑链）——推力脉冲期坐骑 Hover/Flight 不跑（flyTime/fatigue 不烧）。
+    expect(playerSrc.match(/if \(mnt2 && !this\.cced && this\.rocketDelay === 0\) \{/g)?.length).toBe(2);
+    expect(playerSrc).not.toMatch(/if \(mnt2 && !this\.cced\) \{/);
   });
   it('F3 债① 干支空中支门+CCed 平重力覆写+cartRamp 窗+终端钳门', () => {
     expect(playerSrc).toContain('} else if (!this.cced) {');

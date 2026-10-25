@@ -508,6 +508,7 @@ describe('BJ467-⑦：Arrow else 支 flag3 收窄——usesIDStatic 族不豁免
   });
 
   it('7b 283 对照（flag3 真）：同残窗豁免照命中——收窄面恰为 usesIDStatic 族', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0）
     const { hooks } = makeGame();
     const e = spyEnemy(400, 552);
     e.iframes = 10;
@@ -519,6 +520,7 @@ describe('BJ467-⑦：Arrow else 支 flag3 收窄——usesIDStatic 族不豁免
   });
 
   it('7c 286 窗清立即命中（拦=整跳不写表不耗穿,窗清照达）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const { hooks } = makeGame();
     const e = spyEnemy(400, 552);
     e.iframes = 10;

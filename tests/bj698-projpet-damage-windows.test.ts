@@ -454,8 +454,11 @@ describe('§2 结构锁：既判对型窗与修面调用位（源文本锚）', 
   it('625-628 星尘龙：全态（carve-out 625-628 段）——头/段无条件 contact', () => {
     expect(block('private dragonHead(', 'lockAfterFoxChannel('))
       .toContain('this.contact(game, dmg0 * scale, 7);');
+    // ★BJ709-G27①（2026-10-24）乘区源更新：旧锁 dragonLocalAI0(total−k) 逐段各自
+    //  系误读——原版 :12873-12879 读 scale（=继承头值）→ 全链同档 1+0.23×tier
+    //  （基础龙 3 段 ×1.69）;锁随刀更新,伤害窗形（无条件 contact/7t）不变。
     expect(block('private dragonSegment(', 'private abigailCounterOriginalDamage('))
-      .toContain('this.contact(game, dmg0 * (1 + 0.23 * this.dragonLocalAI0(game)), 7);');
+      .toContain('this.contact(game, dmg0 * (1 + 0.23 * tier), 7);');
   });
   it('864 刃杖：全态（carve-out `type != 864`）——smolstarAI 三态各一 contact', () => {
     const b = block('private smolstarAI(', 'private babyBirdStep(');

@@ -34,6 +34,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { canHitLine } from '../physics/LineOfSight';
 import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
+import { nextVector2Circular } from './SparkleGuitarProj';   // ★BJ707-G31 Utils.NextVector2Circular(4,4) 扫帚 spark 面（Utils.cs:1301-1304 单源）
 // ★终清波批：930 圣坦爆散 gore 段（GorePiece.newGore 通道,旧"无 API 不接"退役）
 import { GorePiece } from './GorePiece';
 import type { GameHooks } from './types';
@@ -429,6 +430,25 @@ export interface MountEffectsCtx {
     x: number; y: number; mul: number; pvx: number; pvy: number;
     color: { r: number; g: number; b: number; a: number };
   }): void;
+  /** ★BJ707-G31（G29 登记债②清偿）:cMount 尘发射面落池通道——海盗船 44（尘 228
+   *  环爆发+steady 两面,Mount.cs :3961-4007）/惊魂木 45（d6 环+d6/d31 steady,
+   *  :4022-4071）/扫帚 23（星尘 43 spark+swirl,UpdateEffects :4870-4915）/蜥蜴 14
+   *  （d31×2 底盒+蓄能 d6 环,:4129-4169）的发射几何在本模块 updateMountEffects
+   *  （沿闩/速度门旗由 updateFrame 写）,经本 typed 尘池 NewDust 同构入池（后置
+   *  字段调用侧覆写）。缺席（测试桩）=该四族尘面静默跳过（goatFlames 同惯例） */
+  vanillaDust?: import('../fx/VanillaDust').VanillaDust;
+  /** cMount 染料 vid 单源（Player.mountDyeVid=miscDyes[3] 直读零掷——G29 通道,
+   *  勿重建）;缺省 -1（=GetSecondaryShader(0)=null 零漂移,ArmorShaderDataSet.cs:63-70） */
+  mountDyeVid?(): number;
+  /** 扫帚挂件风摆（Main.WindForVisuals=windSpeedCurrent;GetWitchBroomTrinketRotation
+   *  :3591-3604——与 mountLights case 23 同式共享）;缺省 0=无风 */
+  wind?: number;
+  /** 扫帚挂件露天档（Player.mountWindExposed=InAPlaceWithWind 中心格）;缺省室内档 */
+  windExposed?: boolean;
+  /** 蜥蜴 14 面 1 的 cMount==0 地板尘（:4140-4148 position ±num2×24 移位
+   *  FloorVisuals(Falling:true)——MakeFloorDust 落地 20 连发面）;入参 = X 移位量
+   *  （num2×24,num2=sign(vx)）;Player 闭包承载移位+makeFloorDust */
+  basiliskFloorDust?(shiftX: number): void;
   fishron: FishronView;
 }
 
@@ -1289,8 +1309,14 @@ export class MountInstance {
   fullRotation = 0;
   /** 蜥蜴 14 冲刺蓄能（UpdateFrame case 14 :4075：每 tick +1/180，钳 0-1） */
   basiliskCharge = 0;
-  /** 本 tick 冲刺帧组切入（flag7 :3838：frameExtra<6 时的首拍——冲刺尘触发沿） */
+  /** 本 tick 冲刺帧组切入（flag7 :3838：frameExtra<6 时的首拍——冲刺尘触发沿）。
+   *  ★BJ707-G31 扩义:海盗船 44（flag2 :3951）/惊魂木 45（flag4 :4012）的
+   *  _mountSpecificData 沿闩 rising edge 同置本旗（updateFrame case 44/45 臂,
+   *  updateMountEffects 消费;10/40-47/44/45 四族互斥分派=无串扰） */
   dashBurst = false;
+  /** ★BJ707-G31:44/45 速度闩（Mount._mountSpecificData bool 位 :3954/:4015——
+   *  上升沿发环爆发,下降沿清;setMount/reset 归零=vanilla null→false 同相） */
+  dashBurstLatched = false;
   /** ★SW-FX18 本 tick 高尔夫球车跑动态（UpdateFrame case 17 :4650-4662 的车轮尘窗
    *  ——state ∉ {0,2,3,4}）；updateMountEffects 消费后即弃 */
   wheelDust = false;
@@ -1735,22 +1761,213 @@ export class MountInstance {
       this.updateScutlix(p, target, ctx.fireScutlixShot ?? (() => { /* 无投射物桶：静默 */ }),
         ctx.fireSantankShot);
     }
-    // 冲刺尘（UpdateFrame case 10/47 flag7 :3896-3922 / case 14 :4081-4091）：
-    // 独角兽 = 176/177/179 任选，山羊/蜥蜴 = 6；山羊地面冲刺另发火焰粒子。
-    // 独角兽追尾尘 = dashing 每 tick 盒内 1 粒（:3924-3932，与 burst 环独立链）
-    if ((this.type === 10 || this.type === 47 || this.type === 14)
-      && (this.dashing || this.dashBurst)) {
+    // 冲刺尘（UpdateFrame case 10/47 flag7 :3896-3922）：独角兽 = 176/177/179 任选，
+    // 山羊 = 6；山羊地面冲刺另发火焰粒子（下方块）。独角兽追尾尘 = dashing 每
+    // tick 盒内 1 粒（:3924-3932，与 burst 环独立链）。★BJ707-G31：蜥蜴 14 移出
+    // 本族（旧近似=借 dashDust 发 6 型环,三面全偏）→ 下方 G31 段 1:1 两面
+    if ((this.type === 10 || this.type === 47) && (this.dashing || this.dashBurst)) {
       const t: 6 | 176 | 177 | 179 = this.type !== 10
         ? 6
         : ([176, 177, 179] as const)[Math.floor(Math.random() * 3)];
       if (this.dashBurst && ctx.dashDust) {
-        if (this.type === 10 || this.type === 47) {
-          ctx.dashDust(p.x + p.w / 2 + p.w * p.facing, p.y + p.h / 2, 14, this.frameExtra, t);
-        } else if (this.type === 14) {
-          ctx.dashDust(p.x, p.y + p.h - 6, 2, 0, 6);
-        }
+        ctx.dashDust(p.x + p.w / 2 + p.w * p.facing, p.y + p.h / 2, 14, this.frameExtra, t);
       }
       if (this.type === 10 && this.dashing && ctx.dashDustBody) ctx.dashDustBody(t);
+    }
+    // ★BJ707-G31（G29 登记债②清偿）:cMount 尘发射面四族 1:1——海盗船 44/惊魂木
+    //  45/扫帚 23/蜥蜴 14（发射几何 1457 亲读;ctx.vanillaDust 缺席=测试桩整段
+    //  静默跳过;dyeVid=ctx.mountDyeVid()（miscDyes[3] 单源,G29 通道）零掷,
+    //  -1=空槽零漂移）。蜥蜴的地板尘回调（cMount==0）不依赖尘池=池外独立门。
+    const pool = ctx.vanillaDust;
+    const dyeVid = ctx.mountDyeVid?.() ?? -1;
+    if (pool) {
+      const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+      if (this.type === 44) {
+        // 海盗船（UpdateFrame case 44）:环爆发（:3961-3987——20×尘 228,锚=Center+
+        //  (width·direction,0),UnitY 旋 i·2π/20+首拍相位 ×0.8,半径 (40,30),速度=
+        //  环向量+RunSpeed−sign(|v|),vx>0 翻 X,1/2 半速;rising edge 沿闩触发）+
+        //  steady（:3988-4007——num8=(int)RunSpeed−(int)|vx| 钳 ≥1 的 1/num8 掷,
+        //  Bottom−(w/2+10,16) 盒 (w+20,22),零速,noLight）。
+        if (this.dashBurst) {
+          const ax = cx + p.w * p.facing, ay = cy;                     // :3963
+          const phase = Math.random() * Math.PI * 2;                    // :3965 num6
+          for (let i = 0; i < 20; i++) {                                // :3966
+            const ang = i * (Math.PI * 2) / 20 + phase;                 // :3968
+            const ux = -Math.sin(ang) * 0.8, uy = Math.cos(ang) * 0.8;  // :3969-3970 UnitY.RotatedBy×0.8
+            const du = pool.spawn(ax, ay, 0, 0, 228);                   // :3967（position 后置覆写）
+            if (!du) continue;
+            du.x = ax + ux * 40; du.y = ay + uy * 30;                   // :3971 ×(40,30)
+            du.vx = ux + this.runSpeed() - Math.sign(Math.hypot(p.vx, p.vy));  // :3972
+            du.vy = uy;
+            if (p.vx > 0) du.vx *= -1;                                  // :3973
+            if (Math.random() < 0.5) { du.vx *= 0.5; du.vy *= 0.5; }    // :3974-3975
+            du.noGravity = true;                                        // :3976
+            du.scale = 1.5 + Math.random() * 0.8;                       // :3977
+            du.fadeIn = 0;                                              // :3978
+            du.dyeVid = dyeVid;                                         // :3985 shader=cMount
+          }
+        }
+        let num8 = Math.trunc(this.runSpeed()) - Math.trunc(Math.abs(p.vx));  // :3988
+        if (num8 <= 0) num8 = 1;                                        // :3990-3991
+        if (Math.random() * num8 < 1) {                                 // :3992 Next(num8)==0
+          const num10 = Math.trunc(p.w / 2) + 10;                       // :3994
+          const du = pool.spawn(cx - num10, p.y + p.h - 16, num10 * 2, 22, 228);  // :3996-3999
+          if (du) {
+            du.vx = 0; du.vy = 0;                                       // :4000
+            du.noGravity = true; du.noLight = true;                     // :4001-4002
+            du.scale = 0.25 + Math.random() * 0.8;                      // :4003
+            du.fadeIn = 0.5 + Math.random() * 2;                        // :4004
+            du.dyeVid = dyeVid;                                         // :4006
+          }
+        }
+      } else if (this.type === 45) {
+        // 惊魂木（UpdateFrame case 45）:环爆发（:4022-4054——20×尘 6,与 44 环同构）
+        //  + steady（:4055-4071——flag4 每 tick 1 粒,型 SelectRandom(6,6,31)=2/3
+        //  尘 6/1/3 尘 31;Center−(6,−6) 盒 12×12,速度=v×0.1;31 支 noGravity+
+        //  scale×1.5+fadeIn 0.2 覆写）。
+        if (this.dashBurst) {
+          const ax = cx + p.w * p.facing, ay = cy;
+          const phase = Math.random() * Math.PI * 2;
+          for (let i = 0; i < 20; i++) {
+            const ang = i * (Math.PI * 2) / 20 + phase;
+            const ux = -Math.sin(ang) * 0.8, uy = Math.cos(ang) * 0.8;
+            const du = pool.spawn(ax, ay, 0, 0, 6);
+            if (!du) continue;
+            du.x = ax + ux * 40; du.y = ay + uy * 30;
+            du.vx = ux + this.runSpeed() - Math.sign(Math.hypot(p.vx, p.vy));
+            du.vy = uy;
+            if (p.vx > 0) du.vx *= -1;
+            if (Math.random() < 0.5) { du.vx *= 0.5; du.vy *= 0.5; }
+            du.noGravity = true;
+            du.scale = 1.5 + Math.random() * 0.8;
+            du.fadeIn = 0;
+            du.dyeVid = dyeVid;                                         // :4046
+          }
+        }
+        if (this.dashing) {                                             // flag4（:4055）
+          const t31 = Math.random() < 1 / 3;                            // :4056 SelectRandom(6,6,31)
+          const du = pool.spawn(cx - 6, cy + 6, 12, 12, t31 ? 31 : 6);  // :4057-4058
+          if (du) {
+            du.vx = p.vx * 0.1; du.vy = p.vy * 0.1;                     // :4059
+            if (Math.random() < 0.5) du.noGravity = true;               // :4060
+            du.scale = 0.7 + Math.random() * 0.8;                       // :4061
+            if (Math.random() < 1 / 3) du.fadeIn = 0.1;                 // :4062
+            if (t31) { du.noGravity = true; du.scale *= 1.5; du.fadeIn = 0.2; }  // :4063-4066
+            du.dyeVid = dyeVid;                                         // :4070
+          }
+        }
+      } else if (this.type === 23) {
+        // 扫帚（UpdateEffects case 23 :4870-4915）:挂件星尘两面。挂件位/摆角与
+        //  mountLights case 23 同式（GetWitchBroomTrinketOriginOffset/Rotation
+        //  :3591-3610——RotatedRelativePoint≈恒等=扫帚族既有口径,登记）。
+        const num = Math.max(-1, Math.min(1, p.vx / 10));               // :3592
+        const wind = ctx.wind ?? 0;
+        const mc = ctx.miscCounter ?? 0;
+        let num2 = Math.sin(mc / 300 * Math.PI * 6) * (Math.PI / 4) * Math.abs(wind) * 0.5
+          + Math.PI / 4 * -wind * 0.5;                                  // :3600
+        num2 *= ctx.windExposed === true ? 1 : 0.5;                     // :3596-3599
+        const rot = num * Math.sin(mc / 150 * Math.PI * 6) * (Math.PI / 4) * 0.5
+          + num * (Math.PI / 4) * 0.5 + num2;                           // :3603
+        const trx = cx + 29 * p.facing + Math.cos(rot + Math.PI / 2) * 11;  // :4871+(3607)×11
+        const try_ = cy - 4 + Math.sin(rot + Math.PI / 2) * 11;
+        // spark 面（:4877-4889）:1/45 掷;NextVector2Circular(4,4) 偏移 + 尘 43
+        //  perfect（α254/黄(255,255,0)/0.3）;非零偏移→径向外向 0.2;
+        //  customData=mountedPlayer → followPlayer（dust43 :1513-1517 旧位跟随）
+        if (Math.random() < 1 / 45) {                                   // :4877 Next(45)==0
+          const v12 = nextVector2Circular(Math.random, 4, 4);           // :4878
+          const du = pool.spawn(trx + v12.x, try_ + v12.y, 0, 0, 43, 0, 0, 254,
+            { r: 255, g: 255, b: 0, a: 255 }, 0.3, { perfect: true });  // :4879
+          if (du) {
+            if (v12.x !== 0 || v12.y !== 0) {                           // :4880-4883
+              const dl = Math.hypot(v12.x, v12.y);                      // DirectionTo=偏移向量归一
+              du.vx = v12.x / dl * 0.2;
+              du.vy = v12.y / dl * 0.2;
+            }
+            du.fadeIn = 0.3;                                            // :4884
+            du.noLightEmittance = true;                                 // :4885
+            du.followPlayer = true;                                     // :4886 customData=mountedPlayer
+            du.dyeVid = dyeVid;                                         // :4888 shader=cMount
+          }
+        }
+        // swirl 面（:4890-4915）:num13=0.1+|v|/30 掷门（pos4 抖动掷先于门=原序）
+        //  → 环 8 点（num15∈{0,0.125..0.875}）各 1/15 掷;椭圆 (0.5,1)×4 旋
+        //  fullRotation,尘 43 perfect;速度 = 环向量×0.025 + pos5 指向×0.5
+        //  （pos4=Center+(18−20·r·dir,12) 掷点;pos5=Center+(52·dir,−6)）。
+        const num13 = 0.1 + Math.hypot(p.vx, p.vy) / 30;                // :4890-4891
+        const p4x = cx + 18 - 20 * Math.random() * p.facing;            // :4892
+        const p5x = cx + 52 * p.facing, p5y = cy - 6;                   // :4893
+        if (Math.random() <= num13) {                                   // :4897 NextFloat()<=num13
+          const num14 = Math.random();                                  // :4899
+          for (let num15 = 0; num15 < 1; num15 += 0.125) {              // :4900
+            if (Math.random() >= 1 / 15) continue;                      // :4901 Next(15)==0
+            const a = Math.PI * 2 * num15 + num14;                      // :4903
+            const sx = Math.cos(a) * 0.5 * 4, sy = Math.sin(a) * 1 * 4; // :4903-4904 ×(0.5,1)×4
+            const fr = this.fullRotation;                               // :4905 RotatedBy(fullRotation)
+            const rx = sx * Math.cos(fr) - sy * Math.sin(fr);
+            const ry = sx * Math.sin(fr) + sy * Math.cos(fr);
+            const dx = p4x + rx, dy = (cy + 12) + ry;                   // pos4+spinning
+            const du = pool.spawn(dx, dy, 0, 0, 43, 0, 0, 254,
+              { r: 255, g: 255, b: 0, a: 255 }, 0.3, { perfect: true });  // :4906
+            if (!du) continue;
+            const ddx = dx - p5x, ddy = dy - p5y;                       // :4907 pos5.DirectionTo
+            const dl2 = Math.hypot(ddx, ddy) || 1;                      // SafeNormalize(Zero)
+            du.vx = rx * 0.025 + ddx / dl2 * 0.5;
+            du.vy = ry * 0.025 + ddy / dl2 * 0.5;
+            du.fadeIn = 0.3;                                            // :4908
+            du.noLightEmittance = true;                                 // :4909
+            du.dyeVid = dyeVid;                                         // :4912 shader=cMount
+          }
+        }
+      } else if (this.type === 14) {
+        // 蜥蜴（UpdateFrame case 14）:面 1（:4129-4149——num(=dashing) ∧ vy==0）=
+        //  2×尘 31 底盒（BottomLeft (w,6) 盒,速度=(vx×0.15, r×−2),noLight）+
+        //  cMount==0 时 ±24 移位 FloorVisuals(Falling)（地板尘 20 连发,
+        //  ctx.basiliskFloorDust 承载——池外独立门,makeFloorDust 自查尘池）;
+        //  面 2（:4150-4169——sign(vx)==facing,0≠±1=静止/背向都不发）=
+        //  floor(3×charge)×尘 6 蓄能环:位=Center+(dir×38, 6+r×12),速度=向锚
+        //  (dir×40,12) 归一 ×(3.5+r×0.5) → vy<0 再 ×(1+2r) → +v×0.55 →
+        //  ×|v|/RunSpeed → ×charge;noGravity/noLight。
+        //  ★旧近似（借 dashDust 发 6 型 14 粒环,spread=0——尘型/计数/几何三面
+        //  全偏）本刀退役。
+        const num2 = Math.sign(p.vx);                                   // :4113
+        if (this.dashing && p.vy === 0) {                               // :4129
+          for (let i = 0; i < 2; i++) {                                 // :4131
+            const du = pool.spawn(p.x, p.y + p.h, p.w, 6, 31);          // :4132 BottomLeft(w,6)
+            if (!du) continue;
+            du.vx = p.vx * 0.15;                                        // :4133
+            du.vy = Math.random() * -2;                                 // :4134
+            du.noLight = true;                                          // :4135
+            du.scale = 0.5 + Math.random() * 0.8;                       // :4136
+            du.fadeIn = 0.5 + Math.random() * 1;                        // :4137
+            du.dyeVid = dyeVid;                                         // :4138 shader=cMount
+          }
+          if (dyeVid <= 0) ctx.basiliskFloorDust?.(num2 * 24);          // :4140-4148 cMount==0
+        }
+        if (num2 === p.facing) {                                        // :4150
+          const n = Math.trunc(3 * this.basiliskCharge);                // :4151 (int)(3f×charge)
+          const aX = cx + num2 * 40, aY = cy + 12;                      // :4153 锚(num3=12,num4=40)
+          for (let j = 0; j < n; j++) {
+            const du = pool.spawn(p.x, p.y + p.h, p.w, 6, 6);           // :4152（position 后置覆写）
+            if (!du) continue;
+            const dx = cx + num2 * 38, dy = cy + 12 - 6 + Math.random() * 12;  // :4154
+            du.x = dx; du.y = dy;
+            let dvx = dx - aX, dvy = dy - aY;                           // :4155 (pos−锚)归一×速
+            const dl = Math.hypot(dvx, dvy) || 1;                       // SafeNormalize(Zero)
+            const spd = 3.5 + Math.random() * 0.5;                      // :4155
+            dvx = dvx / dl * spd; dvy = dvy / dl * spd;
+            if (dvy < 0) dvy *= 1 + 2 * Math.random();                  // :4156-4157
+            dvx += p.vx * 0.55; dvy += p.vy * 0.55;                     // :4158
+            const vr = Math.hypot(p.vx, p.vy) / this.runSpeed();        // :4159 ×|v|/RunSpeed
+            dvx *= vr * this.basiliskCharge; dvy *= vr * this.basiliskCharge;  // :4160 ×charge
+            du.vx = dvx; du.vy = dvy;
+            du.noGravity = true;                                        // :4161
+            du.noLight = true;                                          // :4162
+            du.scale = 0.5 + Math.random() * 0.8;                       // :4163
+            du.fadeIn = 0.5 + Math.random() * 1;                        // :4164
+            du.dyeVid = dyeVid;                                         // :4168 shader=cMount
+          }
+        }
+      }
     }
     if (this.type === 47 && this.dashing && p.vy === 0 && ctx.goatFlames && p.store) {
       // :3885-3896：落脚格 = (Center.X/16, (Y+H-1)/16)+1 须 active 且无液体且
@@ -2167,6 +2384,41 @@ export class MountInstance {
           if (this.frameExtra > 3) this.frameExtra = 0;
         }
         break;
+      case 44: {
+        // ★BJ707-G31（G29 登记债②清偿）海盗船（UpdateFrame case 44 :3948-4008）:
+        //  ① :3950 `state = 1` 强制跑动组（纯组覆写不写 frameState,case 7/48 同形
+        //  ——旧缺=静止船帧组冻结,与下方 FRAME_RUNNING 的 44 跑动速率特例
+        //  （max(1,|vx|×0.25),:4228-4230）失配,帆动画停摆）;
+        //  ② :3951 flag2=|vx| > DashSpeed−RunSpeed/4 的沿闩（_mountSpecificData
+        //  :3954-3960）——rising edge 置 dashBurst（20 粒尘 228 环爆发旗,发射面在
+        //  updateMountEffects）;
+        //  ③ steady 面（1/num8 掷,:3988-4007）也在 updateMountEffects（每 tick
+        //  单掷——落地拍 vanilla TryLanding 二次进 UpdateFrame 双掷,仓内单掷=
+        //  10/47 族既有口径,登记）。
+        state = FRAME_RUNNING;
+        const flag2 = Math.abs(vx) > this.dashSpeed - this.runSpeed() / 4;
+        this.dashBurst = false;              // 每拍重算（10/47 族同形）
+        if (this.dashBurstLatched && !flag2) this.dashBurstLatched = false;
+        else if (!this.dashBurstLatched && flag2) {
+          this.dashBurstLatched = true;
+          this.dashBurst = true;
+        }
+        break;
+      }
+      case 45: {
+        // ★BJ707-G31 惊魂木（case 45 :4010-4072）:flag4=|vx| > DashSpeed×0.9 的沿闩
+        //  （:4015-4021 rising edge 置 dashBurst=20 粒尘 6 环爆发旗）;dashing 承载
+        //  flag4 本身（steady 面门,发射面在 updateMountEffects）。
+        const flag4 = Math.abs(vx) > this.dashSpeed * 0.9;
+        this.dashBurst = false;              // 每拍重算（10/47 族同形）
+        if (this.dashBurstLatched && !flag4) this.dashBurstLatched = false;
+        else if (!this.dashBurstLatched && flag4) {
+          this.dashBurstLatched = true;
+          this.dashBurst = true;
+        }
+        this.dashing = flag4;
+        break;
+      }
       case 10:
       case 40:
       case 41:
@@ -2189,13 +2441,14 @@ export class MountInstance {
         break;
       }
       case 14: {
-        // 蜥蜴冲刺蓄能 + 尘（:4063-4117）：|vx| > RunSpeed/2 每拍 +1/180（钳 0-1），
-        // 否则清零；地面冲刺 → 底部尘 31×2；面朝方向 → 蓄能比例的尘 6（经 ctx 消费）
+        // 蜥蜴冲刺蓄能（case 14 :4111-4127）：|vx| > RunSpeed/2 每拍 +1/180（钳
+        //  0-1），否则清零;dashing 承载 num（两发射面门——★BJ707-G31:发射面
+        //  updateMountEffects 1:1 落地,旧 `dashBurst = fast && vy===0` 借
+        //  dashDust 发 6 型环的近似旗退役）
         const fast = Math.abs(vx) > (d.runSpeed ?? 0) / 2;
         if (!fast) this.basiliskCharge = 0;
         else this.basiliskCharge = Math.min(1, this.basiliskCharge + 1 / 180);
         this.dashing = fast;
-        this.dashBurst = fast && vy === 0;
         break;
       }
       case 54: {
@@ -2845,6 +3098,7 @@ export class MountInstance {
     this.fullRotation = 0;
     this.basiliskCharge = 0;
     this.dashBurst = false;
+    this.dashBurstLatched = false;
     this.dashing = false;
     this.wheelDust = false;
   }
@@ -2970,6 +3224,14 @@ function fairyQueenDustColor(): { r: number; g: number; b: number; a: number } {
     a: 255,
   };
 }
+/** ★BJ707-G29（BJ707-A 债③定谳）渲染帧采样口径族注——vanilla 坐骑光为 UpdateFrame/
+ *  UpdateEffects 逐 tick Lighting.AddLight（Mount.cs :3481/:4077/:4811/:5392/:5447/
+ *  Player.cs :21530 等）;本仓统一=渲染帧 drawMountLayer 背层逐帧 addLight
+ *  （Renderer「坐骑灯惯例:次帧生效」）。值全为坐骑状态派生量（frame/charge/dash
+ *  门/液色）→ tick 域与渲染域采样值恒同,仅刷新拍位差 ≤1 帧;LightingEngine
+ *  perFrame 点光每周期消费后清空=任意刷新率无累积漂移。与 7/23/9/46 既有口径
+ *  同族统一维持（62-65 见 case 注）——迁移 tick 域须动光照引擎累积通道,零可
+ *  感知收益,备案不迁。新 case 沿本口径即免再登记。 */
 export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLightCtx): MountLight[] {
   const out: MountLight[] = [];
   const d = m.data;

@@ -291,23 +291,40 @@ describe('叶弹 227 结算面（dealContacts 单源;pierce=1;sweep 一拍全路
     expect(randSpy).toHaveBeenCalled();
   });
 
-  it('未命中路径：timeLeft=180 与 181 子步吻合 → 一拍耗尽即 Kill（Kill 尘×15+音）', () => {
+  it('未命中路径：timeLeft=180 于 181 子步内耗尽 → 一拍 Kill（Kill 尘×15+音,BJ692 勘正后锚）', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const g = {
       enemies: () => [],
       world: mkWorld(),
       player: new Player(200, 500, new Inventory()),
       spawnDust: vi.fn(),
-      playSfxWav: vi.fn(),
+      playSfx: vi.fn(),
       bannerNpcActive: () => false,
       broadcastParticleOrchestra: vi.fn(),
       spawnParticles: vi.fn(),
     } as never;
-    const shot = new ChloroLeafShot(5000, 500, -12, 0); // 反向飞行
+    // ★BJ708-G28 夹具勘正：旧 cx=5000 在 160 格（2560px）世界外 → 首子步 :347 边界
+    // 静默出界（无 killWithFx）,旧断言实际锚住的是【出生拍】音——BJ692 修码前出生
+    // :28264 与消亡 :76022 两处同为 'Item_6' 故绿。归位标题语义：界内反向飞满子步,
+    // timeLeft 180 恰耗尽（179 子步 Kill,x 终位 ≈245 仍界内）。
+    const shot = new ChloroLeafShot(2400, 500, -12, 0); // 反向飞行,全程界内
     shot.fixedUpdate(1 / 60, g);
-    expect(shot.dead).toBe(true);                       // 寿命尽自然 Kill
-    const playSfx = (g as unknown as { playSfxWav: ReturnType<typeof vi.fn> }).playSfxWav;
-    expect(playSfx).toHaveBeenCalledWith('Item_6', 1, expect.anything(), expect.anything());
+    expect(shot.dead).toBe(true);                       // 寿命尽自然 Kill（非边界静默出界）
+    // ★BJ692 复诊勘误（2026-10-17;本测试漏改=BJ708-A 起预先红根源）：227 出生
+    // :28264 与消亡 :76022 两处均 legacy PlaySound(6,x,y)=【Grass 声库】
+    // （LegacySoundPlayer.cs case 6 SoundGrass,±0.30 随机音调）→ 仓内映射
+    // playSfx('chop',Sfx.ts chop:['Grass']+put[-30,30] 同款方差);旧 'Item_6'=
+    // 魔镜回城采样=误译（用户实报「穿叶绿套攻击出魔镜音」根因）。
+    const playSfx = (g as unknown as { playSfx: ReturnType<typeof vi.fn> }).playSfx;
+    const sfxCalls = playSfx.mock.calls as unknown[][];
+    expect(sfxCalls.length).toBe(2);                     // 出生拍 + Kill 拍各一
+    expect(sfxCalls.every((c) => c[0] === 'chop' && c[1] === 1)).toBe(true);   // 两拍均 Grass 声库（单杀拍回退 'Item_6' 恰红）
+    expect(playSfx).toHaveBeenCalledWith('chop', 1, expect.anything(), expect.anything());
+    // Kill 尘 15×d157（:76024-76031 noGravity/scale1.5/vel+=oldVel×NextFloat）+
+    // 出生尘 8×d157（:28265-28274）——按 type=157 计数锁两拍合计
+    const dustCalls = ((g as unknown as { spawnDust: ReturnType<typeof vi.fn> }).spawnDust)
+      .mock.calls as unknown[][];
+    expect(dustCalls.filter((c) => c[4] === 157).length).toBe(8 + 15);
   });
 });
 

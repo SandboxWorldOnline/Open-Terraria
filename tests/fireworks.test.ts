@@ -6,7 +6,7 @@
 // 弹体侧 Projectile 167-170/415-418/419-422/733 的 SetDefaults + AI + Kill
 //   （Projectile.cs:2291-2300 / 4669-4686 / 7434-7441；AI :25677-25739 / 29369-29510 /
 //    49278-49314；Kill :73435-73921）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Wiring } from '../src/world/Wiring';
 import { deviceTable, type DeviceCtx } from '../src/world/wiring/devices';
@@ -242,6 +242,7 @@ describe('马桶烟花（Wiring.cs:1498-1509，tile 497 与椅表 15 共用）',
 
 describe('烟花火箭弹体 167-170（SetDefaults Projectile.cs:2291-2300 + AI :25677-25739 + Kill :73435）', () => {
   it('14×14 / timeLeft 45 / 无重力直线上升，45 tick 到点爆花 + Item14 + 192×192 伤害盒', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（烟花爆盒首掷 ×1.0）
     // 爆心 ≈ (207, -145)：敌怪摆在盒内（±96，:73912-73920）
     const { game, bursts, sfx, hits } = makeGame(undefined, 130, -180);
     const p = new TrapShot(200, 200, 0, -8, 150, 'fireworkRocket', 0);

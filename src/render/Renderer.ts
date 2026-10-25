@@ -152,7 +152,7 @@ import {
 } from '../data/vanillaItemGlow';   // ★BJ601 Item.glowMask 消费面（手持两段+掉落物光罩）
 import { PROJ_GLOWMASK, PROJ_GLOW_DISCO, projGlowColors } from '../data/vanillaProjGlow';   // ★BJ603 弹幕域
 import { TOOL_CUTTER, TOOL_ACTUATOR, grandDesignPath, pathConnectionMasks } from '../world/Wiring';   // ★BJ613:ghost 预览单源路径+掩码
-import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, eyelidFrameRaptor, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import type { Baked } from './bitmapize';   // ★BJ665b 恒色件烘焙面类型（PaperDoll 同源）
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
 import { MALE_VARIANTS, defaultAppearance } from '../player/Appearance';
@@ -1167,6 +1167,7 @@ import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation
 import type { Player } from '../entities/Player';
 import { ICE_SLIP_IDS, FROZEN_SLIME_ID, downDashGhostStamps, isSolarFlareFullSet, solarOutlineStamps, advanceSolarGhostFade, solarShieldRotation, solarShieldTextureId, SOLAR_SHIELD_ALPHA, beetleOrbDrawPlan } from '../entities/Player';
 import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, MOUNT_PLAYER_SIZE, fairyQueenHslToRgb } from '../entities/Mounts';
+import { mechCartLights } from '../entities/Minecart';   // ★BJ709-G34（G32-D1）机械矿车五点光（纯函数,drawPlayer 车身块前置注入）
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -1212,7 +1213,7 @@ import {
   NECK_IS_SCARF, FRONT_SCARF_CAPE_HIDE, FRONT_NECK_LAYER_ALWAYS, SITTING_LEG_SLICES,
   SITTING_LEG_SLICES_SPECIAL, SITTING_LEG_SPECIAL_LEGS,
   FACE_HELMET_OFFSET, HELMET_DRAW_OFFSET, FACE_MASK_HELMET_HIDE, FACE_FLOWER_HELMET_HIDE,
-  HEAD_HIDES_HEAD, PREVENT_BEARD_DRAW,
+  HEAD_HIDES_HEAD, PREVENT_BEARD_DRAW, HEAD_CAN_DRAW_ON_RAPTOR,
   shieldHaloFactor, shieldParryTransform,
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
   resolveFaceLayers, faceLayerSplitPlan, FACE_HEAD_OFFSET_IDS, FACE_HEAD_HELMET_OFFSET,
@@ -12924,8 +12925,8 @@ export class Renderer {
         //   tintA=g 两步式（dest-out 削底+lighter 全额=XNA 预乘 c=(g,g,g,g) 逐字节
         //   tex.rgb·tex.a·g/255+bg·(1−tex.a·g/255),BJ551 判例域）;抖动折 cx/cy
         //   （世界域 ±2px ≙ 原版 position+vector66 未缩放位差）。懒加载经消费侧
-        //   ensureVImage 自愈通道（10s TTL）;VANILLA_MISC 暖存未入=首见迟几拍,
-        //   boss 表情装饰面可接受（BJ705-A 漏员①族防再登记注）。
+        //   ensureVImage 自愈通道（10s TTL）;★BJ707-G29（G26 债②清偿）两键已入
+        //   VANILLA_MISC 暖存（首见迟数拍面收口;漏载窗仍由 10s TTL 自愈兜底）。
         if (e.vanillaId === 327 || e.vanillaId === 325) {
           const faceTex = e.vanillaId === 327 ? 'vanilla/PumpkingFace.png' : 'vanilla/TreeFace.png';
           this.npcWhiteLiftQueue.push({
@@ -20450,7 +20451,17 @@ export class Renderer {
       return sc;
     };
     /** 纯加色 scratch（Color(255³,0)·f 族——A=0 预乘 = 纯加色，StringLine.ts 同法）：
-     *  摊平 alpha=255 + RGB×tint，'lighter' 单笔（透明像素成不透明黑，加 0 无害） */
+     *  ★BJ719-A（2026-10-25 用户实报「星尘之翼入水出现蓝色矩形影」定谳）：保形
+     *  RGB×tint（原 alpha 原样保留）'lighter' 单笔——贡献=tex.rgb×tex.a×f = XNA
+     *  One 因子逐 texel 精确（透明域贡献 0）。旧「摊平 alpha=255（透明像素成不透明
+     *  黑,加 0 无害）」=BJ700-C 已证伪 false belief 的复发面：主画布 'lighter' 色
+     *  加 0 确实无害，但 ①半透明 texel 贡献 straight 而非 premult（Glow_183 semi
+     *  11.9% → 过亮 1/a 倍）②★BJ679 水罩 mask 镜像重放同一 scratch——摊平把整片
+     *  86×62×1.06 切片 α 刷成 255×f → escapeVeilEnd「前景水×mask」over 主画布
+     *  =水下翼 AABB 整片第二层水=实报蓝矩形（水上无罩会话=不可见,故仅入水显形;
+     *  探针 _bj719a-wing-veil.mjs：修前 mask n255=6072/nSemi=0 全矩形,修后=形状）。
+     *  消费面 29 selfAdd/31 nebula（Wings 二值 α）/32 glowAdd（Glow_183 半透明）
+     *  三站一刀全修。 */
     const addScratch = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
       rgb: [number, number, number]): HTMLCanvasElement | null => {
       const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
@@ -20461,7 +20472,7 @@ export class Renderer {
       const id = sctx.getImageData(0, 0, sw, sh);
       for (let i = 0; i < id.data.length; i += 4) {
         id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
-        id.data[i + 3] = 255;
+        // ★BJ719-A：alpha 不摊平（保形——透明域贡献 0；摊平会污染水罩 mask 成全矩形）
       }
       if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
         { sx, sy, sheetW: img.width, sheetH: img.height });
@@ -20882,13 +20893,28 @@ export class Renderer {
    *  Players[skinVar,15]（Player_0_15.png 40×168 三帧竖排，全变体共用）按
    *  eyeFrame 叠画于头/眼之上——头层组同一基座坐标 + OffsetsPlayerHeadgear[row] Y−2
    *  （行 7/8/9/14/15/16 → −2，其余 0；gravDir 镜像空间内同值即原版 ×(−1) 语义）；
-   *  色 = colorHead → skinColor（eyelidFrame 调色）；帧 0=睁眼为空帧不画 */
-  private drawEyelid(ctx: CanvasRenderingContext2D, p: Player, row: number, pad: number, hideFace = false): void {
-    if (p.eyeFrame === 0 || !p.appearance || hideFace) return;
-    const lid = eyelidFrame(p.appearance);
+   *  色 = colorHead → skinColor（eyelidFrame 调色）；帧 0=睁眼为空帧不画。
+   *  ★BJ707-G31（G29 登记债③清偿）迅猛龙 54 覆写面（:2655-2663）：骑 54 时
+   *  （mountHandlesHeadDraw=mountDrawsEyelid 恒 54,PlayerDrawSet.cs:1811-1818）
+   *  眼睑【无 HidesHead 门】恒画（vanilla mountHandlesHeadDraw 支不查 flag——
+   *  veloHead 调用位旧传 HIDES_HEAD 门=288 族误吞;主路径 mntHidden 不可达同相）;
+   *  基色 (158,92,67)×实体窗采光 + cMount 染料（eyelidFrameRaptor——普通面
+   *  skinDyePacked vanilla 恒 0=死字段,零染维持）+ head==288 支（:2660-2663）色
+   *  覆写 Black+帧强钉 2（染料保留,shader 不动）;immune 闪烁随调用位既有
+   *  globalAlpha(bodyAlpha) 承载（GetImmuneAlpha 全层族同相） */
+  private drawEyelid(ctx: CanvasRenderingContext2D, p: Player, row: number, pad: number, hideFace = false, headId = 0): void {
+    const raptor = p.ridingMount && p.mount.type === 54;
+    if (!p.appearance) return;
+    if (!raptor && (p.eyeFrame === 0 || hideFace)) return;
+    const black288 = raptor && headId === 288;
+    if (!black288 && p.eyeFrame === 0) return;   // raptor 睁眼帧 0=空帧同不画
+    const frame = black288 ? 2 : p.eyeFrame;
+    const lid = raptor
+      ? eyelidFrameRaptor(p.appearance, p.mountDyeVid(), black288)
+      : eyelidFrame(p.appearance);
     if (!lid) return;
     const offY = (HEADGEAR_ZERO_ROWS.has(row) ? 0 : 2) - 2;
-    ctx.drawImage(lid, 0, p.eyeFrame * FRAME_H, FRAME_W, FRAME_H,
+    ctx.drawImage(lid, 0, frame * FRAME_H, FRAME_W, FRAME_H,
       -FRAME_W / 2, -FRAME_H + pad + offY, FRAME_W, FRAME_H);
   }
 
@@ -21351,8 +21377,9 @@ export class Renderer {
      *  drawAccFrontLayers 抑制前层兜底重画 */
     let headFaceDrawn = false;
     // 54 迅猛龙（hideEntirePlayerExceptHelmetsAndFaceAccessories :1843-1854）：
-    // 本体隐藏但头盔照画（ArmorIDs.Head.Sets.CanDrawOnVelociraptorMount 门
-    // :2103-2108）。脸饰品在迅猛龙上原版仍画：face/faceMask/faceFlower 走
+    // 本体隐藏但头盔照画——仅白名单头型（ArmorIDs.Head.Sets.CanDrawOnVelociraptor
+    // Mount 门 PlayerDrawLayers.cs:2106-2111 flag4;★G32② 补门+旧注 :2103-2108 锚
+    // 勘正）。脸饰品在迅猛龙上原版仍画：face/faceMask/faceFlower 走
     // DrawPlayer_22_FaceAcc :2801-2852（CanDrawOnVelociraptorMount 门 :2823/:2843，
     // 锚 = DrawPlayer_GetMountOffsetForFaceAcc :2773-2799——52 狼 (28,-2)·Directions、
     // 54/55/56/61 走 ApplyHeadOffsetFromMount − GetHelmetOffsetAddonFromMount；
@@ -21379,17 +21406,25 @@ export class Renderer {
         if (p.buffs.has(BuffType.Werewolf)) vh = { ...vh, head: 38, body: 21, legs: 20 };
         if (p.merman) vh = { ...vh, head: 39, body: 22, legs: 21 };
         const vr = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, vh.legs ?? 0);
+        // ★BJ709-G32②（G31 登记债1清偿,2026-10-24）：CanDrawOnVelociraptorMount 门
+        //  （PlayerDrawLayers.cs:2106-2111：骑 54 ∧ head≥0 ∧ !表[head] → flag4=false
+        //  整头层跳过=头盔+发全隐;head=0 无盔 ∉ 表=骑迅猛龙无盔同隐）。旧注声称有门
+        //  而码无=注释-行为不一致,本刀补门。眼睑【不受 flag4 门】（TheFace :2097 先
+        //  于 flag4 计算,eyelid :2583 mountDrawsEyelid 支恒画）→ 移出 if(headDoll):
+        //  无盔/门拒两态同画（旧位=无盔时眼睑漏画,同刀归位）;drawn 消费面 :21828
+        //  带 !mntHidden 门=本支无影响。
+        const raptorHeadOk = vh.head == null || HEAD_CAN_DRAW_ON_RAPTOR.has(vh.head);
         // ★BJ665b：迅猛龙藏身+恒色头甲（CanDrawOnVelociraptorMount 门内头盔照画,
         //  原版色=colorArmorHead=恒色覆写面同域）——lit 烘除+逃逸重绘（头甲件面）
         const vl = lunarConstPieces(vh.head ?? 0, vh.body ?? 0, vh.legs ?? 0);
         lunarHoist = vl;
         const vlHead = vl?.head != null && !!vh.head;
-        const headDoll = vh.head
+        const headDoll = raptorHeadOk && vh.head
           ? compositePaperDoll(app, vh, { part: 'head', ...(vlHead ? { lunarSplit: true } : {}) })
           : null;
+        ctx.save();
+        ctx.translate(-14, 0);   // Position.X −= direction·14（镜像空间局部 X）
         if (headDoll) {
-          ctx.save();
-          ctx.translate(-14, 0);   // Position.X −= direction·14（镜像空间局部 X）
           const hf = dollFrame(headDoll, vr.body);
           ctx.drawImage(hf.img, hf.sx, hf.sy, hf.sw, hf.sh, -hf.sw / 2, -hf.sh + 4, hf.sw, hf.sh);
           if (vlHead) {
@@ -21409,10 +21444,10 @@ export class Renderer {
               }
             }
           }
-          this.drawEyelid(ctx, p, vr.body, 4, HIDES_HEAD.has(vh.head ?? 0));
-          ctx.restore();
-          drawn = true;
         }
+        this.drawEyelid(ctx, p, vr.body, 4, HIDES_HEAD.has(vh.head ?? 0), vh.head ?? 0);
+        ctx.restore();
+        drawn = true;
       }
     }
     if (!mntHidden) {
@@ -22177,6 +22212,17 @@ export class Renderer {
     // 锚点 = 玩家位 + (w/2 + XOffset*dir, h/2 + YOffset(13) + PlayerOffset(8))，
     // 源矩形 = (0, 帧高*frame, 50, 帧高)、origin = (25, 帧高/2)；轮组 3 帧×12t。
     // 旋转与玩家同轴（上方 fullRotation 变换），故此处再绕同一原点转一次
+    // ★BJ709-G34（G32-D1 清偿）:case 11 机械矿车五点光（Mount.cs:5072-5094
+    //  UpdateEffects case 11 头段:num8=1+|vx|/RunSpeed×2.5,vector5=(0.4,0.12,
+    //  0.15)×num8,Center/Top/Bottom/Left/Right 五点 AddLight;netMode==2 服务器
+    //  早退门=单机域不适用）。渲染帧采样=坐骑灯惯例（mountLights 族注:状态
+    //  派生量 tick/渲染域同值,拍位差 ≤1 帧;LightingEngine perFrame 逐周期
+    //  消费无累积;骑乘态与 sitting/sleeping 双绘互斥=无双加）。
+    if (cart && cart.mountId === 11 && this.lighting) {
+      for (const l of mechCartLights(cart.x, cart.y, cart.w, cart.h, Math.abs(cart.vx), cart.runSpeed)) {
+        this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
+      }
+    }
     if (cart && this.atlas) {
       const img = this.atlas.ensureVImage(cart.texture);
       if (img) {

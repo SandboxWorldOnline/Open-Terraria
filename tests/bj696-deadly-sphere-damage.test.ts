@@ -20,7 +20,7 @@
 //  localNPCImmunity 逐拍递减（:16779 Update 头 → :17365 全表递减）——跨次冲刺烧表压制
 //  命中节奏（探针 61/77 被拒重叠帧=自表冻结项），影响面=全 usesLocalNPCImmunity 随从
 //  族+龙链共享实例，另刀落。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Player } from '../src/entities/Player';
@@ -128,6 +128,7 @@ describe.skipIf(EXT_MISSING)('① 原版锚：projPet 门=533 唯冲刺态可伤
 // ============================================================
 describe('② 533 伤害出口=唯冲刺态（post-AI dA0∈[6,8]）', () => {
   it('冲刺持续拍重叠 → 结算伤害（M2 摘冲刺出口 → 红）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const e = mkEnemy(1, 60 * 16 + 300, 90 * 16);
     const { hooks, player } = makeHooks([e]);
     const m = minion(player, hooks, e.cx, e.cy);

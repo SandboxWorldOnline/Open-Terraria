@@ -54,6 +54,21 @@ function sheetFallback(wt: number): { id: number; copyFrame: boolean } | null {
   return { id: f.id, copyFrame: f.framed };
 }
 
+/** ★vanilla interop 导出单点（net/vanilla/sections.ts 段流解码共用）：原版 tile id →
+ *  内部 id。映射语义与 parseWldToSave 逐字同源（TILE_MAP 显式表 → sheet 兜底 →
+ *  未映射 null→clear；映射目标 framed 时 copyFrame=true 需直拷帧）。 */
+export function mapVanillaTile(wt: number): { id: number; copyFrame: boolean } | null {
+  const mapped = (TILE_MAP as Record<number, MapEntry>)[wt];
+  if (mapped === undefined) return sheetFallback(wt);
+  if (mapped === null) return null; // 显式映射为「清除」（占位/杂波族）
+  if (typeof mapped === 'string') {
+    const id = TILE_BY_KEY[mapped] ?? 0;
+    return { id, copyFrame: !!TILE_DEFS[id]?.framed };
+  }
+  const id = TILE_BY_KEY[mapped.key] ?? 0;
+  return { id, copyFrame: mapped.copyFrame ?? false };
+}
+
 const TILE_MAP: Record<number, MapEntry> = {
   594: { key: 'v_594_volcanolarge', copyFrame: true },
   593: { key: 'v_593_volcanosmall', copyFrame: true },

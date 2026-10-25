@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net40</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>SimHarness</AssemblyName>
+    <RootNamespace>SimHarness</RootNamespace>
+    <LangVersion>5</LangVersion>
+    <Nullable>disable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Compile Include="SimHarness.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="TerrariaServer"><HintPath>bin/TerrariaServer.exe</HintPath><Private>false</Private></Reference>
+    <Reference Include="FNA"><HintPath>bin/FNA.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="ReLogic"><HintPath>libs/ReLogic.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>libs/Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="CsvHelper"><HintPath>libs/CsvHelper.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Ionic.Zip.CF"><HintPath>libs/Ionic.Zip.CF.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Steamworks.NET"><HintPath>libs/Steamworks.NET.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="RailSDK.Net"><HintPath>libs/RailSDK.Net.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SteelSeriesEngineWrapper"><HintPath>libs/SteelSeriesEngineWrapper.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MP3Sharp"><HintPath>libs/MP3Sharp.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="NVorbis"><HintPath>libs/NVorbis.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

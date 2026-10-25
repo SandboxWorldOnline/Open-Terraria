@@ -1,0 +1,121 @@
+{
+  "schema": 2,
+  "generatedAt": "2026-10-24T08:18:25.968Z",
+  "mods": [
+    {
+      "id": "calamity",
+      "name": "Calamity",
+      "version": "6.83.0",
+      "author": "CalamityTeam (ported)",
+      "description": "灾厄 mod SandboxWorld 移植版(P7 六模块合并单体:材料/武器/配饰/敌怪/荒漠灾虫/药水)",
+      "api": 1,
+      "side": "both",
+      "minEngine": "0.1.77-beta",
+      "category": "content",
+      "tags": [
+        "boss",
+        "items",
+        "accessories",
+        "enemies"
+      ],
+      "dependencies": [],
+      "artifact": {
+        "file": "calamity.swmod",
+        "sha256": "47486d001abec656897caafaf2a79905fe8d272b52ac7bd1341675d3b854c7e4"
+      }
+    },
+    {
+      "id": "director",
+      "name": "导演模式",
+      "version": "1.0.0",
+      "author": "SandboxWorld",
+      "description": "Cutscene 导演台——经本地 WebSocket 服务(ws://127.0.0.1:7788)驱动游戏演出：相机/时间/字幕/黑幕/遮幅/玩家。配合 director server 使用。",
+      "api": 1,
+      "side": "both",
+      "minEngine": "0.1.77-beta",
+      "category": "utility",
+      "tags": [
+        "cinematic",
+        "tool"
+      ],
+      "dependencies": [],
+      "artifact": {
+        "file": "director.swmod",
+        "sha256": "8d868a64cfba691ee783693a7966ce84536cad7233e31e56222ef05f20909902"
+      }
+    },
+    {
+      "id": "glmgirl",
+      "name": "GLM娘",
+      "version": "1.0.0",
+      "author": "SandboxWorld",
+      "description": "GLM 娘城镇NPC——ModLoader 城镇NPC链实验批(townNPC 声明/实体化/入驻/对话/头贴全链)",
+      "api": 1,
+      "side": "both",
+      "minEngine": "0.1.77-beta",
+      "category": "npc",
+      "tags": [
+        "town-npc",
+        "cute"
+      ],
+      "dependencies": [],
+      "artifact": {
+        "file": "glmgirl.swmod",
+        "sha256": "73bc3251fc6a5db1c2e4347c6226b4eecaa79bdfc852a90253bae5463b282e51"
+      }
+    },
+    {
+      "id": "lights_and_shadows",
+      "name": "Lights And Shadows",
+      "version": "1.4.2",
+      "author": "yiyang233 (ported to SandboxWorld WebGL2)",
+      "description": "光影与体积阴影屏幕后处理——日光色带渐变/太阳位置阴影提取/godray 体积光/Kawase 泛光链。tModLoader 工坊件 2670628346 (Lights v1.4.2) 的 WebGL2 移植,全部效果 GPU 单上下文管线实现。",
+      "api": 1,
+      "side": "client",
+      "minEngine": "0.1.77-beta",
+      "category": "visual",
+      "tags": [
+        "post-processing",
+        "lighting"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "magic_storage",
+      "name": "Magic Storage 魔法存储",
+      "version": "1.0.0",
+      "author": "blushiemagic & Contributors (SandboxWorld port)",
+      "description": "Magic Storage v0.7.1 移植——存储心脏/存储单元/存储访问装置/合成访问装置。单元邻接成网,心脏聚合全网物品;访问装置远程开网;合成访问装置以存储内容为材料源直接合成(MIT,源码 /tmp/MagicStorage)。当前批:核心存储/存取/搜索分页/合成访问;未含:升级链/模块/分解塔/环境塔。",
+      "api": 1,
+      "side": "both",
+      "minEngine": "0.1.77-beta",
+      "category": "utility",
+      "tags": [
+        "storage",
+        "crafting"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "rivals",
+      "name": "宿命之敌:Claude & GPT",
+      "version": "1.0.0",
+      "author": "SandboxWorld",
+      "description": "GLM 娘的死对手降临:星织圣·Claude(星芒环射/追猎火花/花瓣螺旋/突进)与六织泰坦·GPT(六边扇/编织螺旋/碎片雨/环绕卫队/狂怒突进)——L2 脚本多阶段 Boss 双人组",
+      "api": 1,
+      "side": "both",
+      "minEngine": "0.1.77-beta",
+      "category": "boss",
+      "tags": [
+        "boss",
+        "multi-phase",
+        "duo"
+      ],
+      "dependencies": [],
+      "artifact": {
+        "file": "rivals.swmod",
+        "sha256": "215da9061f4c47270fed8703e5c32e878cc98a7ae5825d9a4036ce38fe745c71"
+      }
+    }
+  ]
+}

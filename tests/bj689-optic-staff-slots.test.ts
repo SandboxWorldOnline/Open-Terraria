@@ -1,7 +1,12 @@
 // ★BJ689（2026-10-16）用户实报「魔眼法杖只能顶替一个召唤位:已经招满了其他召唤物时,
-//   使用魔眼法杖只能顶替掉原来的一个召唤物,无法继续召唤替换槽位」——定谳=【原版相,
-//   零修刀】:SW 与反编译 1:1,所述行为即原版 Terraria 行为本身。本文件=行为判别锁,
-//   防未来「好心修」(如把驱逐池改成贵者先死)破坏原版语义。
+//   使用魔眼法杖只能顶替掉原来的一个召唤物,无法继续召唤替换槽位」——当时定谳=
+//   【原版相,零修刀】:SW 与反编译 1:1,所述行为即原版 Terraria 行为本身。
+//   ★★BJ710-A 改判（2026-10-24）：用户对同一 5+1 现象再次实报并明令分歧——
+//   「如果确定是原版行为,按我们的预期优化:允许替换更多槽位」。BJ689 零修刀
+//   判语就此推翻：驱逐序改为【先异型（与 incoming 家族不同,池内保原版升序）
+//   后同型回落】（Game.ts freeUpMinionsForSummon evictOrder 分区 + minionFamilyOf
+//   家族口径,改判史详见其注）。本文件判别锁随迁:S2/S6 断言面改为分歧语义,
+//   原版锚（升序池/0.5 粒度/成对生成）在非本家路径上照钉。
 //
 // 定谳链(锚 1457;1456 同构并注):
 //   · 一次用杖=成对双子:Item.cs:24640-24658 case 2535(shoot=387/buffType=134/
@@ -58,15 +63,15 @@ describe('BJ689 魔眼法杖槽位顶替面(原版相判别锁,FreeUpPetsAndMini
     expect([a.dead, b.dead, c.dead]).toEqual([true, false, false]);
   });
 
-  it('BJ689-S2 连用症状语义锁:266×2+双子对满板再召 387 → 旧对整体死(0.5 升序排池首)、266 不动', () => {
-    // 原版升序池铁律(:52377-52388 插入排序+ :52418 池首逐杀):387/388 各 0.5
-    // 恒排 1.0 槽之前 → 二用起被顶替的是【自己的旧对】(id 刷新),板面组成不推进
-    // = 用户实报「无法继续召唤替换槽位」的原版真相。★若有人把池改成贵者先死
-    // (让连用推进置换 266),本测必红——那是对原版语义的破坏,不是修复。
+  it('BJ689-S2 连用置换锁（BJ710-A 分歧面）:266×2+双子对满板再召 387 → 逐最老 266、双子对存活', () => {
+    // ★改判史:BJ689 原判（2026-10-16）=原版升序池铁律,旧对先死、266 永不被顶替
+    //   =用户实报 5+1 锁死的原版真相,零修刀。BJ710-A（2026-10-24）用户明令分歧:
+    //   先异型后同型（evictOrder 分区）——本断言面=分歧语义:266a 被逐、旧对存活。
+    //   原版锚仍钉于 S6/纯核（非本家路径升序照旧）+ Game.ts minionFamilyOf 注。
     const [a, b, t1, t2] = alive(266, 266, 387, 388);
     freeUpMinionsForSummon(387, [a, b, t1, t2], 3);
-    expect([a.dead, b.dead]).toEqual([false, false]);   // 266 永不被顶替
-    expect([t1.dead, t2.dead]).toEqual([true, true]);   // 旧对成对死(num4 交替门)
+    expect([a.dead, b.dead]).toEqual([true, false]);    // 最老异型被逐（分歧面）
+    expect([t1.dead, t2.dead]).toEqual([false, false]); // 上一按召出的双子对存活
   });
 
   it('S3 自由槽零驱逐:仅一对(used1/max3)再召 387 → 谁都不死(空槽允许第二对入板)', () => {
@@ -90,11 +95,14 @@ describe('BJ689 魔眼法杖槽位顶替面(原版相判别锁,FreeUpPetsAndMini
     expect(a.dead).toBe(true);
   });
 
-  it('BJ689-S6 0.5 槽粒度锁:孤残 387+266 混板(max2,used1.5)再召 387 → 先杀 0.5 槽孤残、266 存活', () => {
-    // 腾位需求=1.5−(2−1)=0.5:杀池首 0.5 槽 387 即够(升序池 0.5 排 1.0 前);
-    // 若 387/388 被误计 1.0 槽,池稳定序=[266,387] → 死的是 266(粒度翻转必红)
+  it('BJ689-S6 0.5 槽粒度锁（非本家路径,原版升序照钉）:孤残 387+266 混板(max2)再召 375 → 先杀 0.5 槽孤残、266 存活', () => {
+    // ★BJ710-A 改判随迁:原 S6（incoming=387）断言面已被分歧分区改写（387 属
+    //   incoming 家族受保护→死 266）,粒度锁改钉【非本家路径】incoming=375:
+    //   family(375)={375} → 全池异型=原版升序铁律照旧。腾位需求=1.5−(2−1)=0.5:
+    //   杀池首 0.5 槽孤残 387 即够;若 387/388 被误计 1.0,稳定序=[266,387] →
+    //   死 266(粒度翻转必红)。
     const [a, orphan] = alive(266, 387);
-    freeUpMinionsForSummon(387, [a, orphan], 2);
+    freeUpMinionsForSummon(375, [a, orphan], 2);
     expect(orphan.dead).toBe(true);
     expect(a.dead).toBe(false);
   });
@@ -141,11 +149,19 @@ describe.skipIf(process.env.SW_BJ689_MUT)('BJ689 变异自证(三发恰红+逐�
     }
   };
 
-  it('M1 驱逐池序倒置(升序→降序) → S2 连用症状锁红(本判别锁的承重墙)', () => {
-    // 「让连用推进置换 266」的伪修复=降序池 → 恰被 S2 拦下
+  it('M1 分区倒置(先同型后异型=回退原版 5+1) → S2 连用置换锁红(本判别锁的承重墙)', () => {
+    // ★BJ710-A 改判随迁:原 M1（池升序→降序）靶面已被分歧分区接管——S2 断言面
+    //   改分歧语义后,池内倒置不再可判（异型遍内同权稳定序不变）。新承重墙=
+    //   evictOrder 分区序:倒置(同型先)即回退 BJ689 时代原版相 5+1 行为 → S2 必红。
     mutate(GT,
-      'const pool = [...alive].sort((a, b) => minionSlotsOf(a) - minionSlotsOf(b));',
-      'const pool = [...alive].sort((a, b) => minionSlotsOf(b) - minionSlotsOf(a));',
+      `const evictOrder = [
+    ...finalPool.filter((m) => !fam.has(m.projId)),
+    ...finalPool.filter((m) => fam.has(m.projId)),
+  ];`,
+      `const evictOrder = [
+    ...finalPool.filter((m) => fam.has(m.projId)),
+    ...finalPool.filter((m) => !fam.has(m.projId)),
+  ];`,
       'BJ689-S2');
   });
 

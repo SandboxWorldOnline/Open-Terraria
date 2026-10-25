@@ -1,0 +1,37 @@
+{
+ "total": 1475,
+ "byPredicate": {
+  "==1": 312,
+  "==2": 446,
+  "!=1": 570,
+  "!=2": 147,
+  "other": 0
+ },
+ "byFile": {
+  "Terraria/Netplay.cs": 1,
+  "Terraria/Liquid.cs": 11,
+  "Terraria/Gore.cs": 2,
+  "Terraria/Dust.cs": 2,
+  "Terraria/WorldItem.cs": 11,
+  "Terraria/MessageBuffer.cs": 220,
+  "Terraria/Collision.cs": 2,
+  "Terraria/Lighting.cs": 1,
+  "Terraria/NetMessage.cs": 17,
+  "Terraria/PopupText.cs": 3,
+  "Terraria/NPC.cs": 564,
+  "Terraria/Cloud.cs": 2,
+  "Terraria/Mount.cs": 41,
+  "Terraria/Main.cs": 100,
+  "Terraria/Rain.cs": 1,
+  "Terraria/Item.cs": 5,
+  "Terraria/Chest.cs": 4,
+  "Terraria/Wiring.cs": 18,
+  "Terraria/Animation.cs": 1,
+  "Terraria/WorldGen.cs": 222,
+  "Terraria/CombatText.cs": 1,
+  "Terraria/Player.cs": 157,
+  "Terraria/Projectile.cs": 89
+ },
+ "generatedAt": "2026-10-25T05:45:01.060Z",
+ "note": "netMode 闸门=权威切分金标清单;SW 等价谓词=net?.active(客户端面)/netMode!=0"
+}

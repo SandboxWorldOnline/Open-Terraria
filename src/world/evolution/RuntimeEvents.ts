@@ -166,38 +166,54 @@ function cultistCheckRitual(world: World, st: TileStore, x: number, y: number,
   if (!force && (world.cultistDelay !== 0 || !host.hardMode || !host.downedGolem || !host.downedBoss3)) {
     return false;
   }
-  // 锚点上方 7 格须在界内且非实心（石碑悬浮于地牢入口上空）
-  if (y < 7 || st.isSolid(x, y - 7)) return false;
+  // 锚点上方 7 格须在界内且非实心（石碑悬浮于地牢入口上空）——WorldGen.SolidTile
+  // (Tile) :70487-70502 全谓词（排除半砖/坡/致动/非活跃）★BJ715-A-③:旧 isSolid 宽
+  //  谓词把半砖/坡面格当实心 → 上方 7 格恰为半砖时误拒仪式
+  if (y < 7 || st.isSolidStrict(x, y - 7)) return false;
   if (!force && host.anyTablet()) return false;   // NPC.AnyNPCs(437)
   // CheckFloor：锚点中心向下扫四根柱，须凑齐 4 个"实心/平台且上方净空"落点
   const cx = x * 16 + 8;
   const cy = y * 16 - 64 - 8 - 27;
-  return cultistCheckFloor(st, cx, cy);
+  return cultistCheckFloorPts(st, cx, cy) !== null;
 }
 
-/** CultistRitual.CheckFloor（:106-135 1:1）：i∈{-5,-3,1,3,5}（跳过 ±1）→
- *  柱 x = tileX+i*2，y 自 tileY-5 向下扫至 +11，首个"实心/平台 且
- *  (上方 3 行三列净空 或 本柱净空+两邻柱上 2 行净空)"的点计入；凑不齐 4 点 → false */
-export function cultistCheckFloor(st: TileStore, centerX: number, centerY: number): boolean {
+/** CultistRitual.CheckFloor（:102-131 1:1,★BJ715-A-③ 单源收编）:i 步进 2 取
+ *  {-5,-3,3,5}（跳过 ±1,★BJ711-A 勘误:旧注「{-5,-3,1,3,5}」把跳过值 1 写进了
+ *  取值集——代码自始正确,四点=四教徒槽位的唯一权威面,由 tests/bj711a-cultist-
+ *  spawn-trigger 判别锁守卫）→ 柱 x = tileX+i*2，y 自 tileY-5 向下扫至 +11,首个
+ *  「实心/平台 且 (上方 3 行三列净空 或 本柱净空+两邻柱上 2 行净空)」的点计入;
+ *  凑不齐 4 点 → null。
+ *  ★BJ715-A-③（2026-10-25,R18 P2 定谳）谓词域勘正——同文件两副本同病（本函数
+ *  与 bossAI_lunar_misc.ritualCheckFloor 复制面,后者改为委托本单源）:
+ *  · 柱第一臂 WorldGen.SolidTile(int,int)（:70642-70664:active∧tileSolid∧
+ *    !tileSolidTop∧!halfBrick∧slope==0∧!inActive）= isSolidStrict——旧 isSolid 宽
+ *    谓词把半砖/坡面格当地板（R18:家具顶/半砖柱可翻转 spawn 门）;
+ *  · 柱第二臂 TileID.Sets.Platforms[type]（:117 纯 type 谓词,不看 active/致动/
+ *    frameY——GetTileSafely 只读 tile.type）= isPlatformsType——旧 isPlatform 可站顶
+ *    宽谓词漏致动平台+多算家具 frameY==0 顶;
+ *  · 净空臂 Collision.SolidTiles（:3468-3499 active∧!inActive∧tileSolid∧
+ *    !tileSolidTop,无半砖/坡排除）= solidRect/isSolid 原式不动。 */
+export function cultistCheckFloorPts(st: TileStore, centerX: number, centerY: number):
+  Array<{ x: number; y: number }> | null {
   const tx = Math.floor(centerX / 16);
   const ty = Math.floor(centerY / 16);
-  let found = 0;
+  const pts: Array<{ x: number; y: number }> = [];
   for (let i = -5; i <= 5; i += 2) {
     if (i === -1 || i === 1) continue;
     for (let j = -5; j < 12; j++) {
       const x = tx + i * 2;
       const y = ty + j;
-      if ((st.isSolid(x, y) || st.isPlatform(x, y))
+      if ((st.isSolidStrict(x, y) || st.isPlatformsType(x, y))
         && (!solidRect(st, x - 1, x + 1, y - 3, y - 1)
           || (!solidRect(st, x, x, y - 3, y - 1)
             && !solidRect(st, x + 1, x + 1, y - 3, y - 2)
             && !solidRect(st, x - 1, x - 1, y - 3, y - 2)))) {
-        found++;
+        pts.push({ x, y });
         break;
       }
     }
   }
-  return found === 4;
+  return pts.length === 4 ? pts : null;
 }
 
 // ============================================================

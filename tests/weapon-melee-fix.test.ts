@@ -135,7 +135,7 @@ describe('② 泰拉刃 985 光束', () => {
     // 大盒敌（200×200）防高速弹单 update 穿越错过判定
     const e = mkEnemy(60 * TILE + 8, 60 * TILE + 8, 200, 200);
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [e];
-    vi.spyOn(Math, 'random').mockReturnValue(0.999);   // 无暴击（critChance 0.04）
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);    // 无暴击（critChance 0.04）;★BJ716-A:DV 中性档(×1.0)
     const beam = new Arrow(e.x + 100, e.y + 100, 60, 0, 100, 3, 985,
       { grav: 0, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     beam.fixedUpdate(1, hooks);
@@ -146,7 +146,7 @@ describe('② 泰拉刃 985 光束', () => {
     const { hooks } = makeGame(new World(120, 120, 30, 'open'));
     const e = mkEnemy(60 * TILE + 8, 60 * TILE + 8, 200, 200);
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [e];
-    vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);    // ★BJ716-A:DV 中性档(×1.0)
     const bolt = new Arrow(e.x + 100, e.y + 100, 8, 0, 100, 3, 14, { grav: 0, life: 600, pierce: 1 });
     bolt.fixedUpdate(1, hooks);
     expect(e.hits).toEqual([100]);

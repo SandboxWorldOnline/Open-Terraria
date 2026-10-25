@@ -173,9 +173,9 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
     const z = zombie(hooks, 4921);
     z.hurt = hurtSpy(calls) as unknown as Enemy['hurt'];
     const m = mk(946, player, z.cx - 8, z.cy - 12);
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.0);   // 夹具装配后装 spy（旧幻影掷必中=必红钉）
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // 夹具装配后装 spy;★BJ716-A:DV 中性档（R18-F2 首掷 ×1.0）
     callAs(m, 'tHitTick')(hooks, player, 30);
-    expect(rnd).not.toHaveBeenCalled();               // ★零掷（无类旗）
+    expect(rnd).toHaveBeenCalledTimes(1);              // ★唯一掷=DamageVar 首掷（BJ716-A）;类旗掷零（幻影基掷复辟=2 必红）
     expect(t.box.length).toBe(1);                     // ★TimerCrit :12928 消费达（旧整缺必红）
     expect(t.box[0]).toEqual([z.x, z.y, z.w, z.h] as unknown as number[]);
     expect(calls[0].crit).toBe(true);
@@ -209,9 +209,9 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
     const z = zombie(hooks, 4923);
     z.hurt = hurtSpy(calls) as unknown as Enemy['hurt'];
     const m = mk(755, player, z.cx - 8, z.cy - 12);
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.0);
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     callAs(m, 'bHitTick')(hooks, player, 30);
-    expect(rnd).not.toHaveBeenCalled();
+    expect(rnd).toHaveBeenCalledTimes(1);              // ★唯一掷=DamageVar 首掷（BJ716-A）
     expect(t.box.length).toBe(1);
     expect(calls[0].crit).toBe(true);
     expect(calls[0].dmg).toBe(60);

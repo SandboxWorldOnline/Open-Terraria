@@ -335,15 +335,20 @@ export const ON_HIT_EXCLUDED_PROJS: ReadonlySet<number> = new Set([221, 227, 614
 // BannerStrength 表 + GameDifficultyData.LinearCurve.Sample）：
 // · 普通旗 strength=1f → keys{Classic(1):1.5, Expert(2):2.0}；
 // · DD2 族 itemId 3837-3846 → BannerStrength=BannerEffect(0.2f) → keys{1.1,1.2}；
-// · Sample(Main.Difficulty) 为【分段线性 + 越尾键同斜率外推】——大师档(3) 经外推
-//   得 2.5/1.3，Main.Difficulty 走浮点难度轴（GameDifficultyLevel.cs:8-16，
-//   旅程 0.5 ≤ 首键 → 取首键值）。闭合式：k1+(difficulty−1)·(k2−k1)，x≤1 时取 k1。
+// · Sample(Main.Difficulty) = 分段线性 + 【双端钳界】（★BJ716-A 2026-10-25 勘误：
+//   越尾时循环尾 key←key2=末键 → num=0 早退返末键值，【非】同斜率外推——旧头注
+//   「越尾键同斜率外推」系误读（GameDifficultyData.cs:35-55 循环体逐行定谳，
+//   R15 判例1「读 LinearCurve.Sample 看 key=key2 末态」；ScaleStats.sampleCurve
+//   单源本就钳界=多副本漂移，BJ712-B 判例1 同族）。大师(3)/传奇(4) 恒 ×2.0/
+//   DD2 ×1.2（旧外推式 2.5/1.3 = 大师每击 +25% 过量）；旅程 0.5 ≤ 首键 → 取
+//   首键值。闭合式：x≤1 取 k1；x≥2 取 k2；段内 k1+(difficulty−1)·(k2−k1)。
 // （原 Game.ts 局部实现整体迁入本模块——applyBannerDamageDealt 单源消费，F1 收口）
 export function bannerDamageDealtSample(itemId: number, difficulty: number): number {
   const dd2 = itemId >= 3837 && itemId <= 3846;
   const k1 = dd2 ? 1.1 : 1.5;
   const k2 = dd2 ? 1.2 : 2;
   if (difficulty <= 1) return k1;
+  if (difficulty >= 2) return k2;   // ★BJ716-A：越尾钳界（Sample 末键 num=0 早退语义）
   return Math.fround(k1 + Math.fround(k2 - k1) * (difficulty - 1));
 }
 
@@ -353,17 +358,22 @@ export function bannerDamageDealtSample(itemId: number, difficulty: number): num
  *  · ProcessHitAgainstNPC :44658-61（近战挥击链，Game.ts 挥击段直接调 sampler）；
  *  · Projectile.Damage_PVE :13388-90（全部玩家弹幕结算面）。
  *  StrikeNPC 本体无旗逻辑 ⇒ 攻端各站【恰好一次】，语义 = `(int)((float)dmg×sample)`
- *  截断；banner 未激活 / 弹 id 无旗档 → 原值返回。靶点判据 = 受击实体 vanillaId。 */
+ *  截断；banner 未激活 / 弹 id 无旗档 → 原值返回。靶点判据 = bannerNpcKeyOf 键域
+ *  （★BJ716-A 2026-10-25 R15-P1-2：原版攻端 GetBannerBuffEffect(npc) →
+ *  NPCtoBanner(npc.BannerID())=netID≥-10 域——旧裸读 target.vanillaId（type 域）：
+ *  变体史莱姆 -1..-10 双向错（放蓝史莱姆旗对全部变体过量吃旗/放变体自有旗反不
+ *  生效）；G35 判例2「banner 域一律走单源」第 4 消费域归队——受端/击杀/
+ *  lastCreatureHit 三域 BJ710-C/G35 已收编，攻端本刀补齐）。 */
 export function applyBannerDamageDealt(
   game: GameHooks,
   target: unknown,
   dmg: number,
 ): number {
-  const vid = (target as { vanillaId?: number | null } | null | undefined)?.vanillaId;
-  if (!vid || vid <= 0) return dmg;
-  const g = game as unknown as { bannerNpcActive?: (id: number) => boolean; world?: never };
-  if (!g.bannerNpcActive?.(vid)) return dmg;
-  const bItem = bannerItemId(bannerOfNpc(vid));
+  const key = bannerNpcKeyOf(target as Parameters<typeof bannerNpcKeyOf>[0]);
+  if (key == null || key === 0) return dmg;
+  const g = game as unknown as { bannerNpcActive?: (id: number) => boolean };
+  if (!g.bannerNpcActive?.(key)) return dmg;
+  const bItem = bannerItemId(bannerOfNpc(key));
   if (!(bItem > 0)) return dmg;
   const world = (game as unknown as { world?: Parameters<typeof mainDifficulty>[0] }).world;
   return Math.trunc(dmg * bannerDamageDealtSample(bItem, mainDifficulty(world)));
@@ -375,14 +385,122 @@ export function applyBannerDamageDealt(
  *  （applyBannerDamageDealt 保持自截断,继续服务旧位次消费面:近战 :22610/
  *  scarabBombExplode 等 DV→banner 相邻无减伤夹层的面）。返回 1 = 不乘。 */
 export function bannerDamageDealtMultOf(game: GameHooks, target: unknown): number {
-  const vid = (target as { vanillaId?: number | null } | null | undefined)?.vanillaId;
-  if (!vid || vid <= 0) return 1;
+  const key = bannerNpcKeyOf(target as Parameters<typeof bannerNpcKeyOf>[0]);   // ★BJ716-A：键域归队（同 applyBannerDamageDealt）
+  if (key == null || key === 0) return 1;
   const g = game as unknown as { bannerNpcActive?: (id: number) => boolean };
-  if (!g.bannerNpcActive?.(vid)) return 1;
-  const bItem = bannerItemId(bannerOfNpc(vid));
+  if (!g.bannerNpcActive?.(key)) return 1;
+  const bItem = bannerItemId(bannerOfNpc(key));
   if (!(bItem > 0)) return 1;
   const world = (game as unknown as { world?: Parameters<typeof mainDifficulty>[0] }).world;
   return bannerDamageDealtSample(bItem, mainDifficulty(world));
+}
+
+/** ★BJ710-C（2026-10-25）：敌弹发射者旗追踪键——原版 NPC.BannerID()（NPC.cs:7671-7678
+ *  `netID >= -10 ? netID : type`）的仓内投影：vanillaNetId≠0（变体）用 netId，否则
+ *  vanillaId（类型域；击杀链 bannerOfNpc 同式 Enemy.ts:15649）。null（无实体引用：
+ *  世界机关/探针桥）= 无旗面。
+ *  ★BJ710-G35 D3b（2026-10-25）：补 `netID >= -10` 上界——-11..-19 变体（如 getGood
+ *  僵尸 -12,SetDefaultsFromNetId :7801-7818 恒型 type=6）原版 BannerID() 回落【type】
+ *  （吃僵尸旗 27）;旧投影裸回 netId=-12 → bannerOfNpc(-12)=0 旗面全丢（接触减伤/
+ *  击杀计账同错）。击杀链/图鉴消费 netId 裸读另有其面（bestiary netID 域正确,勿改）。 */
+export function bannerNpcKeyOf(e: { vanillaId?: number | null; vanillaNetId?: number } | null | undefined): number | null {
+  if (!e) return null;
+  const netId = e.vanillaNetId ?? 0;
+  return netId !== 0 && netId >= -10 ? netId : (e.vanillaId ?? 0);
+}
+
+/** ★BJ710-C：敌弹旗减伤消费单源（原版 Damage_EVP :14905-14908 `GetBannerBuffEffect(
+ *  bannerIdToRespondTo)` 段——DamageVar 后、resistCold/难度缩放前；bannerIdToRespondTo
+ *  由 FindBannerToAssociateTo（:11106-11119）在弹构造期自 EntitySource_Parent 发射
+ *  NPC（NPC.GetSpawnSource_ForProjectile NPC.cs:91865）冻结，宿主死后仍保留）。
+ *  键域 = NPC 类型/变体 id（bannerNpcActive/_bannerNpcs 同键，接触面 Game.damagePlayer
+ *  :44717 同域）。itemId 档区分 DD2 旗（3837-3846 → 0.917/0.833，普通旗 0.75/0.5）。
+ *  trunc 截断（(int) 语义——接触面 :44714 Notes① 判例，round 会抬 .5 中点；旧门
+ *  Math.round 系域错死码期错档，随本刀勘正）。
+ *  ★D6 销案（BJ710-G35 2026-10-25）：max(1) 下限=仓内自创、保留为已知分歧——
+ *  原版 (int) 无下限（1 伤弹 ×0.5 归 0），但触发面=敌弹 base dmg=1 且发射者有旗
+ *  （仓内敌弹最小伤面=蒲公英籽 836 的 7,远高于 1）→ 分歧不可达，销案锁死勿再登记
+ *  （接触面 :44718 同形 floor 同判例）。bannerNpcId 空/无旗/未放旗 = 原值直返；
+ *  PvP 调用面不进本函数（Damage_PVP 无此段）。 */
+export function applyBannerDamageReceivedOnProj(
+  game: GameHooks, dmg: number, bannerNpcId: number | null | undefined,
+): number {
+  const vid = bannerNpcId ?? null;
+  if (vid == null || vid === 0) return dmg;
+  const g = game as unknown as { bannerNpcActive?: (id: number) => boolean };
+  if (!g.bannerNpcActive?.(vid)) return dmg;
+  const bItem = bannerItemId(bannerOfNpc(vid));
+  if (!(bItem > 0)) return dmg;
+  const world = (game as unknown as { world?: Parameters<typeof mainDifficulty>[0] }).world;
+  // ★BJ716-A（R15-P2-4）：mainExpertMode 布尔档 → mainDifficulty 曲线式——旅程滑杆
+  //  分数难度∈(1,2) 原版连续插值（R15 判例3「布尔档只在整数难度轴等价」），
+  //  非旅程整数值两式逐值相同（bannerReceivedMult 体内钳界保证）
+  return Math.max(1, Math.trunc(dmg * bannerReceivedMult(mainDifficulty(world), bItem)));
+}
+
+/** ★BJ710-C：bossAI 弹域直调站（game.damagePlayer+projDomain 14 站，BJ704-R3 P1①
+ *  锁面）统一伤害出口——原版 Damage_EVP :14905-14918 门序投影：**banner 减伤 →
+ *  难度缩放 → 恒 ×2**。banner 必须在缩放【前】：trunc 边界序不可交换
+ *  （trunc(trunc(13×0.75)×2)=36 ≠ trunc(trunc(13×2)×0.75)=38）。直调站均为非反射
+ *  载体（死光/爆盒/跺地波/龙卷列等不可反射实体），无 reflected 门（反射门只在
+ *  hitPlayer——可反射 Arrow/Dart 载体域）。bannerNpcId=null（世界机关面
+ *  MeteorChunk/FallingBlock/探针桥）= 旧行为逐位不变。
+ *  ★BJ710-G35 D7b（2026-10-25）：trap 弹加 sweater 面（:14919-14922 `deadMansSweater
+ *  && trap → ×0.5 截断再 min 300`,在 ×2 【后】——cap 吃终值）——直调站现役 trap 弹
+ *  唯 1078 MeteorOre（MeteorChunk,TRAP_PROJ_VIDS 同源）;其余站不传 = 逐位不变。
+ *  sweater 旗读 game.player.equipStats.deadMansSweater（SW-AC1 单源,GrantArmorBenefits
+ *  case 5007）。 */
+export function evpDirectDmg(
+  game: GameHooks, dmg: number, bannerNpcId: number | null | undefined, trap = false,
+  /** ★BJ716-A（R15-P2-3≈BJ712-C D1，2026-10-25）：弹型 id——resistCold 门
+   *  （Projectile.cs:14909-14912 `if (Main.player[myPlayer].resistCold &&
+   *  coldDamage) num3 = (int)(num3 * 0.7f)`，Damage_EVP 链内 banner 后、
+   *  hostileDamageScaling 前）查 COLD_DAMAGE_PROJS（hitPlayer :866 同表同门
+   *  +BuffType.Warmth）。唯一直调站冷弹面 = 961/962（Deerclops 冰锥/冰浪，
+   *  P.cs:9089/:9100 coldDamage=true 亲证;965 非冷余站全非 COLD 表）。
+   *  缺省 undefined = 非冷弹旧行为逐位不变（温暖药水下鹿角怪冰伤曾 ~1.43×） */
+  projVid?: number,
+): number {
+  let mid = applyBannerDamageReceivedOnProj(game, dmg, bannerNpcId);
+
+  if (projVid !== undefined && COLD_DAMAGE_PROJS.has(projVid)
+    && (game.player as unknown as { buffs?: { has?: (b: BuffType) => boolean } } | null)
+      ?.buffs?.has?.(BuffType.Warmth) === true) {
+    mid = Math.trunc(mid * 0.7);   // :14909-14912（(int) 截断）
+  }
+  let out = hostileProjectileDamage(mid, mainDifficulty(game.world)) * 2;
+  if (trap) {
+    out = (game.player as unknown as { equipStats?: { deadMansSweater?: boolean } } | null)
+      ?.equipStats?.deadMansSweater === true
+      ? Math.min(Math.trunc(out * 0.5), 300) : out;
+  }
+  return out;
+}
+
+/** ★BJ716-A（R18-F1，2026-10-25）：expert EoW 虫段 /5 的 20 弹型表——
+ *  Projectile.cs:13392-13398 条件行 :13394 逐项照抄（原表曾落 Game.ts
+ *  explodeNpcDamageChain 专面,本刀提为弹域单源,Game 侧静态字段转发——多副本
+ *  漂移收敛,BJ712-B 判例1 同族）。181/183/281/566 不走爆炸 face（explodeAt 无
+ *  投掷点,Game.ts:33318 自注）,全表收录=1:1。 */
+export const EXPERT_EOW_FIFTH_PROJS: ReadonlySet<number> = new Set([30, 397, 517, 28, 37, 516, 29, 470, 637,
+  1086, 1087, 108, 281, 588, 519, 773, 183, 181, 566, 1002]);
+
+/** ★BJ716-A（R18-F1）：`Main.expertMode && 表含弹型 && targetNPC.type 13-15 →
+ *  dmg /= 5`（int 截断）。位次 = banner(:13388-13390) 后、crit 翻倍（StrikeNPC
+ *  :13702 内）前——dealContacts/projTargets 三消费链按此序接。目标键域 =
+ *  vanillaId（type 域——原文读 targetNPC.type;EoW 头/身/尾 13/14/15 无 netID
+ *  变体,勿走 bannerNpcKeyOf）。专家门 = mainExpertMode（GDL Difficulty≥2,
+ *  旅程滑杆/FTW+1 感知——R14 判例3）。 */
+export function expertEowFifthDmg(
+  dmg: number, projId: number,
+  targetVid: number | null | undefined,
+  world: Parameters<typeof mainExpertMode>[0],
+): number {
+  if (!mainExpertMode(world)) return dmg;
+  if (!EXPERT_EOW_FIFTH_PROJS.has(projId)) return dmg;
+  const t = targetVid ?? -1;
+  if (t < 13 || t > 15) return dmg;
+  return Math.trunc(dmg / 5);
 }
 
 // ---- ★α-H4 OnHit 域出口谓词（HittableForOnHitRewards 统一收口） ----------------
@@ -687,16 +805,20 @@ export const evpNoCheeseSlot = (projId: number | undefined): boolean =>
  *  （:6619-6626 applyAfterHit num10）自动接管——调用方零重复。 */
 export function damageEvPNoCheese(
   game: GameHooks, dmg: number, sx: number, sy: number, attacker?: import('./Enemy').Enemy,
+  /** ★BJ710-G35 D4（2026-10-25）：opts 透传——BossNoCheese 直调站的弹域双旗
+   *  （projDomain+projVid,Game.damagePlayer :44690 mod 修正链门）此前缺失=静默
+   *  no-op（BJ704-R3 P1 同款病）。现役唯一消费 = MLDeathray 455。 */
+  opts?: { projDomain?: boolean; projVid?: number },
 ): number {
   const buckets = getGlobalHurtBuckets();
   const p = game.player;
-  if (!buckets || !p) return game.damagePlayer(dmg, sx, sy, attacker);
+  if (!buckets || !p) return game.damagePlayer(dmg, sx, sy, attacker, undefined, undefined, undefined, opts);
   const chan = p as unknown as {
     __swNextHitBucket?: { id: number; table: ReturnType<typeof getGlobalHurtBuckets> } | undefined;
   };
   chan.__swNextHitBucket = { id: ImmunityCooldownID.BossNoCheese, table: buckets };
   try {
-    return game.damagePlayer(dmg, sx, sy, attacker);
+    return game.damagePlayer(dmg, sx, sy, attacker, undefined, undefined, undefined, opts);
   } finally {
     chan.__swNextHitBucket = undefined;
   }
@@ -772,15 +894,19 @@ export function hitPlayer(
   //   Game.netPuppetProjContact 已按原文次序预掷+856 修正后再进本函数；此处再掷 =
   //   双重 ±15% 复合（实测偏移可达 ±0.28σ 面）。keep single-roll：caller 面为唯一掷点
   if (!pvp) dmg = damageVar(dmg, -p.luck);
-  // R5-F22：旗 buff 减伤对敌弹生效（Projectile.cs:13763-13765 `GetBannerBuffEffect(
-  // bannerIdToRespondTo)`——bannerIdToRespondTo = 发射 NPC 的 banner（:11112-11116
-  // FindBannerToAssociateTo）。本仓弹体侧仅 Dart 带 ownerNpcId,其余族发射者追踪
-  // 未建模——有 ownerNpcId 即吃旗减伤,无则跳过（登记）
+  // R5-F22（★BJ710-C 2026-10-25 域勘正+全链接线）：旗 buff 减伤对敌弹生效（1457
+  //  Projectile.cs:14905-14908 `GetBannerBuffEffect(bannerIdToRespondTo)`——
+  //  bannerIdToRespondTo = 发射 NPC 的旗（:11106-11119 FindBannerToAssociateTo，
+  //  EntitySource_Parent(NPC.cs:91865) 恒注入）。★域勘误：旧门读 Dart.ownerNpcId
+  //  ——那是【实体 id】（whoAmI/G3 宿主绑定域，Dart.hostOf 按 e.id 查找消费），而
+  //  bannerNpcActive 键域 = NPC 类型/变体 id（_bannerNpcs=scanBannerNpcs 产物，
+  //  接触面 :44717 同域）→ 旧门域错=死码（实体 id 撞上有效旗类型 id 时反会误减伤）。
+  //  修 = 发射侧统一写 bannerNpcId（类型域，Enemy.spawnHostileProj/shootDart +
+  //  bossAI 14 直调站实体），消费走 applyBannerDamageReceivedOnProj 单源（itemId
+  //  档区分 DD2 旗 0.917/0.833 + trunc 截断——旧 Math.round 系 .5 中点抬升错档）。
+  //  无 bannerNpcId（世界机关/探针桥/未接线余量族）恒跳过——余量发射站点登记债。
   if (!pvp) {
-    const srcNpcId = (self as { ownerNpcId?: number }).ownerNpcId ?? 0;
-    if (srcNpcId > 0 && (game as { bannerNpcActive?: (id: number) => boolean }).bannerNpcActive?.(srcNpcId)) {
-      dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(game.world))));
-    }
+    dmg = applyBannerDamageReceivedOnProj(game, dmg, (self as { bannerNpcId?: number | null }).bannerNpcId);
   }
   // 温暖(124) resistCold：寒冷系敌弹 ×0.7（Projectile.cs:13766-13768——banner 段后、
   // hostileDamageScaling 前；(int) 截断）。PvP 弹走 Damage_PVP 无此段,不乘
@@ -793,29 +919,50 @@ export function hitPlayer(
   //  pvp=Damage_PVP 族/trap=陷阱弹经 ctx 透传供分支)
   dmg = runModModifyHitPlayerByProj(p, game, evpId ?? -1, dmg, trap, pvp);
   const ifr = p.iframes;
-  // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:14912-14917，Damage_EVP 段）：
+  // ★ 玩家受伤难度乘区 + 全局 ×2（1457 Projectile.cs:14913-14918，Damage_EVP 段）：
   //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`
   //   随后 `int num4 = 2; num3 *= num4;`——敌弹对玩家恒 ×2（对所有难度，含经典）。
   //   hostileDamageScaling = GameDifficultyData.HostileProjectileDamageMultiplier
-  //   （Projectile.cs:264/544：旅程 0.5 / 经典 1 / 专家 2 / 大师 3）。
+  //   （Projectile.cs:480/806：旅程 0.5 / 经典 1 / 专家 2 / 大师 3；type 1091 特化
+  //   LightningPlayerDamageScaling 在 proj1457 落雷家自管，不经本口）。
   //   NPC 接触伤害不走这里——其难度缩放在生成时由 NPC.ScaleStats 完成
   //   （Enemy.def.damage 已是缩放值），在此再乘会双重缩放；
   //   但接触伤害同样吃这 ×2？否——×2 只在 Projectile.Damage_EVP（弹幕侧），
   //   接触侧是 Player.Hurt 直入（Enemy.def.damage 已是 ScaleStats 终值）。
-  //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
+  //   ★BJ710-C 件1（2026-10-25 用户转报核验）：!reflected 门此前缺失——反射弹
+  //   （reflectProjectile :937 置 reflected=true+hostile=true 后确实走本函数敌面）
+  //   曾在专家被 ×2(缩放)×2=×4、大师 ×6，原版反射弹跳过缩放只吃末尾恒 ×2。
+  //   门序=原文亲读：banner/resistCold 段【无】reflected 门（:14905-14912——
+  //   反射弹照吃旗减伤/寒冷减伤），唯缩放段有门。旧注「本函数调用方均为 hostile
+  //   弹幕，无 reflected 路径」系陈旧错注（反射弹 hostile=true 即达），随刀勘正。
   const evpDmg = pvp
     ? dmg
-    : hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2;
+    : ((self as { reflected?: boolean }).reflected
+      ? dmg
+      : hostileProjectileDamage(dmg, mainDifficulty(game.world))) * 2;
+  // ★BJ710-G35 D7a（2026-10-25）：Dead Man's Sweater && trap 减半 + 300 帽
+  //  （:14919-14922 `if (Main.player[myPlayer].deadMansSweater && trap) { num3 =
+  //  (int)(num3 * 0.5f); num3 = Math.Min(num3, 300); }`——在 ×2 【后】、Hurt 前）。
+  //  sweater 旗 = equipStats.deadMansSweater（SW-AC1 单源,胸甲 vi_5007）;trap 形参
+  //  由 TrapShot 族/1049 冰雹传 true。★pvp=Damage_PVP 无此段（:14637-14845 区间
+  //  无 sweater 面）;reflected 无门（原文无——反射陷阱弹照吃,仓内 TrapShot 传
+  //  !reflected 系既有分歧行为,登记勿在本刀改）。12 落星/108·1002 自伤/1091 雷
+  //  三面各有已建模消费点（FallingStar 内联/selfHurtSweaterCap/lightningEvpFinalDamage）。
+  const sweaterDmg = !pvp && trap
+    && (p as unknown as { equipStats?: { deadMansSweater?: boolean } }).equipStats
+      ?.deadMansSweater === true
+    ? Math.min(Math.trunc(evpDmg * 0.5), 300)
+    : evpDmg;
   let dealt = 0;
   if (noCheese) {
     // ★Boss 面⑥：452/454/455/462 等走独立 BossNoCheese 槽（damageEvPNoCheese 内部
     // 经 __swNextHitBucket 注入——门/写两面都在 Player.damage 原位发生）。该路径下
     // iframes 不动，落地判定改读实扣值（= 原版 Hurt 返回 num>0 语义）。
-    dealt = damageEvPNoCheese(game, evpDmg, self.x + self.w / 2, self.y + self.h / 2);
+    dealt = damageEvPNoCheese(game, sweaterDmg, self.x + self.w / 2, self.y + self.h / 2);
   } else {
     // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:14912-14917）；
     // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar 直传
-    game.damagePlayer(evpDmg, self.x + self.w / 2, self.y + self.h / 2, undefined, false, pvp);
+    game.damagePlayer(sweaterDmg, self.x + self.w / 2, self.y + self.h / 2, undefined, false, pvp);
   }
   // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
   // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）
@@ -828,7 +975,7 @@ export function hitPlayer(
   return noCheese ? dealt > 0 : p.iframes > ifr;
 }
 
-// ================= 弹幕反射管线（原版 Projectile.cs:12050-12060 + NPC.cs:67003-67059） =================
+// ================= 弹幕反射管线（原版 Projectile.cs:12781-12791 + NPC.cs:67156-67212；1456 行号 :12050-12060/:67003-67059——BJ710-C 勘正 1457 锚） =================
 
 /** 可反射 aiStyle 白名单（Projectile.CanBeReflected，Projectile.cs:20224）：
  *  1 箭/子弹直飞弹、2 抛物线投掷物、8/21/24/28/29/131 各特化直线弹。
@@ -857,14 +1004,20 @@ export function projCanBeReflected(
   return REFLECTABLE_AI_STYLES.has(projectileData(projId)?.aiStyle ?? -1);
 }
 
-/** 原版 NPC.ReflectProjectile（NPC.cs:67036-67059）：
- *  - 音效 Item150 + 尘 31×3（velocity×0.3）；
+/** 原版 NPC.ReflectProjectile（1457 NPC.cs:67189-67212；1456 :67036-67059——
+ *  BJ710-C 勘正 1457 锚）：
+ *  - 音效 Item150 + 尘 31×3（velocity×0.3，:67191-67196）；
  *  - reflected=true、friendly=false、hostile=true（owner 不变——"朝发射者"
- *    方向读 Main.player[owner]，本仓单主角恒为 game.player）；
- *  - 速度 = normalize(随机方向×原速 + 朝发射者×20) × 原速（:67047-67055，
- *    即随机散射偏向回打玩家；原速取 oldVelocity.Length，此处用当前速度近似）；
- *  - damage ÷2 两次（int 语义 ≈ ÷4）+ penetrate=1（穿透归一，穿透字段的
- *    清理由调用方按各自存储执行）。 */
+ *    方向读 Main.player[owner]，本仓单主角恒为 game.player；hostile 翻转后
+ *    反射弹走 hitPlayer 敌面——:966 早退门放行、Damage_EVP 全链照走）；
+ *  - 速度 = normalize(归一随机方向×原速 + 朝发射者×(原速×20)) × 原速（:67200-67208
+ *    ——vector=unit(朝发射者)×oldVelocity.Length,偏置=vector×20;随机项先
+ *    Normalize 再×原速,故锥角恒 ≤2.9°(atan(1/20))、终速恒 |oldVelocity|。
+ *    ★BJ716-A 2026-10-25 勘误（R15-P2-5）：旧式 unit×20 裸值+随机项未归一×speed
+ *    ——速 ≥10 锥宽暴涨、速 >~28 随机项主导可反向飞离玩家;原速取
+ *    oldVelocity.Length,此处用当前速度近似（既有登记近似保持））；
+ *  - damage ÷2 两次（int 语义 ≈ ÷4）+ penetrate=1（:67209-67211，穿透归一，
+ *    穿透字段的清理由调用方按各自存储执行）。 */
 export function reflectProjectile(proj: ReflectableProj, game: GameHooks): void {
   const cx = proj.x + proj.w / 2, cy = proj.y + proj.h / 2;
   // Item_150 未入音效提取库（public/sounds 无此 wav）：playSfxFile 未命中静默，
@@ -873,7 +1026,7 @@ export function reflectProjectile(proj: ReflectableProj, game: GameHooks): void 
   game.spawnParticles(cx, cy, '#D8D8E0', 3, 0.6, { life: 24, damp: 0.9 });
   proj.reflected = true;
   proj.hostile = true;
-  // 反射向量（NPC.cs:67047-67055）
+  // 反射向量（1457 NPC.cs:67200-67208；1456 :67047-67055）
   const p = game.player;
   const speed = Math.hypot(proj.vx, proj.vy);
   let ox = p.cx - cx, oy = p.cy - cy;
@@ -881,17 +1034,23 @@ export function reflectProjectile(proj: ReflectableProj, game: GameHooks): void 
   if (od > 0.001) { ox /= od; oy /= od; }
   else if (speed > 0.001) { ox = -proj.vx / speed; oy = -proj.vy / speed; } // 重合退化:原路弹回
   else { ox = 0; oy = -1; }
-  // 随机方向 = Main.rand.Next(-100,101) 双轴归一（此处 [-1,1) 均匀近似）
+  // 随机方向 = Main.rand.Next(-100,101) 双轴采样后【Normalize】（:67202-67204——
+  //  归一随机单位向量×|v|）;偏置 = unit(朝发射者)×(|v|×20)（:67200/:67205-67206
+  //  vector 先乘 oldVelocity.Length 再 ×20——★BJ716-A 勘误:旧式 unit×20 裸值+
+  //  随机项未归一×speed,速>20 随机项主导=锥宽爆表/可反向飞离;修后锥恒 ≤2.9°
+  //  (atan(1/20)),终速恒 |oldVelocity|）
   const rx = Math.random() * 2 - 1, ry = Math.random() * 2 - 1;
-  let dx = rx * speed + ox * 20, dy = ry * speed + oy * 20;
+  const rl = Math.hypot(rx, ry);
+  const ux = rl > 0 ? rx / rl : 0, uy = rl > 0 ? ry / rl : 0;
+  let dx = ux * speed + ox * speed * 20, dy = uy * speed + oy * speed * 20;
   const dl = Math.hypot(dx, dy);
   if (dl > 0.001) { proj.vx = (dx / dl) * speed; proj.vy = (dy / dl) * speed; }
   else { proj.vx = ox * 6; proj.vy = oy * 6; } // 零速退化:低速直飞回发射者
-  // 伤害衰减（int 连除两次）+ penetrate=1（:67056-67058）
+  // 伤害衰减（int 连除两次）+ penetrate=1（:67209-67211；1456 :67056-67058）
   proj.damage = Math.floor(Math.floor(proj.damage / 2) / 2);
 }
 
-/** 弹体命中敌怪分支的反射门禁 + 执行（原版 Projectile.cs:12050-12060：
+/** 弹体命中敌怪分支的反射门禁 + 执行（原版 1457 Projectile.cs:12781-12791（1456 :12050-12060）：
  *  flag6 = targetNPC.reflectsProjectiles（getGoodWorld 星弹特例未接入——运行时
  *  无 FTW 标志），命中重叠本身即 NPC.CanReflectProjectile 的 Hitbox 相交）。
  *  返回 true = 已反射，调用方跳过本次伤害结算并结束本帧命中迭代
@@ -913,7 +1072,7 @@ export function tryReflectProjectile(
  *  Projectile.cs:13721-13725，1456 :12830-12834 / 1458 :13722-13726 三基线同值）：
  *  `if (flag8 && active && timeLeft > 10 && targetNPC.active && targetNPC.type == 676
  *  && CanBeReflected()) { targetNPC.ReflectProjectile(this); penetrate++; }`
- *  ★与 tryReflectProjectile（:12050-12060 事前支）不同域——676 全 SetDefaults/AI
+ *  ★与 tryReflectProjectile（1457 :12781-12791 事前支）不同域——676 全 SetDefaults/AI
  *  【零】置 reflectsProjectiles（1457 NPC.cs grep 全量核），故事前支对 676 恒不触发；
  *  本支位于 StrikeNPC（:13706）【之后】、穿透外层递减之前 ⇒ 原版语义 = 微光史莱姆
  *  吃弹掉血【同时】把弹打回玩家（伤害 ÷4、hostile 翻转、速度=|原速| 向玩家偏置 20 权重），

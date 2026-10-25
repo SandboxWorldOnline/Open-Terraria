@@ -1491,6 +1491,62 @@ function makeGame(): Game {
     }
   }
 
+  // ===== vanilla interop（?vanilla=host:port 自动加入,2026-10-24;多人面板入口 2026-10-25）=====
+  // 链路:浏览器 →(WS)→ 桥(server/src/vanillaBridge.ts,缺省 127.0.0.1:5290,?vbridge= 可换)
+  //   →(raw TCP)→ 原版 1.4.5.8 服。P0-B 范围=进世界+走动+服务器 tile 流;角色全量上传
+  //   (真物品/外观)属 P1,本地角色态暂不回放（避免与服务器空物品账分叉）。
+  let vanillaAutoJoined = false;
+  /** 原版服加入流（?vanilla= 自动加入与多人面板「连接原版服」入口共用;target=host:port） */
+  async function joinVanillaServer(target: string): Promise<void> {
+    try {
+      console.info('[vanilla-flow] join 启动 target=' + target);
+      const [host, portRaw] = target.split(':');
+      const port = parseInt(portRaw || '7777', 10);
+      const bridgePort = new URLSearchParams(location.search).get('vbridge') ?? '5290';
+      // 诊断透传（?vdump=NAME → 桥下行帧账 /tmp/vbridge-NAME.log——服务器对我方连接发了什么）
+      const vdump = new URLSearchParams(location.search).get('vdump');
+      const g = makeGame();
+      console.info('[vanilla-flow] makeGame 完成,开始连接桥');
+      // ★名字/外观正源（2026-10-25 用户实报同名踢定谳）：角色随身态表单
+      // （SaveData.player）无 appearance 字段——曾按 playerFromDiskForm(cs)
+      // .appearance?.name 读 = 恒 undefined → 全员回退默认名「玩家」→ 任何两
+      // 并发会话必撞服务器同名拒绝（mp[5],MessageBuffer.cs:362-374）。
+      // 正源 = charStore.get(cid)（Appearance:name+skinVariant+hair+7 色）
+      // 或面板选角拍（selectedAppearance）。
+      const cid = charContextId();
+      const app = (cid != null ? await charStore.get(cid) : null) ?? selectedAppearance;
+      const cs = cid != null ? await charStore.getState(cid) : null;
+      const diskForm = cs ? playerFromDiskForm(cs) : null;
+      if (app?.name) {
+        (g as unknown as { pendingJoinName?: string }).pendingJoinName = app.name;
+        (g as unknown as { pendingJoinAppearance?: typeof app }).pendingJoinAppearance = app;
+      }
+      // 随身态 stash（msg5 真物品上传:服务器侧防御/伤害正确的生存基础）
+      (g as unknown as { pendingJoinItems?: unknown }).pendingJoinItems = diskForm;
+      ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
+      await g.joinVanillaGame(`ws://127.0.0.1:${bridgePort}/?host=${encodeURIComponent(host)}&port=${port}${vdump ? `&dump=${vdump}` : ''}`,
+        (label, p) => ui.showProgress(label, 0.1 + p * 0.8));
+      // 本地角色态回放（joinRoom 非 SSC 同款语义:vanilla 非 SSC 服=客户端权威,
+      // 本地物品与上传账一致;缺这步=本地默认背包 vs 服务器真装备分叉）
+      if (diskForm) {
+        applyPlayer(g, { ...diskForm, x: g.player.x, y: g.player.y });
+      }
+      // 全量物品/属性再同步（本地权威→服务器终拍:新角色起始包/读档装备全覆盖,
+      // 服务器 CanRelay 中继=他人渲染我方纸娃娃）
+      (g.net as unknown as { syncFullInventory?: () => void }).syncFullInventory?.();
+      ui.hideProgress();
+      console.info('[vanilla-flow] 加入完成');
+    } catch (e) {
+      console.error('[vanilla-flow] 失败:', (e as Error)?.message, e);
+      ui.hideProgress();
+      ui.toast(`原版服连接失败：${(e as Error).message}`);
+      showTitle();
+    }
+  }
+  async function autoJoinVanilla(target: string): Promise<void> {
+    await joinVanillaServer(target);
+  }
+
   /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}）。
    *  v8 rules 透传（serverAuth=true = 服务器权威房,世界由 SimHost 计算,建房者亦为访客） */
   async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number; rules?: Partial<import('./net/protocol').RoomRules> } = {}): Promise<{ code: string; hostToken: string; gmToken?: string; error?: string }> {
@@ -1540,6 +1596,12 @@ function makeGame(): Game {
     let panelRoot: HTMLElement | null = null;
     const closePanel = () => { panelRoot?.remove(); panelRoot = null; };
     const panel = new MultiplayerSelect({
+      // 连接原版服务器（vanilla interop P0,2026-10-25;target=host:port 经本地桥转发,
+      // 与 ?vanilla= 自动加入同一 joinVanillaServer 流）
+      onJoinVanilla: (target) => {
+        closePanel();
+        void joinVanillaServer(target);
+      },
       // v3 房间制：onJoinRoom(url, hostToken[, worldId])——url 含 /<房间码>[?token=];
       // worldId=建房链传入的本机世界槽位 id（★BJ704-G7 件1:联机玩自家世界的
       // playedWorlds 绑定;码入房不传=无绑定不记,见 doSave 注边界声明）
@@ -1932,6 +1994,14 @@ function makeGame(): Game {
     // ★BJ280：回标题清拦截态（标题界面永不 dirty;覆盖 quitToMenu 保存失败仍退出
     // 的路径——原版失败可离开语义,拦截面随之解除）
     worldDirty = false;
+    // ★vanilla interop 自动加入（?vanilla=host:port;仅首启触发一次,失败回标题）
+    if (!vanillaAutoJoined) {
+      const vp = new URLSearchParams(location.search).get('vanilla');
+      if (vp) {
+        vanillaAutoJoined = true;
+        void autoJoinVanilla(vp); // 异步叠加进度层,标题装配照常完成
+      }
+    }
     audio.play('title', titleStyleMusicId());   // IIII225 种子覆写 + IIIII228 TitleMusicStyle 细分
     ui.closeAll();
     // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标

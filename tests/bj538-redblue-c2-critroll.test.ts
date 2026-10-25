@@ -212,7 +212,7 @@ describe('BJ-C2/F3：天降三剑 503 掷率（类缺省门闭=永不暴击必�
     const { hooks, player } = makeHooks([e]);
     vi.spyOn(player, 'critChance').mockReturnValue(0);
     vi.spyOn(player.inv, 'heldItem').mockReturnValue(null);
-    vi.spyOn(Math, 'random').mockReturnValue(0.03);
+    let d503b = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d503b++ === 0 ? 0.03 : 0.5));   // 首掷=crit 阈值(0.03<0.04 照暴);后续=★BJ716-A DV 中性档(×1.0)
     const star = new Arrow(520, 585, 8, 0, 10, 1, 503, { grav: 0, life: 900, pierce: 2 });
     star.critChance = 0.04;                               // 迁移后 spawn 形
     step([star], 20, hooks);

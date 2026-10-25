@@ -42,7 +42,7 @@
 //   C3/C5 落叶域锁在 tests/nature-particles.test.ts。
 //
 // 运行：cd game && npx vitest run tests/bj650-summon-vfx.test.ts
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -371,6 +371,7 @@ describe('② 件1：864 辉光色式 + 白模 4 份 + 残影接线', () => {
 
 describe('③ 件2：533 localAI[2]≥40 伤害 ×0.5', () => {
   it('dLai2≥40 → 受击伤害减半截断（dmg0=6 → 3）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（533 contact 首掷 ×1.0）
     const e = mkEnemy(30, 0, 0);
     const { hooks, player } = makeHooks([e]);
     const m = minion(player, hooks, 533, player.cx + 100, player.cy);
@@ -382,6 +383,7 @@ describe('③ 件2：533 localAI[2]≥40 伤害 ×0.5', () => {
   });
 
   it('dLai2<40 → 全额（6）——阈值下沿不触发', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（533 contact 首掷 ×1.0）
     const e = mkEnemy(31, 0, 0);
     const { hooks, player } = makeHooks([e]);
     const m = minion(player, hooks, 533, player.cx + 100, player.cy);
@@ -393,6 +395,7 @@ describe('③ 件2：533 localAI[2]≥40 伤害 ×0.5', () => {
   });
 
   it('奇数伤害截断档（dmg0=7 → 3,非 3.5/4）——num7 (int) 语义', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（533 contact 首掷 ×1.0）
     const e = mkEnemy(32, 0, 0);
     const { hooks, player } = makeHooks([e]);
     const m = new MinionProj(player.cx + 100, player.cy, 533, 7, 0, false, 0, false, () => player);
@@ -608,6 +611,7 @@ describe('⑧ 清偿 C7/R2-F3：963 伤害源=highestAbigailCounterOriginalDamag
   });
 
   it('后入高伤计数器 → 存活 963 每拍伤害面随 max 刷新（:66083 每拍回填;旧快照 6 → 红）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const e = mkEnemy(60, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
     const a = counter(player, hooks, 6);

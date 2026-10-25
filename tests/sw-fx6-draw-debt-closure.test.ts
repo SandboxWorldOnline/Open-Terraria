@@ -186,10 +186,13 @@ describe.skipIf(EXT_MISSING)('SW-FX6 债② 691-693 陷阱塔 B 支 Bottom 锚�
       m.facing = -1;                                                 // dir≡None——翻转必须不发生
       const rec = recordingCtx();
       m.draw({ ctx: rec.ctx } as never);
-      expect(rec.translates, `proj ${id} anchor=Bottom`).toEqual([[m.cx, m.y + m.h]]);
+      // ★G30（2026-10-24）存量红转绿：第二 translate=R15-F2 辉光叠画捕获锚
+      //  （Main.cs:34507-34521 同锚同参;2026-09-10 立锁时该笔未在,陈旧期望单笔）
+      expect(rec.translates, `proj ${id} anchor=Bottom×2（本体+辉光）`)
+        .toEqual([[m.cx, m.y + m.h], [m.cx, m.y + m.h]]);
       expect(rec.draws[0].args, `proj ${id} origin=(fw/2,fh−4)`).toEqual([-fw / 2, -(fh - 4)]);
       expect((m.y + m.h - (fh - 4) + fh) - (m.y + m.h)).toBe(4);     // 精灵底−盒底=+4
-      expect(rec.scales, `proj ${id} dir≡None 不镜像`).toEqual([]);
+      expect(rec.scales, `proj ${id} dir≡None 不镜像（drawScale=1 无 scale）`).toEqual([]);
     });
 
     it(`proj ${id}：携行态（ai[2]==1）不重锚 = B 支缺省盒心锚、origin=帧心`, () => {
@@ -200,7 +203,9 @@ describe.skipIf(EXT_MISSING)('SW-FX6 债② 691-693 陷阱塔 B 支 Bottom 锚�
       const fh = th / 4, fw = tw;
       const rec = recordingCtx();
       m.draw({ ctx: rec.ctx } as never);
-      expect(rec.translates, `proj ${id} 携行锚=盒心`).toEqual([[m.cx, m.cy]]);
+      // ★G30：第二 translate=辉光捕获锚（携行随 B 支缺省盒心,:34507 无 ai[2] 门照画）
+      expect(rec.translates, `proj ${id} 携行锚=盒心×2（本体+辉光）`)
+        .toEqual([[m.cx, m.cy], [m.cx, m.cy]]);
       expect(rec.draws[0].args, `proj ${id} origin=帧心`).toEqual([-fw / 2, -fh / 2]);
     });
   }

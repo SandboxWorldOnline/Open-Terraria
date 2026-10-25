@@ -11,7 +11,7 @@
 //     泡体纯载体不结算接触伤害（Damage_CanDealDamage :11782 豁免表含 444）、
 //     timeLeft 钳 60（:29711-29713）逐子步消耗（:15861）/ 撞块即爆 → Kill
 //     （:70282-70303）按锁定弹型/弹速（localAI[0]/[1]）回调 Game 生成真子弹
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
 import { Arrow } from '../src/entities/Arrow';
@@ -135,12 +135,14 @@ const hitOnce = (projId: number, vanillaId: number | null, dmg = 30): number[] =
 
 describe('② 银弹 981 对狼人（NPCID 104）×3（P.cs:12594-12597 num12 *= 3）', () => {
   it('981 × vanillaId 104 → 30×3=90（暴击翻倍前同槽位）；×103 对照 → 30', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0）
     expect(hitOnce(981, 104)).toEqual([90]);
     expect(hitOnce(981, 103)).toEqual([30]);
     expect(hitOnce(981, null)).toEqual([30]);
   });
 
   it('弹型门：普通火枪弹 14 打狼人仍 30（仅 981 吃倍率）；奇偶伤截断 25→75', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     expect(hitOnce(14, 104)).toEqual([30]);
     expect(hitOnce(981, 104, 25)).toEqual([75]);
   });

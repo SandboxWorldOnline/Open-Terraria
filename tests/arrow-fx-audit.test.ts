@@ -340,8 +340,11 @@ describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位
     // ai[1]==0 首拍同拍)——正则改从 Arrow(…576) 向后窗找 Item_12
     // ★SW-FX9(2026-09-10)：`, null,`（旧 dropKey 占位实参）已随回收链摘除,窗匹配
     // 改按 576 出生实参尾锚
+    // ★BJ710-C(2026-10-25)：窗 320→420——576 发射位合法增重（ArrowOpts 增
+    //  bannerNpcId 旗透传=574 子弹继承父弹旗,FindBannerToAssociateTo :11110-11113）,
+    // 断言语义不变(出膛音仍锚在 576 出生语句块内)
     const m = src.match(
-      /576,[\s\S]{0,320}?playSfxWav\?\.\('Item_12'/);
+      /576,[\s\S]{0,420}?playSfxWav\?\.\('Item_12'/);
     expect(m, 'bossAI_lunar_misc.ts 弹 576 出膛位缺 Item_12 播放').toBeTruthy();
   });
 });
@@ -380,15 +383,17 @@ describe('出膛音面金标·dormant 族（2026-09-03 任务一:9 型发射位�
 
   it('②机枪雪球 110：bossAI_moon_events.ts 发射位紧邻 shootE(…110) 播 Item_11', () => {
     const src = readSrc('../src/entities/bossAI_moon_events.ts');
+    // ★BJ710-G35 D1（2026-10-25）：发射位合法增重（143 旗透传 opts 尾参）——窗按
+    //  BJ710-C「576 出膛音」判例放宽（Item_11 紧邻语义不变）
     const m = src.match(
-      /shootE\(game, ox, oy, 12 \* e\.facing, 0, 25, 110\);[\s\S]{0,240}?playSfxWav\?\.\('Item_11'/);
+      /shootE\(game, ox, oy, 12 \* e\.facing, 0, 25, 110,[^;]*\);[\s\S]{0,240}?playSfxWav\?\.\('Item_11'/);
     expect(m, 'bossAI_moon_events.ts 弹 110 出膛位缺 Item_11 播放').toBeTruthy();
   });
 
   it('③骑手激光 438：bossAI_martian.ts 发射位紧邻 shootM(…438) 播 Item_12', () => {
     const src = readSrc('../src/entities/bossAI_martian.ts');
     const m = src.match(
-      /shootM\(game, oxp, oyp, sx, sy, 30, 438\);[\s\S]{0,520}?playSfxWav\?\.\('Item_12'/);
+      /shootM\(game, oxp, oyp, sx, sy, 30, 438,[^;]*\);[\s\S]{0,520}?playSfxWav\?\.\('Item_12'/);
     expect(m, 'bossAI_martian.ts 弹 438 出膛位缺 Item_12 播放').toBeTruthy();
   });
 

@@ -79,19 +79,17 @@ const lerpValue = (from: number, to: number, t: number): number =>
 /** 原版 Vector2.Lerp */
 const vLerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
-/** 伤害/防御基值缓存(状态机每 tick 从基值派生临时修正,防重复乘膨胀;同 bossAI.baseStats) */
+/** 伤害/防御基值缓存(状态机每 tick 从基值派生临时修正,防重复乘膨胀;同 bossAI.baseStats)。
+ *  ★BJ712-A(2026-10-25 转报件3/4):基值=首 AI 拍捕获的 def.damage/def.defense
+ *  =ScaleStats 后值(原版 defDamage/defDefense 快照,NPC.cs:18199-18201 在
+ *  ScaleStats 尾部落成——AI 派生写 `damage=(int)(defDamage×num)` 族消费的是
+ *  缩放后基线,女皇 :47432/史后无写位)。旧实现回落 e.vanilla.damage(未缩放
+ *  原值)→ 女皇/史后每拍覆写把难度缩放抹平(80/80/80、60/60/60),回落退场,
+ *  与 bossAI/golem/wof/duke 四处同语义对齐。 */
 const baseStats = new WeakMap<Enemy, { dmg: number; def: number }>();
 const baseOf = (e: Enemy): { dmg: number; def: number } => {
   let b = baseStats.get(e);
-  if (!b) {
-    // 首次进入时 def 可能已被别的状态改写——重新取原版数据基值兜底
-    b = { dmg: e.def.damage, def: e.def.defense ?? 0 };
-    if (e.vanilla) {
-      b.dmg = e.vanilla.damage ?? b.dmg;
-      b.def = e.vanilla.defense ?? b.def;
-    }
-    baseStats.set(e, b);
-  }
+  if (!b) { b = { dmg: e.def.damage, def: e.def.defense ?? 0 }; baseStats.set(e, b); }
   return b;
 };
 

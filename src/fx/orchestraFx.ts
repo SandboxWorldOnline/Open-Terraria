@@ -2033,13 +2033,18 @@ export function heatRayTrailFx(
   });
 }
 
-/** SpawnHelper_SpawnSingleLineDust(:2065-2074)：scale=rand(70..110)×0.013、velocity×0.2 */
+/** SpawnHelper_SpawnSingleLineDust(:2065-2074)：scale=rand(70..110)×0.013、velocity×0.2。
+ *  ★BJ708-A scale 直写勘正（2026-10-23）：原版 `dust.scale = Next(70,110)×0.013f`
+ *  是【后置覆写】（NewDust 抖动掷照走但不入值）——旧实现把终值当 spawn scale 形参
+ *  传入 = 被 NewDust 内建 ±20% 抖动再乘（带域 0.728..1.716 vs 原版 0.91..1.43）。
+ *  修 = spawn 后直写 d.scale（d.x/y 同款后置覆写面）。影响面 = aiStyle48 发束族
+ *  （160/162 三束型）尘径带归真。 */
 export function spawnSingleLineDust(
   game: GameHooks, type: number, x: number, y: number, color: string | null, rng: Rng = Math.random,
 ): void {
-  const d = game.spawnDust?.(x, y, 1, 1, type, 0, 0, 0, color ? hexToRgbArr(color) : null,
-    (((rng() * 40) | 0) + 70) * 0.013);
-  if (d) { d.x = x; d.y = y; d.vx *= 0.2; d.vy *= 0.2; }
+  const sc = (((rng() * 40) | 0) + 70) * 0.013;
+  const d = game.spawnDust?.(x, y, 1, 1, type, 0, 0, 0, color ? hexToRgbArr(color) : null, sc);
+  if (d) { d.x = x; d.y = y; d.scale = sc; d.vx *= 0.2; d.vy *= 0.2; }
 }
 
 // ==================== 环境杂件（ItemTransfer/PooFly/Dungeon/Heroicis/Voice/Nature/Lake/Snapping 环带/充能/HarpyCharm 家族） ====================

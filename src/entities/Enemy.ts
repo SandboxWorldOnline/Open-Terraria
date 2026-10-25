@@ -5,7 +5,7 @@ import { entityNet } from '../net/entitySyncHooks';
 // M3 Boss 伤害统计漏斗（/boss伤害;NPC.StrikeNPC→NPCDamageTracker.AddDamage :82129-82130。
 // entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
 import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
-import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
+import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS, bannerNpcKeyOf } from './projTargets';
 import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS } from '../data/tiles';
 import { TOWN_CRITTER_IDS, NPC_CATCHABLE } from '../data/critters';   // ★BJ704-G3 D7/D10：TownCritter 集(NPCID.cs:4827)/npcCatchable 集(Main.cs:9469+)单源
 import { walkPrediction } from './npcWalkPrediction';   // ★BJ704-G6 D12：AI_007 行走预测共享叶子（TownNPC 同源;Enemy↔TownNPC import 环防）
@@ -136,6 +136,7 @@ import {
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
   getKnockbackMultiplierScaledByDifficulty,
   scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, seedTailBox, type SeedAdjustStats, f32, damageVar, netIdSpawnScale,
+  netIdFlagTrueRescale, truncCSf32Mul,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
@@ -2430,7 +2431,7 @@ export class Enemy extends Entity {
           //  色 (1, 0.95, 0.8) = 与手持火把同色；尘 6 号 1/30 概率
           if (this.vanillaId === 590 || this.vanillaId === 591) this.torchZombieLight(game);
           // AI_003 火星尾段（bossAI_martian.ts）：军官 383 带盾无敌/补盾、工程师 386 放炮塔
-          if (this.vanillaId === 383 || this.vanillaId === 386) martianFighterExtras(this, game, p);
+          if (this.vanillaId === 383 || this.vanillaId === 386 || this.vanillaId === 389) martianFighterExtras(this, game, p);   // 389 千兆电击塔电矛 437（1457 NPC.cs:59636-59655,★BJ712-C）
           break;                                                        // AI_003 战士族（原版通用核）
         // EoC 传参例外:玩家死亡也要传原对象(cs:19931 dead 判定走逃离分支,
         // 冲刺计时合法冻结;传 null 会让 aiT 照走、状态机停摆 → 首冲时长翻倍)
@@ -3690,10 +3691,11 @@ export class Enemy extends Entity {
    *    钳 9（:68688 frame.Y<num*9 门）。**落到帧 9 的那拍**喷 8× 尘 6（火把火舌,
    *    VanillaDust 精植在档）于口部 vector4=Center+(56·sdir,−30).RotatedBy(rotation)
    *    （:68687）——NewDustDirect(α100) 后 velocity×3/scale 0.6/fadeIn 1.2/noGravity/
-   *    noLight（:68694-68703）。rotation 用 AI 直写的原始速度角 atan2(vy,vx)（原版
-   *    FindFrame 读到的 npc.rotation 即 AI_108 :66120 直写值,AngleTowards 微推
-   *    ≤0.02rad 不可辨;sdir=−facing ≙ sign(vx) 死区档,facing 本身即 AI 每 tick
-   *    按速度写的显示面闩）。
+   *    noLight（:68694-68703）。rotation = AI_108 的 ±π/2 折叠速度角（★BJ715-A-②:
+   *    :66131 直写 atan2(vy,vx) 后 :66281-66287 无条件折叠进右半平面;FindFrame
+   *    case :68661-68668 的 AngleTowards 目标 num188=同折叠式值→精确 no-op,故
+   *    :68687 vector4 消费的 npc.rotation=折叠值非裸角——修前裸 atan2 在 vx<0 时
+   *    锚过心镜像,帧 9 火舌/拖尾打在尾部;sdir=sign(vx) 死区档单源 ffSdir 同拍写）。
    *  · 帧 9 钳住后 frameCounter 不再被推进支重置（推进门 frame.Y<num*9 恒假,
    *    ++ 仍在条件位执行）→ 无界增长,拖尾密度阶梯 maxValue 5→4(>60)→3(>180)→
    *    2(>300)→1(>600)（:68712-68728,严格大于）。拖尾门 = 帧≥9 且 ai0<3
@@ -3712,7 +3714,9 @@ export class Enemy extends Entity {
       //  sdir=sign(vx) 死区档（:68661-68668,本支 :68663-68668 写→:68687 消费同序,
       //  本仓 findFrameRotation 内 ffSdir 写先于本调用同拍同值;旧式 −facing 全链
       //  等值〔AI 每 tick facing=−sign(vx)〕但语义两面脱钩,随单源收编）
-      const rot = Math.atan2(this.vy, this.vx);           // ≙ npc.rotation（AI :66120 直写值）
+      let rot = Math.atan2(this.vy, this.vx);             // ≙ npc.rotation（AI_108 :66131 直写值）
+      if (rot < -Math.PI / 2) rot += Math.PI;             // ★BJ715-A-②:AI_108 :66281-66283 ±π/2 折叠
+      if (rot > Math.PI / 2) rot -= Math.PI;              // :66285-66287——:68687 消费的是折叠后值
       const mx = 56 * sdir, my = -30;
       const cosR = Math.cos(rot), sinR = Math.sin(rot);
       const mouthX = this.cx + mx * cosR - my * sinR;
@@ -3781,8 +3785,9 @@ export class Enemy extends Entity {
    *  · 555-557 投弹手（:68568-68608）:攻(ai1>0&&ai0>0)10-16@6t[41]/腾 1/站 0/走 2-9·64
    *  · 561-563 标枪手（:68527-68567）:攻同上 10-13@6t[89]/腾 8/站 9/走 0-7·64
    *  · 566/567 骷髅（:68329-68353）:无攻/腾 8/站 0/走 0-7·64
-   *  · 568/569 枯萎兽（:67793-68025）:攻(ai0>0)梯 7+(fc/5%4)×5 轮→8..14 钳持,
-   *    fc>=270 持 14[带外 5-16 复位]/腾 4/站 6/走 0-6·56
+   *  · 568/569 枯萎兽（:67793-68025）:攻(ai0>0)梯 7+(fc/5%4)×6 轮（fc 1-119）→11/12/13
+   *    （120-134）,135 拍起 14 钳持,fc>=270 续持[带外 5-16 复位]/腾 4/站 6/走 0-6·56
+   *    （★BJ715-A-① 六轮闭式:27 级阈值梯 q<24 带内取模+带外 11+(q-24) 钳 14）
    *  · 570/571 德拉肯（:68482-68526）:攻(ai1>0&&ai0>0)10-15@5t[14 持 35t,59]/腾 1/站 9/走 2-9·64
    *  · 572/573 小妖精地面型（:68263-68328）:点火(ai0>0&&ai1==0)恒 8;冲锋(ai1==1)
    *    腾 17/站 8/走 8-15·64;常态 腾 16/站 0/走 0-7·64
@@ -3833,8 +3838,13 @@ export class Enemy extends Entity {
       if (this.ai0 > 0) {
         if (f < 5 || f > 16) fc = 0;                 // 带外复位（:67799-67802,fc 清零）
         fc++;
-        const q = Math.floor(fc / 5);                // 反编译梯（5t/档）:7,8,9,10×5 轮→8..14
-        f = q < 20 ? 7 + (q % 4) : Math.min(14, 8 + (q - 20));
+        const q = Math.floor(fc / 5);                // 反编译梯（5t/档）:7,8,9,10×6 轮（fc 1-119,q 0-23）
+        // ★BJ715-A-①（R18 定谳）:原版 :67803-67994 共 27 级阈值梯（基值 7（:67803）+
+        //  阈值 5i,i=1..27（:67810-67994）→ 8,9,10,7,8,9,10×5,11,12,13,14）= 6 轮
+        //  7-8-9-10 后 11/12/13（fc 120-134）,135 拍起持 14。旧式
+        //  `q<20?7+(q%4):min(14,8+(q-20))` 差一轮:fc∈[100,134] 35 拍逐档超前一格
+        //  （130 即到 14）。夹具对拍 300/300（/tmp/bj713r18-ladder-check.mjs）。
+        f = q < 24 ? 7 + (q % 4) : Math.min(14, 11 + (q - 24));
         if (fc >= 270) { f = 14; fc -= 10; }         // :67995-67999 终态持 14
       } else if (backslide) { fc = 0; f = 4; }
       else if (this.vx === 0) { fc = 0; f = 6; }
@@ -3991,6 +4001,7 @@ export class Enemy extends Entity {
     const d = Math.hypot(tx, ty) || 1;
     const dart = new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg, projId);
     dart.hostile = true; // 敌怪发射弹（原版 Projectile.hostile）——联机 v5 随 msg27 bit7 下发
+    dart.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-C：发射者旗冻结（FindBannerToAssociateTo P.cs:11106-11119）
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
       .add(dart, 'projectiles');
   }
@@ -3999,11 +4010,15 @@ export class Enemy extends Entity {
    *  "速度向量已定"的发射点——shootDart 会把 (tx,ty) 归一到 speed，不适用此处。
    *  projId = 原版弹型（Dart.ts DART_STYLE 表）。
    *  ownerId = 弹-NPC 绑定通道（原版 NewProjectile 末参 whoAmI 落 ai[1] 槽）：
-   *  仅 411→537 / 424→573 消费（Projectile.cs :30308/:32087 起），其余发射点不传 */
+   *  仅 411→537 / 424→573 消费（Projectile.cs :30308/:32087 起），其余发射点不传。
+   *  ★BJ710-C：无论 ownerId 传否，发射者旗一律冻结进 dart.bannerNpcId（原版
+   *  FindBannerToAssociateTo 对一切 EntitySource_Parent 发射无条件注入——
+   *  NPC.GetSpawnSource_ForProjectile NPC.cs:91865 恒 EntitySource_Parent）。 */
   spawnHostileProj(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId = 0, ownerId = 0): void {
     const dart = new Dart(x, y, vx, vy, dmg, projId);
     dart.hostile = true;
     dart.ownerNpcId = ownerId;
+    dart.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-C：发射者旗（NPC 类型/变体 id 域，勿与实体 id 域 ownerNpcId 混）
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
       .add(dart, 'projectiles');
   }
@@ -8839,6 +8854,7 @@ export class Enemy extends Entity {
           tyP = (tyP / dP) * 10;
           const dart96 = new Dart(this.cx, this.cy, txP, tyP, dmgP, 96);
           dart96.hostile = true;
+          dart96.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：101 Clinger（banner 96）发射者旗冻结
           dart96.life = 300;                                    // :22846 timeLeft=300
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
             .add(dart96, 'projectiles');
@@ -8896,7 +8912,13 @@ export class Enemy extends Entity {
     if (this.vanillaId === 139 && this.ai3 !== 0 && mechProbeLock(this, game, player)) return;
     const st = game.world.store;
     const vid = this.vanillaId ?? 0;   // swarmerAI 仅数据驱动路径可达，vanillaId 恒非空
-    const scale = this.vanilla?.scale ?? 1;
+    // ★BJ720-A（issue #19 D13，2026-10-25）：npc.scale 【终态】= 表 scale × vanillaScale
+    //  （spawnNPC/分裂站注入的变体乘区）——原版 AI_005 的 `scale` 字段即 npc.scale
+    //  （负 netID 大小变体 -16..-21/-56..-65 经 SetDefaults_ForNetId 替换后 ≠1）。
+    //  旧读裸表 scale：①毒刺基伤 (int)(10f/30f×scale)（:51331-51335）变体恒 10/30；
+    //  ②蓄力速率 rand(5,20)×0.1×scale（:51300-51308）；③速度表 ×(2f−scale)
+    //  （:50884-50885）——三消费面同变量,一并修正。
+    const scale = (this.vanilla?.scale ?? 1) * (this.vanillaScale ?? 1);
     const isBee = vid === 210 || vid === 211;         // 蜜蜂（TargetClosestNonBees 差异无蜜蜂敌人,略）
     const isHornet = vid === 42 || vid === 176 || (vid >= 231 && vid <= 235);
     // ---- 619 血鱿鱼头部整段（cs:50645-50681,审计蜂群#4,2026-08-19）：
@@ -9172,7 +9194,10 @@ export class Enemy extends Entity {
           const sxp = player.cx - this.cx + (Math.random() * 41 - 20);
           const syp = player.cy - this.cy + (Math.random() * 41 - 20);
           if ((sxp < 0 && this.vx < 0) || (sxp > 0 && this.vx > 0)) {
-            this.shootDart(game, this.cx, this.cy, sxp, syp, 8, Math.round((vid === 176 ? 30 : 10) * scale), 55);
+            // ★BJ720-A D13：(int)(10f*scale)/(int)(30f*scale)（:51331-51335）——
+            //  f32 乘积 (int) 截断（Math.round 系 .5 中点抬升错档：10×0.85=8.5
+            //  原版 8/旧 round 9；10×0.78=7.8 原版 7/旧 8）。
+            this.shootDart(game, this.cx, this.cy, sxp, syp, 8, truncCSf32Mul(vid === 176 ? 30 : 10, scale), 55);
             this.ai1 = 101;
           } else this.ai1 = 0;
         } else this.ai1 = 0;
@@ -9647,7 +9672,8 @@ export class Enemy extends Entity {
                                             // F6 判例。★BJ643① 曾恒满径 40=NextVector2CircularEdge 档）
           shoot(game, this.cx + Math.cos(ang) * rad, this.cy + Math.sin(ang) * rad,
             this.vx, (Math.random() * 2 - 1) * 3,
-            getAttackDamageForProjectiles(40, 30, this.difficulty), 1001, 360);   // life=360（:9519 timeLeft,shoot 缺省 300 系旧直飞档）
+            getAttackDamageForProjectiles(40, 30, this.difficulty), 1001, 360,   // life=360（:9519 timeLeft,shoot 缺省 300 系旧直飞档）
+            { bannerNpcId: bannerNpcKeyOf(this) });   // ★BJ710-G35 D1：315 无头骑士（banner 120）发射者旗冻结
         }
       }
     }
@@ -9668,7 +9694,8 @@ export class Enemy extends Entity {
       }
       if (boom) {
         for (let k = 0; k < 3; k++) {
-          shoot(game, this.cx, this.cy, (Math.random() - 0.5) * 2, -4 - 10 * Math.random(), 50, 538);
+          shoot(game, this.cx, this.cy, (Math.random() - 0.5) * 2, -4 - 10 * Math.random(), 50, 538,
+            300, { bannerNpcId: bannerNpcKeyOf(this) });   // ★BJ710-G35 D1：410 星尘小蛛（banner 219）发射者旗冻结
         }
         this.dead = true;   // life=0 + HitEffect(9999) + active=false（:62971-62975）
         return;
@@ -9687,7 +9714,8 @@ export class Enemy extends Entity {
         if (this.vx > -0.5 && this.vx < 0.5) this.vx = 0;
         if (this.ai1 === 30 && player && !player.dead) {
           shoot(game, this.cx - this.facing * 20, this.cy, -this.facing * 7, 0,
-            getAttackDamageForProjectiles(50, 35, this.difficulty), 575);
+            getAttackDamageForProjectiles(50, 35, this.difficulty), 575,
+            300, { bannerNpcId: bannerNpcKeyOf(this) });   // ★BJ710-G35 D1：423 星云兽（banner 231）发射者旗冻结
         }
         if (this.ai1 >= 60) {
           this.ai1 = -Math.floor(Math.random() * 281) - 320;   // −rand(320,601)
@@ -10705,6 +10733,7 @@ export class Enemy extends Entity {
         const ang = Math.atan2(aimDY, aimDX) + (Math.random() - 0.5) * 0.157;
         const laser = new Dart(this.cx, this.cy, Math.cos(ang) * 7, Math.sin(ang) * 7, 25, 84);
         laser.hostile = true;
+        laser.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：122 Gastropod（banner 37）发射者旗冻结
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
           .add(laser, 'projectiles');
       }
@@ -12834,26 +12863,44 @@ export class Enemy extends Entity {
       if (slave) {
         // 变体覆盖（SetDefaults case -3/:7658、-4/:7668、-7/:7699：
         // SetDefaults_ForNetId(scale) + 属性/颜色/kbResist 覆写）。
-        // kbResist 乘子（:7665/:7675/:7705）直乘"承受比例"（def 已存原版语义）
-        const kbMul = (m: number) => {
-          slave.def.knockbackResist = Math.max(0, slave.def.knockbackResist * m);
-        };
         const r = Math.random();
-        if (r < 1 / 180) { // 金史莱姆 -4：scale 0.6/dmg 5/def 5/hp 150/kb×1.4
+        // ★BJ720-A（issue #19 D12+#7，2026-10-25）：①slave 补 vanillaNetId 身份
+        //  （原版 :48269-48272 NewNPC(1)+SetDefaults(-N) → netID=-N：BannerID()/击杀
+        //  计账/图鉴 netID 域——旧缺=变体史莱姆全按 type 1 蓝史莱姆域计）；
+        //  ②case 硬置后走尾段 flag=true 重排（NPC.cs:8363-8372——与 spawnNPC 同源
+        //  netIdFlagTrueRescale：专家/大师乘区+肉后兜底+kbr ×case 乘子（:7665/
+        //  :7675/:7705——kbMul 局部函数退役并入单源，防双乘）；旧恒经典硬编码
+        //  =issue D12「气球携带变体」实测面）。case 值锚：-4 :7716-7726/
+        //  -7 :7747-7756/-3 :7706-7715。
+        let slaveNetId = 0, sLife = 0, sDmg = 0, sDef = 0, sVal = 0, sKb = 1;
+        if (r < 1 / 180) { // 金史莱姆 -4：scale 0.6/dmg 5/def 5/hp 150/kb×1.4/value 10000
           //（曾除以已更新的 vanillaScale → 缩放自抵消不缩身，已改同 -7/-3 直乘）
           slave.w = Math.round(slave.w * 0.6); slave.h = Math.round(slave.h * 0.6);
           slave.vanillaScale = 0.6;
-          slave.hp = slave.maxHp = 150; slave.def.damage = 5; slave.def.defense = 5;
-          slave.colorRGBA = [250, 30, 90, 90]; kbMul(1.4);
+          slaveNetId = -4; sLife = 150; sDmg = 5; sDef = 5; sVal = 10000; sKb = 1.4;
+          slave.colorRGBA = [250, 30, 90, 90];
         } else if (r < 1 / 10) { // 母史莱姆 -7（SetDefaults case -7 :7699：scale 1.2/
           // damage 12/defense 6/life 40/kbResist×0.9/color 200,0,255,150——曾近似成纯 scale 1.05）
           slave.vanillaScale = 1.2; slave.w = Math.round(slave.w * 1.2); slave.h = Math.round(slave.h * 1.2);
-          slave.hp = slave.maxHp = 40; slave.def.damage = 12; slave.def.defense = 6;
-          slave.colorRGBA = [200, 0, 255, 150]; kbMul(0.9);
+          slaveNetId = -7; sLife = 40; sDmg = 12; sDef = 6; sVal = 10; sKb = 0.9;
+          slave.colorRGBA = [200, 0, 255, 150];
         } else if (r < 1 / 3) { // 绿史莱姆 -3
           slave.vanillaScale = 0.9; slave.w = Math.round(slave.w * 0.9); slave.h = Math.round(slave.h * 0.9);
-          slave.hp = slave.maxHp = 14; slave.def.damage = 6; slave.def.defense = 0;
-          slave.colorRGBA = [0, 220, 40, 100]; kbMul(1.2);
+          slaveNetId = -3; sLife = 14; sDmg = 6; sDef = 0; sVal = 3; sKb = 1.2;
+          slave.colorRGBA = [0, 220, 40, 100];
+        }
+        if (slaveNetId !== 0) {
+          slave.vanillaNetId = slaveNetId;
+          const fin = netIdFlagTrueRescale(
+            { type: 1, boss: false, friendly: false, townNPC: false,
+              scale: (slave.vanilla?.scale ?? 1) * (slave.vanillaScale ?? 1) },
+            { life: sLife, damage: sDmg, defense: sDef, value: sVal, kbMul: sKb },
+            slave.def.knockbackResist ?? 1, scaleStatsWorld());
+          slave.hp = slave.maxHp = fin.lifeMax;
+          slave.def.damage = fin.damage;
+          slave.def.defense = fin.defense;
+          slave.def.value = fin.value;
+          slave.def.knockbackResist = fin.knockbackResist;
         }
         slave.ai0 = -999; // 挂载冻结标记（slimeAI 首行放行）
         slave.id = (game as unknown as { entities: { nextId: number; add(e: unknown, b: string): void } }).entities.nextId++;
@@ -13101,6 +13148,7 @@ export class Enemy extends Entity {
             if (vy > -3) vy = -3;
             const seedDart = new Dart(this.cx + vecX + dir * 6, this.cy + vecY, vx, vy, 7, 836);
             seedDart.hostile = true; // 628 蒲公英籽直构弹——敌怪弹（v5 bit7）
+            seedDart.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：628 蒲公英（banner 274）发射者旗冻结
             ents.add(seedDart, 'projectiles');
           }
         }
@@ -13668,6 +13716,7 @@ export class Enemy extends Entity {
               const vy = Math.sin(ma) * 10 + (Math.random() * 12 - 6);
               const dart = new Dart(mx - Math.cos(ma) * 5, my - Math.sin(ma) * 5, vx, vy, dmg, 814);
               dart.hostile = true;             // 敌怪弹（v5 bit7）
+              dart.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：496 Dreadnautilus（banner 188）发射者旗冻结
               ents.add(dart, 'projectiles');
             }
             for (let k = 0; k < 4; k++) game.spawnParticles(mx, my, '#B03040', 1, 2, { life: 22 });
@@ -14281,6 +14330,7 @@ export class Enemy extends Entity {
         //  由 Dart 首子步补偿捕获（差 1 拍玩家位移）。293/290 原版即传 0/0 不动
         if (proj === 291) { dart.spawnAi0 = player.cx; dart.spawnAi1 = player.cy; }
         dart.hostile = true; // 史后三法师直构弹——敌怪弹（v5 bit7）
+        dart.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：281-286 史后三法师（banner 156/147/105）发射者旗冻结
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       } else if (vid === 533) {
         // 沙漠精灵（:21104-21135）：落点采样=玩家 ±6 格（C1 修正：玩家排除窗
@@ -14311,6 +14361,7 @@ export class Enemy extends Entity {
           if (!ok) continue;
           const curse = new Dart(sx * TILE + 8, sy * TILE + 8, 0, 0, this.baseDamage, 596);
           curse.hostile = true;
+          curse.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：533 Desert Djinn（banner 213）发射者旗冻结
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(curse, 'projectiles');
           break;
         }
@@ -14329,6 +14380,7 @@ export class Enemy extends Entity {
         const dmg172 = getAttackDamageForProjectiles(40, 32, this.difficulty);
         const blast = new Dart(this.cx, this.cy, dx, dy, dmg172, 129);
         blast.hostile = true;
+        blast.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ710-G35 D1：172 Rune Wizard（banner 160）发射者旗冻结
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(blast, 'projectiles');
       } else if (vid === 693) {
         // 图书管理员骷髅（NPC.cs:21208-21215）：书锚 = AI_FindNearbyBook（tile 50 放置书
@@ -14360,6 +14412,7 @@ export class Enemy extends Entity {
           by += Math.sin(ang) * 15 * rad;
         }
         const book = new BookProj(bx - 8, by - 8, 13, player);
+        book.bannerNpcId = bannerNpcKeyOf(this);   // ★BJ720-A（issue #19 B01）：693（banner 291）发射者旗冻结——GetSpawnSource_ForProjectile 恒注入（P.cs:11106-11119）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(book, 'projectiles');
       } else {
         // 原版通用分支无兜底发射（NPC.cs:21196-21241 的 if 链外零弹）——法师族全员
@@ -15646,7 +15699,7 @@ export class Enemy extends Entity {
         this.playerInteracted = true;
         // ★SW-BJ47 计数器"最近击杀"命中写位（假人分支——原版 ApplyDamageToNPC 对
         // 488 同样走全管线写 lastCreatureHit;NPCtoBanner(488)=0 → 行灰"杀敌数不可用"）
-        if (pl) pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0));
+        if (pl) pl.lastCreatureHit = bannerOfNpc(bannerNpcKeyOf(this) ?? 0);   // ★BJ710-G35 D3b：BannerID() netID>=-10 上界（-12 getGood 僵尸回落 type=6 吃僵尸旗 27）
         const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
         if (net?.active) this.applyNetInteraction(net.mySlot, game);
       }
@@ -15708,7 +15761,7 @@ export class Enemy extends Entity {
       //  免疫帧/无伤早退在 hurt() 头部 = 原版免疫门先行等价（须实扣命中才写）。
       //  MP 远端访客弹（remoteOwner,fromPlayer=false）不写 = 原版 ownedBySomeone
       //  写 Main.player[myPlayer] 的 host 聚合面登记未建模（与旗杀 MP credit 同族债）。
-      if (pl) pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0));
+      if (pl) pl.lastCreatureHit = bannerOfNpc(bannerNpcKeyOf(this) ?? 0);   // ★BJ710-G35 D3b：BannerID() netID>=-10 上界（-12 getGood 僵尸回落 type=6 吃僵尸旗 27）
       // MP：本地玩家交互登记（ApplyInteraction 等价——per-client 掉落发放门;
       //  单人无 net 净空,interactionSlots 恒空不参与结算）
       const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
@@ -16016,9 +16069,19 @@ export class Enemy extends Entity {
           b.vanillaScale = 0.9;
           b.colorRGBA = [0, 0, 0, 50];
           b.spawnAlpha = 120;
-          b.hp = b.maxHp = 30;
-          b.def.damage = 13;
-          b.def.defense = 4;
+          // ★BJ720-A（issue #19 D12）：case -5 硬置（:7727-7737：dmg13/def4/life30/
+          //  kb×0.95/value10）后尾段 flag=true 重排（NPC.cs:8363-8372——专家/大师
+          //  乘区+肉后兜底；旧 raw 直写=三档停经典值,kb×0.95 旧站漏乘同批清偿）。
+          const fin5 = netIdFlagTrueRescale(
+            { type: 1, boss: false, friendly: false, townNPC: false,
+              scale: (b.vanilla?.scale ?? 1) * (b.vanillaScale ?? 1) },
+            { life: 30, damage: 13, defense: 4, value: 10, kbMul: 0.95 },
+            b.def.knockbackResist ?? 1, scaleStatsWorld());
+          b.hp = b.maxHp = fin5.lifeMax;
+          b.def.damage = fin5.damage;
+          b.def.defense = fin5.defense;
+          b.def.value = fin5.value;
+          b.def.knockbackResist = fin5.knockbackResist;
           b.vx = this.vx * 2 + (Math.floor(Math.random() * 41) - 20) * 0.1 + k * this.facing * 0.3;
           b.vy = this.vy - Math.floor(Math.random() * 10) * 0.1 - k;
           b.ai0 = -1000 * Math.floor(Math.random() * 3);   // :85728
@@ -16028,12 +16091,11 @@ export class Enemy extends Entity {
       // ★BJ263 站1 飞尸 121 死 → 小腐化史莱姆（1457 :86418-86431 HitEffect 死亡支：type==121 →
       // NewNPC(GetSpawnSource_NPCHurt(),(int)(position.X+width/2),(int)(position.Y+height),81)
       // + SetDefaults(-2)）。★netID -2 定谳（FromNetId(NPCID.cs:12478-12484)→NetIdMap[1]=81
-      // =腐化史莱姆基底×scale0.9,非蓝史莱姆系）：dmg45/def20/life90/kbResist×1.2/value100f
-      // （覆写后不再 ScaleStats——与母史莱姆 -5 判例同相,raw 值直写）。落点=父底【底中】锚
+      // =腐化史莱姆基底×scale0.9,非蓝史莱姆系）：dmg45/def20/life90/kbResist×1.2/value100f，
+      // 硬置后走尾段 flag=true 重排（★BJ720-A D12 勘正：旧注「覆写后不再 ScaleStats」
+      // 系错读——NPC.cs:8368-8372 对 -1..-10 恒走）。落点=父底【底中】锚
       // （:86419 NewNPC→:81594 Bottom）；速度=父 vx/vy 原值继承（:86421-86422）。
       // Gore 94@scale 走 gore 表（carveOut）;联机傀儡跳过（分裂权威在房主,同 -5 门）。
-      // ★登记（-5 同族潜伏差）：kbResist ×1.2 本站已接（base 81 缺省 1f×1.2）,-5 旧站
-      // ×0.95 未接=既有潜伏差,本批不动旧站留台账。
       if (this.vanillaId === 121 && !this.netPuppet) {
         const s = Enemy.fromVanilla(81, this.cx, this.y + this.h);
         if (s) {
@@ -16049,10 +16111,20 @@ export class Enemy extends Entity {
           s.x = this.cx - s.w / 2;              // 盒定后 Bottom 锚重定（:86419+:81594）
           s.y = this.y + this.h - s.h;
           s.vanillaNetId = -2;
-          s.hp = s.maxHp = 90;
-          s.def.damage = 45;
-          s.def.defense = 20;
-          s.def.knockbackResist = 1.2;
+          // ★BJ720-A（issue #19 D12）：case -2 硬置（:7697-7705：dmg45/def20/life90/
+          //  kb×1.2/value100）后尾段 flag=true 重排（NPC.cs:8363-8372——旧注「覆写后
+          //  不再 ScaleStats」系错读,原版 flag=true 恒走尾段；kb 旧直写 1.2=经典档
+          //  巧合对、专家档漏难度乘区）。
+          const fin2 = netIdFlagTrueRescale(
+            { type: 81, boss: false, friendly: false, townNPC: false,
+              scale: (v81.scale ?? 1) * (s.vanillaScale ?? 1) },
+            { life: 90, damage: 45, defense: 20, value: 100, kbMul: 1.2 },
+            s.def.knockbackResist ?? 1, scaleStatsWorld());
+          s.hp = s.maxHp = fin2.lifeMax;
+          s.def.damage = fin2.damage;
+          s.def.defense = fin2.defense;
+          s.def.value = fin2.value;
+          s.def.knockbackResist = fin2.knockbackResist;
           s.vx = this.vx;
           s.vy = this.vy;
           addEnemy(game, s);
@@ -16084,10 +16156,18 @@ export class Enemy extends Entity {
           c.x = this.cx - c.w / 2;              // 盒定后 Bottom 锚重定（:86434+:81594）
           c.y = this.y + this.h - c.h;
           c.vanillaNetId = -1;
-          c.hp = c.maxHp = 90;
-          c.def.damage = 45;
-          c.def.defense = 10;
-          c.def.knockbackResist = 1.2;
+          // ★BJ720-A（issue #19 D12）：case -1 硬置（:7688-7696：dmg45/def10/life90/
+          //  kb×1.2/value100）后尾段 flag=true 重排（同 -2/-5 站单源）。
+          const fin1 = netIdFlagTrueRescale(
+            { type: 81, boss: false, friendly: false, townNPC: false,
+              scale: (v81c.scale ?? 1) * (c.vanillaScale ?? 1) },
+            { life: 90, damage: 45, defense: 10, value: 100, kbMul: 1.2 },
+            c.def.knockbackResist ?? 1, scaleStatsWorld());
+          c.hp = c.maxHp = fin1.lifeMax;
+          c.def.damage = fin1.damage;
+          c.def.defense = fin1.defense;
+          c.def.value = fin1.value;
+          c.def.knockbackResist = fin1.knockbackResist;
           c.vx = this.vx * 3 + (Math.floor(Math.random() * 21) - 10) * 0.1 + k * this.facing * 0.3;
           c.vy = this.vy - Math.floor(Math.random() * 10) * 0.1 - k;
           c.ai1 = k;                            // :86449 ai[1]=num419

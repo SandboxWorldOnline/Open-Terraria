@@ -4,7 +4,7 @@
 //  3. 银河珍珠 5340 / 漂亮镜子 5577 物品注册（vi_ 前缀图标管线可达）
 //  4. 火把僵尸 590/591 手持火把点光（Enemy.torchZombieLight）
 //  5. 吸血链（Arrow 命中 → applyLifeSteal 分发：304=vampire / magic=ghost）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { parseSeed } from '../src/world/gen/SeedEasterEggs';
 import { newGenState } from '../src/world/gen/vanilla/GenState';
 import { BuffState, BuffType } from '../src/stats/Buffs';
@@ -113,6 +113,7 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
   }
 
   it('吸血鬼飞刀 304 命中 → vampire（系数 0.075 侧）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0,吸血基数不漂）
     const log: Log = { calls: [] };
     const game = makeGame(log, targetEnemy(30 * 16));
     const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 100, 0, 304, { grav: 0, life: 300, pierce: 1 });

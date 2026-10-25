@@ -24,6 +24,11 @@ export class BookProj extends Entity {
   readonly projId = 1092;
   w = 16; h = 16;
   damage: number;
+  /** ★BJ720-A（issue #19 B01，2026-10-25）：发射者旗追踪键（原版 bannerIdToRespondTo
+   *  投影——NewNPC→GetSpawnSource_ForProjectile（NPC.cs:91865）恒 EntitySource_Parent
+   *  → FindBannerToAssociateTo P.cs:11106-11119 注入 693 的 BannerID()）。发射站
+   *  Enemy.ts 693 分支冻结；hitPlayer 消费（applyBannerDamageReceivedOnProj 单源）。 */
+  bannerNpcId: number | null = null;
   /** timeLeft（SetDefaults 420） */
   life = 420;
   /** 点光（:23744 每帧 AddLight(Center, 0.3, 0.25, 0.1)）——Game 实体光扫描消费 */

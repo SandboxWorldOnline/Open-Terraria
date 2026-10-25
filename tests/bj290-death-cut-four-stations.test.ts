@@ -267,8 +267,9 @@ describe.skipIf(EXT_MISSING)('BJ290-件1 结构锁（修复站在位 + 备案站
 
   it('备案锁：Dart 小动物/城镇 NPC 死亡位零补割（原版 hostile 无割面+现役 -1 穿透恒不经）', () => {
     const s = src('Dart.ts');
-    // 全文件唯一 cutTilesBox 调用 = 敌环前置站（hostile 门内不落第二处）
-    expect(s.match(/cutTilesBox\(game, this\.x/g)!.length).toBe(1);
+    // ★BJ716-A 顺手清记账:BJ704-G22 烟花域扫面清偿加 fireworkUpdate 头割草站
+    //  （死亡拍小盒照割,:17184 位）→ 计数 1→2;敌环前置站语义不变（hostile 门内不落第三处）
+    expect(s.match(/cutTilesBox\(game, this\.x/g)!.length).toBe(2);
     expect(s).toContain('★BJ290 件1 备案锁');
   });
 

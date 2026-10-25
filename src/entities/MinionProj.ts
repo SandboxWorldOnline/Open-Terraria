@@ -34,6 +34,7 @@ import { hslToRgb255 } from '../render/AuroraSky';   // ★BJ650件1：864 辉�
 import { ExplosiveTrapBlastProj } from './ExplosiveTrapBlast';   // ★BJ650件4：爆炸机关弹视觉实体（R15-F6 清偿）
 import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
 import { hitCritters, hitTownNpcs, townVoodooGateOpen, applyBannerDamageDealt, type TownHitSettle } from './projTargets';
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2，2026-10-25）：随从弹 PVE 面 DamageVar 首掷（Projectile.cs:12970）
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { laserScan } from './ForbiddenSignProj';   // ★BJ639 批1：642 束长 LaserScan 单源（Collision.cs:4599-4614 1:1）
@@ -627,7 +628,9 @@ export function minionTrueBox(projId: number): { w: number; h: number } {
     // ★SW-BJ16 2026-09-07：33693 中心锚支家族真盒（与构造器 if 链单源同步,判据同 BJ13）
     case 613: return { w: 24, h: 24 };                   // 星尘细胞（:6600-6611 块内 width/height）
     case 623: return { w: 50, h: 80 };                   // 星尘守护者（:6713-6714）
-    case 625: case 626: case 627: case 628: return { w: 24, h: 24 };   // 龙链四段（:6743-6744）
+    // 龙链四段 SetDefaults 初盒 24×24（:6741-6742——仅出生首拍前值;★G27② AI_121
+    // 逐拍覆写 (int)(30×scale) :43773/:43867,真盒以运行时 w/h 为准）
+    case 625: case 626: case 627: case 628: return { w: 24, h: 24 };
     case 758: return { w: 20, h: 30 };                   // 吸血蛙（:7817-7818）
     case 759: case 831: case 970: return { w: 10, h: 10 };   // 雀杖/虎宝石/阿比盖尔计数器（:7839/:8073/:9188）
     case 387: case 388: return { w: 40, h: 20 };         // ★BJ635 双子（:4714-4715/:4730-4731）
@@ -862,7 +865,11 @@ export class MoonGateBeam extends Entity {
       const gated = en.dead;                                       // dontTakeDamage 已被头门早退（窄化余项）
       const golemCrit = rollGolemSentryCrit(game, this.projId, false);   // 6176 SentryShot 10%
       const crit = res.crit || timerCrit || monkCrit || golemCrit;
-      en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? res.dmg * 2 : res.dmg),
+      // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970 `Main.DamageVar(num15,
+      //  Main.player[owner].luck)`）——原版序=tag(:12947)→golem(:12962-65)→DV;
+      //  掷 res.dmg（tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+      const dmgV867 = damageVarRoll(res.dmg, this.ownerPlayer?.luck ?? 0);
+      en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? dmgV867 * 2 : dmgV867),
         this.vx * this.knockback, this.vy * this.knockback, game, 0, crit, 1, true);
       if (!gated) {
         ghostHealProc(game, this.projId, 0,
@@ -2122,9 +2129,12 @@ export class MinionProj extends Entity {
   // ---- 旗舰家族分支（行号见各方法注释；均在通用运动前 return）----
 
   /** 星尘龙头（aiStyle 121 :40138-40403）：加速追敌（acc 0.4/0.6/0.8 ×1.5=0.6/0.9/1.2
-   *  限速 30，穿墙穿敌）/ 跟随玩家（限速 15，>2000px 传送）；伤害 ×(1+0.23×localAI[0])
-   *  （:12097，localAI[0]=距尾段数，头=全段数）；首次生成 626→627→628 链（段距 16px），
-   *  全链共用一张命中表（7t/敌） */
+   *  限速 30，穿墙穿敌）/ 跟随玩家（限速 15，>2000px 传送）；伤害 ×(1+0.23×tier)
+   *  （★G27① 勘误:真锚 :12873-12879 乘区读 scale=1+localAI[0]×0.01（头
+   *  localAI[0]=段总数,旧注「:12097 localAI[0]=距尾段数」系误读——那是逐段镜像值,
+   *  头恒=全段数））；首次生成 626→627→628 链（段距 16px），
+   *  全链共用一张命中表（7t/敌）。★G27 ②④⑤⑥:逐拍盒 30×scale/淡入 −42+
+   *  2×dust135/no-target 逐轴 Sign 加速+阻尼门 speed>2+上浮门 |vy|<1/旋转无条件。 */
   /** AI_121 索敌 1:1（1457 :43653-43695 / 1456 :40178-40219）——★专用择敌（不共用
    *  nearestEnemy）：原版野生支遍历 Main.maxNPCs 升序、过门即覆盖写 num6（:43690/
    *  :40216——无最近比较、无 break）＝【最后一个通过门的候选】胜,遍历序敏感;
@@ -2177,13 +2187,20 @@ export class MinionProj extends Entity {
         parent = m;
       }
     }
-    const scale = 1 + 0.23 * this.dragonLocalAI0(game);
+    // ★BJ709-G27（2026-10-24,BJ709-A 登记债②④⑤⑥清偿）——头支运动后段 1:1 对齐
+    // 1457 AI_121 :43726-43888（1456 :40220-40341 同构）。
+    // 伤害乘区（①同源,:12873-12879）：value=clamp((scale−1)×100,0,50) →
+    // ×(1+value·0.23);头 scale=1+clamp(localAI[0],0,50)×0.01（:43770-43772,
+    // localAI[0]=段总数=dragonLocalAI0 头支）⇒ 头乘区=1+0.23×tier。
+    const tier = this.dragonLocalAI0(game);
+    const scale = 1 + 0.23 * tier;
     // >2000 瞬移（:43656-43660 / :40182-40185）：索敌【前】无条件,base.Center =
-    // player.Center——中心即玩家心（盒 24×24 :6743-6744 → 左上=心−12）;原版不清
-    // 速度（动量保留,AI 从新位续走）。曾错挂 no-target 支 +(−30,−30) 旧盒径残留
-    // （中心落 pcx−18）,双错一并清偿（2026-09-08）。
+    // player.Center——Center 写位用【当前盒】半宽（②后=上一拍 30×scale,首拍 24
+    // :6741-6742）;原版不清速度（动量保留,AI 从新位续走）。曾错挂 no-target 支
+    // +(−30,−30) 旧盒径残留（中心落 pcx−18）,双错一并清偿（2026-09-08）;
+    // ★G27②再清偿:−12 硬编码系 24 盒时代残值 → this.w/2 动态半宽。
     if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) {
-      this.x = p.cx - 12; this.y = p.cy - 12;
+      this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
     }
     // 索敌 1:1（AI_121,1457 :43653-43695 / 1456 :40178-40219）——dragonTarget
     // 原文字面（集火 num4×2<1400 + 野生双门 num5∧num4 + 末位覆盖语义）
@@ -2203,25 +2220,57 @@ export class MinionProj extends Entity {
       const sp = Math.hypot(this.vx, this.vy);
       if (sp > 30) { this.vx *= 30 / sp; this.vy *= 30 / sp; }
     } else {
+      // ★G27⑤ no-target 支 1:1（:43728-43761）——旧实现三偏差清偿:
+      //  (a)归一化向量加速 → 原版【逐轴 Sign】加速 + 轴门（|Δx|>20 才加 X、
+      //    |Δy|>10 才加 Y,:43740-43747）;
+      //  (b)阻尼 ×0.96 无条件挂 d≤100 支 → 原版 else-if【speed>2 门】
+      //    （:43749-43752）;
+      //  (c)上浮 −0.1 只挂近距支 → 原版【|vy|<1 独立门】（:43753-43756）;
+      //  限速 15 原版在 no-target 支尾【无条件】（:43757-43761,旧实现只挂
+      //  d>100 分支 → 近距残留动量>15 不收）。
       const dx = p.cx - this.cx, dy = p.cy - this.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      // >2000 瞬移已上移索敌前（:43656-43660/:40182-40185 无条件）——旧 no-target
-      // 支 (−30,−30)+清速残支撤除（中心错位见方法首注）
+      const d = Math.hypot(dx, dy);
+      const num11 = d < 140 ? 0.06 : d < 200 ? 0.12 : 0.2;   // :43728-43737
       if (d > 100) {
-        const acc = d < 140 ? 0.06 : d < 200 ? 0.12 : 0.2;
-        this.vx += (dx / d) * acc;
-        this.vy += (dy / d) * acc;
-        const sp = Math.hypot(this.vx, this.vy);
-        if (sp > 15) { this.vx *= 15 / sp; this.vy *= 15 / sp; }
-      } else {
-        this.vx *= 0.96; this.vy *= 0.96; this.vy -= 0.1; // 近距缓刹 + 轻微上浮（:40168）
+        if (Math.abs(dx) > 20) this.vx += num11 * Math.sign(dx);   // :43740-43743
+        if (Math.abs(dy) > 10) this.vy += num11 * Math.sign(dy);   // :43744-43747
+      } else if (Math.hypot(this.vx, this.vy) > 2) {
+        this.vx *= 0.96; this.vy *= 0.96;                     // :43749-43752
       }
+      if (Math.abs(this.vy) < 1) this.vy -= 0.1;              // :43753-43756 上浮门
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > 15) { this.vx *= 15 / sp; this.vy *= 15 / sp; }        // :43757-43761
     }
+    // ★G27⑥ :43763-43765 运动后状态写【无条件】——旧 speed>0.5 旋转门撤除
+    //  （vanilla 逐拍恒写 velocity.ToRotation()+π/2）;同块 direction/spriteDirection
+    //  = velocity.X>0?1:−1 逐拍覆写（零消费者簿记——MINION_ROT_ONLY 族 draw 不翻,
+    //  旧「有目标读目标向」为目标面误植,一并归位）。
+    this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+    this.facing = this.vx > 0 ? 1 : -1;
+    // ★G27② :43770-43774 逐拍盒 30×scale（num2=30 :43626-43637,SetDefaults 24×24
+    //  :6741-6742 仅出生首拍前值）——position=Center → resize → Center=position
+    //  中心保持（(int) 截断 :43773）。头 localAI[0]=tier → scale=1+tier×0.01。
+    const hcx = this.cx, hcy = this.cy;
+    this.w = this.h = Math.trunc(30 * (1 + tier * 0.01));
+    this.x = hcx - this.w / 2; this.y = hcy - this.h / 2;
+    this.drawScale = 1 + tier * 0.01;        // proj.scale 镜像（③draw 消费,:43772）
+    // ★G27④ :43775-43788 出场淡入尾段——alpha>0 → 2×dust135（盒内随机位,
+    //  alpha=100/scale=2/noGravity/noLight）+ −42（clamp 0,≈7t 渐显;段支
+    //  :43852 的无条件 −42 在 α=0 后为 no-op,观测等价）。
+    if (this.alphaFade > 0) {
+      for (let j = 0; j < 2; j++) {
+        const d15 = game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100, null, 2, true);
+        if (d15) d15.noLight = true;
+      }
+      this.alphaFade = Math.max(0, this.alphaFade - 42);
+    }
+    // ★G30⑨ :43875-43876 AI 尾世界边界钳——vanilla 位=AI_121 函数末位（头/段支汇
+    //  流后）,先于 HandleMovement→UpdatePosition 的 position+=velocity 积分;本仓
+    //  头支运动积分在 AI 体内 → 钳位=淡入块后/运动前同相（当拍可越界 ≤|velocity|,
+    //  次拍 AI 尾钳回=原版逐拍同构）。
+    this.dragonClampWorld(game);
     this.x += this.vx;
     this.y += this.vy;
-    if (Math.hypot(this.vx, this.vy) > 0.5) this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
-    const fd = tgt ? Math.sign(tgt.cx - this.cx) : Math.sign(this.vx);
-    if (fd !== 0) this.facing = fd;
     this.contact(game, dmg0 * scale, 7);
   }
 
@@ -2319,8 +2368,11 @@ export class MinionProj extends Entity {
 
   /** 星尘龙 localAI[0] 等价（1456 Projectile.cs:40342 每段找父后 parent.localAI[0]=
    *  self+1——链自尾向头传播：尾 628=0、627=1、626=2、头 625=3（基础龙 3 段）；
-   *  再召唤插段同式累加）。伤害 ×(1+0.23×clamp(localAI[0],0,50))（:12097-12102，
-   *  scale=1+localAI[0]×0.01 → value=(scale-1)×100）——逐段各自档位，非全链同值 */
+   *  再召唤插段同式累加）。★BJ709-G27① 勘误（2026-10-24）：本值【不是】伤害档——
+   *  原版乘区 :12873-12879 读 scale（段=继承头值=全链同档 1+0.23×段总数）,旧注
+   *  「逐段各自档位,非全链同值」系把 value=(scale−1)×100 误读为逐段 localAI[0]
+   *  的假信念（旧锚 :12097-12102 亦误,真锚 :12873-12879）。本方法保留为
+   *  localAI[0] 状态镜像（头 scale 源=头支返回值;逐段值=weapon-summon-fix §248 锁）。 */
   private dragonLocalAI0(game: GameHooks): number {
     const total = this.peerCount(game, 626) + this.peerCount(game, 627) + this.peerCount(game, 628);
     if (this.projId === 625) return Math.min(50, total); // 头 = 全段数
@@ -2330,17 +2382,83 @@ export class MinionProj extends Entity {
     return Math.min(50, Math.max(0, total - k));        // 段 = 全段数 − 距头步数
   }
 
-  /** 龙身/尾（626/627/628）：无自主速度——纯链式跟随（:40384 pos=父段心-方向×16px） */
+  /** 龙身/尾（626/627/628）：AI_121 段支 1:1（1457 :43790-43874 / 1456 :40347-40417）。
+   *  无自主速度（:43857 velocity=Zero）,纯链式跟随:方向向量 vector4=父心−自心,经
+   *  【父rot−自rot 差的 10%】预旋转（:43859-43863,鞭链摆动滞后——段朝向渐进跟父,
+   *  非瞬时硬指）后:rotation=vector4.ToRotation()+π/2（:43864）,位置=父心−
+   *  normalize(vector4)×16×scale（:43869-43871,保持自身方位、间距钳 16×scale;
+   *  scale=1+localAI[0]×0.01 只在头写 :43772,段沿链逐拍继承父值 :43866 num18=
+   *  clamp(父scale,0,50) → 全链同值=1+min(50,头localAI[0]=段总数)×0.01）。
+   *  ★BJ709-A（2026-10-24,用户实报「星尘龙一直抽搐」定谳）:旧实现方向向量符号
+   *  取反（dx=自−父 而 pos=父−unit(dx)·16）=每拍绕父段【镜像翻转】——探针
+   *  _bj709a-dragon-twitch 实锤三段 flipRate=1.000/位移幅 32/64/96px 沿链放大/
+   *  rot 每拍翻 π;且缺 10% 旋转平滑与 ×scale 间距。interp 开/关双跑指标全同
+   *  =插值嫌疑证伪;帧机证伪（vanilla projFrames[625-628]=1 无帧循环）。
+   *  ★BJ709-G27（2026-10-24,登记债①②④清偿+①假信念勘误）:①伤害乘区改读
+   *  tier（=头 scale 继承值,:12873-12879 全链同档,旧逐段 dragonLocalAI0 误植）;
+   *  ②逐拍盒 30×scale 中心保持 resize（:43865-43868）;④出场淡入 −42/拍+
+   *  2×dust135（:43843-43856,构造 alphaFade=255 起）。③draw scale 在 draw 支
+   *  清偿（CENTER_ANCHOR_33703 消费 drawScale+A/=2）。剩余登记债⑦⑧见
+   *  memory/bj709g27-dragon-debts.md。 */
   private dragonSegment(game: GameHooks, p: Player, dmg0: number): void {
     void p;
     const par = this.parentRef?.();
     if (!par) { this.dead = true; return; } // 头亡链断
-    const dx = this.cx - par.cx, dy = this.cy - par.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    this.x = par.cx - (dx / d) * 16 - this.w / 2;
-    this.y = par.cy - (dy / d) * 16 - this.h / 2;
-    this.rot = Math.atan2(par.cy - this.cy, par.cx - this.cx) + Math.PI / 2;
-    this.contact(game, dmg0 * (1 + 0.23 * this.dragonLocalAI0(game)), 7);
+    // ★G27④ :43843-43856 淡入首段（父链解析后、几何写前）——尘位=上一拍盒
+    // （resize/位移前的 position/width/height）;−42 无条件在 α=0 后为 no-op,
+    // 与头支 alpha>0 门内减观测等价。
+    if (this.alphaFade > 0) {
+      for (let l = 0; l < 2; l++) {
+        const d19 = game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 100, null, 2, true);
+        if (d19) d19.noLight = true;
+      }
+      this.alphaFade = Math.max(0, this.alphaFade - 42);
+    }
+    this.vx = 0; this.vy = 0;               // :43857 velocity = Vector2.Zero
+    let v4x = par.cx - this.cx, v4y = par.cy - this.cy;   // :43858 vector4 = 父心−自心
+    if (par.rot !== this.rot) {             // :43859-43863 旋转平滑（鞭链滞后）
+      const a = wrapAngle(par.rot - this.rot) * 0.1;
+      const c = Math.cos(a), s = Math.sin(a);
+      const nx = v4x * c - v4y * s, ny = v4x * s + v4y * c;
+      v4x = nx; v4y = ny;
+    }
+    this.rot = Math.atan2(v4y, v4x) + Math.PI / 2;         // :43864
+    // 头 scale=1+min(50,localAI[0])×0.01（:43770-43772,头 localAI[0]=段总数）,段逐拍
+    // 继承父值（:43866;头先更（链序 625→628）→ 全链收敛同值,插段当拍 1t 滞后不建模）
+    const tier = Math.min(50, this.peerCount(game, 626) + this.peerCount(game, 627) + this.peerCount(game, 628));
+    // ★G27② :43865-43868 逐拍盒 30×scale 中心保持 resize——position=Center →
+    // width=height=(int)(num2×scale)（num2=30 :43637）→ Center=position;d4=0 支
+    // （与父心重合）保持原心（旧实现 24×24 静态,盒差 6px/档）。
+    const scx = this.cx, scy = this.cy;
+    this.w = this.h = Math.trunc(30 * (1 + tier * 0.01));
+    this.x = scx - this.w / 2; this.y = scy - this.h / 2;
+    this.drawScale = 1 + tier * 0.01;        // proj.scale 镜像（③draw 消费,:43866 继承值）
+    const d4 = Math.hypot(v4x, v4y);
+    if (d4 !== 0) {                         // :43869-43871 vector4≠Zero 才写位
+      this.x = par.cx - (v4x / d4) * 16 * (1 + tier * 0.01) - this.w / 2;
+      this.y = par.cy - (v4y / d4) * 16 * (1 + tier * 0.01) - this.h / 2;
+    }
+    this.facing = v4x > 0 ? 1 : -1;         // :43873 spriteDirection（MINION_ROT_ONLY 族 draw 不消费,簿记 1:1）
+    // ★G30⑨ :43875-43876 世界边界钳（段支:velocity=Zero 纯终态钳,写位后无积分）
+    this.dragonClampWorld(game);
+    // ★G27① :12873-12879 伤害乘区读【scale】（=继承的头值）→ 全链同档
+    //  1+0.23×tier（基础龙 3 段=×1.69）——旧 dragonLocalAI0(total−k) 逐段各自
+    //  （626/627/628 ×1.46/1.23/1.0）系把「value=(scale−1)×100」误读为逐段
+    //  localAI[0];dragonLocalAI0 保留为 localAI[0] 状态镜像（头=total/段=total−k,
+    //  weapon-summon-fix §248 锁）,不再作伤害源。
+    this.contact(game, dmg0 * (1 + 0.23 * tier), 7);
+  }
+
+  /** ★BJ709-G30⑨（2026-10-24,G27 登记债⑨清偿）：AI_121 尾世界边界钳
+   *  （Projectile.cs:43875-43876,头/段共用——两支汇流后的函数末位无条件跑）:
+   *  position 钳 [160, maxTiles×16−160]（X/Y 同式;世界缘 10 格安全网,边角低危面）。
+   *  头支钳位=淡入块后/运动积分前（vanilla AI 内尾先于 UpdatePosition 同相）;
+   *  段支 velocity=Zero → 纯终态钳。MathHelper.Clamp=min/max 钳（NaN 透传同 XNA）。 */
+  private dragonClampWorld(game: GameHooks): void {
+    const st = game.world.store;
+    const mx = st.w * 16 - 160, my = st.h * 16 - 160;
+    this.x = Math.min(Math.max(this.x, 160), mx);
+    this.y = Math.min(Math.max(this.y, 160), my);
   }
 
   /** ★清偿 C7/R2-F3（2026-10-14）：970 计数器 originalDamage 聚合面——原版
@@ -5341,7 +5459,10 @@ export class MinionProj extends Entity {
       : Math.sign(en.cx - this.cx);
     const mainGated = en.dead || (en as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
     const critHit = res.crit || rollCrit || timerCrit || monkCrit || golemCrit;
-    en.hurt?.(applyBannerDamageDealt(game, en, critHit && !res.crit ? res.dmg * 2 : res.dmg),
+    // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970）——tag→golem→DV 原序;掷 res.dmg
+    //  （tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+    const dmgV156 = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+    en.hurt?.(applyBannerDamageDealt(game, en, critHit && !res.crit ? dmgV156 * 2 : dmgV156),
       kbDir * (this.knockback + mkb), 0, game, pen0, critHit, -3, true);
     if (!mainGated) {
       ghostHealProc(game, this.projId, this.pveNumHits,
@@ -7514,7 +7635,9 @@ export class MinionProj extends Entity {
           // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
           const guardGated = en.dead
             || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
-          en.hurt(applyBannerDamageDealt(game, en, critFist && !res.crit ? res.dmg * 2 : res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, critFist, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
+          // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→DV 原序
+          const dmgVFist = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+          en.hurt(applyBannerDamageDealt(game, en, critFist && !res.crit ? dmgVFist * 2 : dmgVFist), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, critFist, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,拳盒 623 同面;
           //  受理门=:12600/:12686 dontTakeDamage——拒收拍 num41=0 flag10 整段不可达）
           //  ★BJ455⑤ 门径统一（原版 :13712 `flag10 |= num41>0` 在 StrikeNPC :13702 后
@@ -7903,7 +8026,10 @@ export class MinionProj extends Entity {
       //  原版 crit=单布尔单翻倍,新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg,
       //  不重倍;旧 res.crit∧golemCrit 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）。
       const critContact = res.crit || timerCritContact || monkCritContact || golemCrit;
-      en.hurt(applyBannerDamageDealt(game, en, critContact && !res.crit ? res.dmg * 2 : res.dmg),
+      // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→golem→DV 原序;
+      //  掷 res.dmg（tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+      const dmgVContact = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+      en.hurt(applyBannerDamageDealt(game, en, critContact && !res.crit ? dmgVContact * 2 : dmgVContact),
         kbDir * (this.knockback + mkb), 0, game, pen0, critContact,
         spec === CONTACT_PLAYER_WINDOW ? 0 : -3, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       // ★BJ436 GC1 写方桥接线（近战域 immune 表 npcImmuneByAttacker 同步,原版
@@ -8111,7 +8237,9 @@ export class MinionProj extends Entity {
         const gated = en.dead || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
         const golemCrit = rollGolemSentryCrit(game, 644, false);   // 6176 SentryShot 10%
         const crit = res.crit || timerCrit || monkCrit || golemCrit;
-        en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? res.dmg * 2 : res.dmg),
+        // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→golem→DV 原序
+        const dmgV644 = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+        en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? dmgV644 * 2 : dmgV644),
           Math.sign(en.cx - bx) * this.knockback, -2, game, 0, crit, 1, true);
         // ★C16a-F3① 命中尾 IDStatic 写梯（:14030-14036）：usesIDStatic ∧ penetrate≠1
         //  （引爆拍 =−1）→ immune[owner]=0 清窗（不走 :14182 缺省 10t 写）——敌侧
@@ -8234,7 +8362,14 @@ export class MinionProj extends Entity {
     // 原版 1118 出场即全显,旧 17t 淡入=自造面。
     this.alphaFade = projId === 1093 || projId === 1112 || projId === 1113
       || projId === 1094
-      || projId === 1098 || projId === 1123 ? 255 : 0;
+      || projId === 1098 || projId === 1123
+      // ★BJ709-G27 ④（2026-10-24）：龙链四段出场淡入——SetDefaults alpha=255
+      //  （:6750）,AI_121 自减 −42/拍（:43783/:43852,头支 alpha>0 门内、段支
+      //  无条件=0 后 no-op,观测等价 ≈7t 渐显）+淡入期 2×dust135（:43777-43782/
+      //  :43845-43850）。非 DoPalAppearEffect（−15 档）——减法在 dragonHead/
+      //  dragonSegment 体内承载。伤害无 α 门（Damage_CanDealDamage :12461-12510
+      //  亲读无 625-628 α 条件）=淡入期照常接触伤。
+      || (projId >= 625 && projId <= 628) ? 255 : 0;
     // 命中盒真值（SetDefaults width/height——MinionProj 缺省 16×16；与
     // vanilla-projectiles.json 对齐，绘制侧 1:1 贴图锚盒左上、与盒尺寸解耦）：
     //  钻地龟 1098/1123 34×34（:10245-10246/:10507-10508）
@@ -8286,7 +8421,7 @@ export class MinionProj extends Entity {
     // ★SW-BJ16 2026-09-07：33693 中心锚支家族 SetDefaults 真盒补注册（同 BJ13 判据：
     //  本支 draw 锚=盒心系,盒错即绘错；此前除 643/1098/1123/1119 外全落 16×16 缺省）：
     //  星尘细胞 613 24×24（:6600-6611）/ 星尘守护者 623 50×80（:6713-6714）/
-    //  龙链四段 625-628 24×24（:6743-6744）/ 彩虹水晶 643 已注册 32×32（:6932-6933）/
+    //  龙链四段 625-628 24×24（:6741-6742 初盒;★G27② AI 逐拍 30×scale 覆写）/ 彩虹水晶 643 已注册 32×32（:6932-6933）/
     //  吸血蛙 758 20×30（:7817-7818）/ 雀杖 759 10×10（:7839-7840）/ 虎宝石 831 10×10
     //  （:8073-8074）/ 雪怪 951 26×26（:8972-8973）/ 阿比盖尔体 963 30×48（:9106-9107）/
     //  阿比盖尔计数器 970 10×10（:9188-9189）
@@ -8392,7 +8527,8 @@ export class MinionProj extends Entity {
     const pdir = owner.facing < 0 ? -1 : 1;                // player.direction
     // ★BJ518⑥：player.fullRotation 单源读值（Minecart 轨/滚轴鞋/Hover 7·8·23;
     // 43/49/55 未建模恒 0=Mounts.ts 既有备案）——1025 缩体支 num2 项与 :70205
-    // rotation += fullRotation 消费;其余型原版亦只 1025 支读（:70152-70212 内）
+    // rotation += fullRotation 消费;★G32① 勘正：trap（aiStyle 138 flag5 尾）原版
+    // 亦有 :70251 读位（旧注「只 1025 支读」系漏读,本刀补接线）
     const fullRotBJ518 = playerFullRotationOf(owner, owner.mount, owner.cart)?.angle ?? 0;
     const floorPos = (): void => { this.x = Math.floor(this.x); this.y = Math.floor(this.y); };
     // ---- 早退支①：aiStyle 123（641 月门/643 彩虹水晶）∪ 84（642 激光随 641 携带,
@@ -8486,14 +8622,18 @@ export class MinionProj extends Entity {
       vecX = this.w / 2; vecY = this.h;                    // :70220
       if (flag) { vec2X += pdir * -14; vec2Y += 25; }      // :70222-70225
     }
-    if (TRAP_TOWER.has(this.projId)) {                     // flag5 = aiStyle 138（:70228-70250）
+    if (TRAP_TOWER.has(this.projId)) {                     // flag5 = aiStyle 138（:70230-70252）
       if (!flag) {
-        vec2X = pdir * -9; vec2Y = 0;                      // :70231（赋值覆写）
-        if (pdir === -1) vec2Y += 2;                       // :70232-70234
-        if (grav === -1) vec2Y -= 2;                       // :70235-70237
+        vec2X = pdir * -9; vec2Y = 0;                      // :70235（赋值覆写）
+        if (pdir === -1) vec2Y += 2;                       // :70236-70239
+        if (grav === -1) vec2Y -= 2;                       // :70240-70243
       }
-      this.rot = pdir === 1 ? Math.fround(4.712389) : Math.PI / 2;   // :70238-70240
-      if (flag) { vec2Y += 5; this.rot = 0; }              // :70241-70244
+      this.rot = pdir === 1 ? Math.fround(4.712389) : Math.PI / 2;   // :70245
+      if (flag) { vec2Y += 5; this.rot = 0; }              // :70246-70250
+      // ★BJ709-G32①（G30 登记债⑩清偿,2026-10-24）：:70251 `rotation += player.
+      //  fullRotation` —— 旧注「其余型原版亦只 1025 支读 fullRotation」系漏读 flag5
+      //  尾行（:70152-70212 外）,本行随刀补齐;消费面=draw 支三处 ctx.rotate（同刀）。
+      this.rot += fullRotBJ518;                            // :70251 rotation += player.fullRotation
     }
     // ---- 坐骑 switch（:70255-70464,★BJ519② 1:1 折算）----
     // MountedTop（Player.cs:3333-3346）：x=Center.X;y=pos.Y+HOC（grav=1）/Bottom.Y−HOC
@@ -9258,7 +9398,9 @@ export class MinionProj extends Entity {
             // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
             const auraGated = en.dead
               || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
-            en.hurt(applyBannerDamageDealt(game, en, critAura && !res.crit ? res.dmg * 2 : res.dmg),
+            // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——光环场伤面
+            const dmgVAura = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+            en.hurt(applyBannerDamageDealt(game, en, critAura && !res.crit ? dmgVAura * 2 : dmgVAura),
               0, 0, game, 0, critAura, 1, true, penPctAura);
             // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,光环场伤载体=
             //  塔本体 688/689/690 的 Damage()——numHits 累计在塔身 pveNumHits 上）
@@ -9491,7 +9633,9 @@ export class MinionProj extends Entity {
                 //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg;res.crit∧golem 同拍
                 //  ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）
                 const critBoom = resBoom.crit || timerCritBoom || monkCritBoom || golemCritBoom;
-                en.hurt(applyBannerDamageDealt(game, en, critBoom && !resBoom.crit ? resBoom.dmg * 2 : resBoom.dmg),
+                // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——爆弹 694-696 面
+                const dmgVBoom = damageVarRoll(resBoom.dmg, this.ownerRef()?.luck ?? 0);
+                en.hurt(applyBannerDamageDealt(game, en, critBoom && !resBoom.crit ? dmgVBoom * 2 : dmgVBoom),
                   Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, critBoom, 1, true);   // ★N2 同式 crit 色位（res.crit‖golem）
                 // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
                 //  爆炸弹 694/695/696（AI_138 :66063-66073 生成的瞬态弹）→ projId 传
@@ -9988,6 +10132,23 @@ export class MinionProj extends Entity {
     //  :15368 勘正;★BJ661 两步式=truncCSf32MulBias（含偏置）,+armorPen）
     const dmg0 = Math.max(1, truncCSf32MulBias(p.summonDamageMult, this.damage)); // ⑥ pen 移 hit 时
     // ---- 旗舰家族分发（源码行号见各方法注释；先于通用运动）----
+    // ★BJ709-G30⑦（2026-10-24,G27 登记债⑦清偿）：AI_121 龙族环境微尘
+    //  （Projectile.cs:43638-43648,flag 块=625-628 全族每拍掷,先于头/段支）——
+    //  Main.rand.Next(30)==0 → Dust.NewDust(position,width,height,135,0,0,α=0,
+    //  scale=2) + noGravity + fadeIn=2（VDust 生长目标语义 :2148-2171）;尘出生格
+    //  实心（InWorld fluff5 ∧ SolidTile,solidTileAt=SolidTile 1:1 判定式）→ noLight
+    //  （墙内尘不发光）。尘盒=AI 入口盒=上一拍 resize/位移前值（与 vanilla 同拍序,
+    //  625 首拍=构造 24×24）。与 G27④ 淡入尘（α=100）同 type 135 双源并存。
+    if (this.projId >= 625 && this.projId <= 628 && Math.floor(Math.random() * 30) === 0) {
+      const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 135, 0, 0, 0, null, 2, true);
+      if (dA) {
+        dA.fadeIn = 2;                                    // :43642 fadeIn=2f
+        const stA = game.world.store;
+        const txA = Math.floor(dA.x / TILE), tyA = Math.floor(dA.y / TILE);   // ToTileCoordinates
+        if (txA >= 5 && txA < stA.w - 5 && tyA >= 5 && tyA < stA.h - 5
+          && solidTileAt(stA, txA, tyA)) dA.noLight = true;                   // :43644-43646
+      }
+    }
     if (this.projId >= 626 && this.projId <= 628) { this.dragonSegment(game, p, dmg0); return; }
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
     if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
@@ -11241,12 +11402,17 @@ export class MinionProj extends Entity {
       }
       ctx.save();
       {
-        // alpha 组合：出场淡入（既有）×623 A/=2（:34175-34177）——本地标量合成,
+        // alpha 组合：出场淡入（既有）×623 A/=2（:34175-34177）×625-628 A/=2
+        // （★G27③ :34180-34183 无条件支——龙链本体恒半透明灵体观感）——本地标量合成,
         // 不回读 ctx.globalAlpha（测试记录型 ctx 无 getter）
         let bodyAlpha = this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1;
         // 623：GetAlpha ×(255-alpha)/255（:45482/:45718 gAlpha——状态 3 隐身窗=0）
         // × Main.cs:34175-34177 A/=2。gAlpha=0 时因子 1×0.5 与旧式逐字节同相
         if (this.projId === 623) bodyAlpha *= ((255 - this.gAlpha) / 255) * 0.5;
+        // ★BJ709-G27③（2026-10-24,BJ709-A 登记债③+邻位偏差）：625-628 龙链
+        //  color106.A /= 2（Main.cs:34180-34183,无 shader 门——与 623 的
+        //  CurrentDrawnEntityShader==0 门不同族,原文无条件）
+        if (this.projId >= 625 && this.projId <= 628) bodyAlpha *= 0.5;
         if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
       }
       ctx.translate(this.cx + ax + jx, this.cy + ay + jy); // gfxOffY 未建模恒 0（通用路同）
@@ -11254,6 +11420,11 @@ export class MinionProj extends Entity {
         ctx.rotate(this.rot);
         if (!MINION_ROT_ONLY.has(this.projId) && this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
       } else if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
+      // ★BJ709-G27③：本支主绘=33693 通用尾 EntitySpriteDraw(...,proj.scale,dir)
+      //  （Main.cs:34212）——proj.scale 镜像=drawScale（1025 先例;龙链 AI 逐拍写
+      //  1+tier×0.01=长龙放大,基础龙 1.03）。本支其余成员 vanilla 恒 scale=1
+      //  （SetDefaults 无 scale 行族）→ drawScale=1 缺省零变化。
+      if (this.drawScale !== 1) ctx.scale(this.drawScale, this.drawScale);
       ctx.imageSmoothingEnabled = false;
       if (this.projId === 963) {
         // 切片 = Frame(4,13,0,frame)（:33704-33706）：第 0 列 × 第 frame 行,帧 44×64
@@ -11442,9 +11613,23 @@ export class MinionProj extends Entity {
       ctx.imageSmoothingEnabled = false;
       if (!this.carriedByBackpack) {
         ctx.translate(this.cx, this.y + this.h);                       // proj.Bottom（:34092）
+        // ★G30⑧（2026-10-24,G27 登记债⑧清偿）：本体主绘吃 proj.scale（Main.cs:34212
+        //  通用尾 EntitySpriteDraw(...,proj.rotation,origin32,proj.scale,dir)）——
+        //  proj.scale 镜像=drawScale（1025 先例;AI_138 携行+变身坐骑 54/55/56/61 写
+        //  0.5=携行半尺,heavySlingReposition :8622/:8633/:8654/:8665）。缺省 1 零变化
+        //  （放置态 scale 恒 1,SetDefaults 无 scale 行）——「值缺省零变化」无 id 门
+        //  （G27 判例:自造门反而是 vanilla 没有的门）。
+        if (this.drawScale !== 1) ctx.scale(this.drawScale, this.drawScale);
+        // ★BJ709-G32①（G30 登记债⑩清偿,2026-10-24）：:34212 主绘同传 proj.rotation
+        //  ——AI_138 携行 heavySlingReposition 写 ±π/2（:70245;变身坐骑 0 :70249
+        //  +fullRotation :70251;mount 61 +dir·π/2 :70303/56 +π :70332）=携行塔侧转
+        //  随身;放置态 rot 恒 0 → 零变化（1025 先例 `if (rot!==0) ctx.rotate`）。
+        if (this.rot !== 0) ctx.rotate(this.rot);
         ctx.drawImage(img as CanvasImageSource, -img.width / 2, -(img.height - 4)); // origin=(fw/2,fh−4)
       } else {
         ctx.translate(this.cx, this.cy);                               // 携行=B 支缺省盒心锚
+        if (this.drawScale !== 1) ctx.scale(this.drawScale, this.drawScale);   // ★G30⑧ 同上（携行半尺）
+        if (this.rot !== 0) ctx.rotate(this.rot);      // ★G32① 同上（携行侧转,唯携行态 rot≠0）
         ctx.drawImage(img as CanvasImageSource, -img.width / 2, -img.height / 2);
       }
       // ★R15-F2（2026-10-11 C15 清偿）：爆炸机关辉光叠画（Main.cs:34507-34521
@@ -11457,6 +11642,15 @@ export class MinionProj extends Entity {
       ctx.restore();
       ctx.save();
       ctx.translate(this.cx, this.carriedByBackpack ? this.cy : this.y + this.h);
+      // ★G30⑧：辉光叠画同吃 proj.scale（Main.cs:34519 EntitySpriteDraw(value124,
+      //  vector99,rectangle23,Color(255,255,255,127),proj.rotation,origin32,
+      //  proj.scale,dir)）——scale 进捕获矩阵（getTransform 于 translate 后同位,
+      //  flushItemGlow setTransform 消费）,op 局部 dx/dy 不变=绕锚缩放同 XNA。
+      if (this.drawScale !== 1) ctx.scale(this.drawScale, this.drawScale);
+      // ★G32①：辉光同传 proj.rotation（:34519 第五参）——rotate 进捕获矩阵与 scale
+      //  同位（G30⑧ 判例:pushGlowOps getTransform 捕获,flushItemGlow setTransform
+      //  消费,op 局部 dx/dy 不动）;均匀缩放与旋转交换律,合成位无序差。
+      if (this.rot !== 0) ctx.rotate(this.rot);
       r.pushGlowOps?.([{
         tex: `vanilla/Glow_${TRAP_GLOW_MASK[this.projId]}.png`,
         sx: 0, sy: frame * img.height, sw: img.width, sh: img.height,
@@ -12035,7 +12229,9 @@ export class TigerPounce extends Entity {
       // ★BJ453 并链：crit 源 ‖ timerCritPounce（:12928）‖ monkCritPounce（:12929-12943）,
       //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg——单一翻倍,原版序）
       const critPounce = res.crit || timerCritPounce || monkCritPounce;
-      en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? res.dmg * 2 : res.dmg), 0, 0, game, 0, critPounce, -3, true); // ★BJ452 N2 crit 色位（tag 掷率强制位,Enemy.hurt 纯染色）;kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——扑击弹 818 面
+      const dmgVPounce = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
+      en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? dmgVPounce * 2 : dmgVPounce), 0, 0, game, 0, critPounce, -3, true); // ★BJ452 N2 crit 色位（tag 掷率强制位,Enemy.hurt 纯染色）;kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
       // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——818 为逐段瞬态弹
       //  （TigerSpecialAttack 每 hop NewProjectile）→ numHits=0 每轮独立
       if (!pounceGated) {

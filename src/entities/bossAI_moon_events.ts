@@ -22,6 +22,7 @@ import { TILE } from '../core/constants';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
+import { bannerNpcKeyOf } from './projTargets';   // ★BJ710-G35 D1：发射者旗键（BannerID() 投影）
 import { Arrow } from './Arrow';
 import { getAttackDamageCappedAtMaster } from '../stats/ScaleStats';
 
@@ -102,6 +103,7 @@ const PROJ_LIFE: Record<number, number> = {
 function shootE(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life?: number,
+  arrowOpts?: Partial<import('./Arrow').ArrowOpts>,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
     new Arrow(x, y, vx, vy, dmg, 0, projId, {
@@ -111,6 +113,7 @@ function shootE(
       pierce: 1, hostile: true,
       bounce: PROJ_BOUNCE.has(projId),
       present: projId === 351,               // aiStyle 58 两段重力（Arrow 内实现）
+      ...arrowOpts,
     }),
     'projectiles');
 }
@@ -885,7 +888,9 @@ export function elfCopterAI(e: Enemy, game: GameHooks, player: Player | null) {
       const sk = 10 / d;
       sx *= sk * (1 + rndRange(-20, 21) * 0.0125);
       sy *= sk * (1 + rndRange(-20, 21) * 0.0125);
-      shootE(game, ox, oy, sx, sy, 32, 180);
+      // ★BJ710-G35 D1：347 ElfCopter（banner 110）发射者旗冻结（FindBannerToAssociateTo
+      //  P.cs:11106-11119——NPC 发弹恒 EntitySource_Parent,旗减伤对 180 链炮弹生效）
+      shootE(game, ox, oy, sx, sy, 32, 180, undefined, { bannerNpcId: bannerNpcKeyOf(e) });
     }
   }
   e.x += e.vx;                     // noTileCollide（SetDefaults 347）直积分
@@ -968,7 +973,8 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (player && !player.dead
         && aiGlobalFiringDistanceCheck(e.cx, e.cy, player.cx, player.cy)) {
         const ox = e.cx - e.facing * 12, oy = e.cy;
-        shootE(game, ox, oy, 12 * e.facing, 0, 25, 110);
+        // ★BJ710-G35 D1：143 Snowman Gangsta（banner 141 族）发射者旗冻结
+        shootE(game, ox, oy, 12 * e.facing, 0, 25, 110, undefined, { bannerNpcId: bannerNpcKeyOf(e) });
         // 出膛音（Projectile.cs:56211-56215 ai[1]==0 首拍）:弹 110 → Item11——
         // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例）
         game.playSfxWav?.('Item_11', 1, ox, oy);
@@ -1004,7 +1010,8 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
       let dx = player.cx - ox, dy = player.y - oy;
       const d = Math.hypot(dx, dy) || 1;
       const k = 10 / d;
-      shootE(game, ox, oy, dx * k, dy * k, 35, 109);
+      // ★BJ710-G35 D1：145 Snow Balla（banner 143 族）发射者旗冻结
+      shootE(game, ox, oy, dx * k, dy * k, 35, 109, undefined, { bannerNpcId: bannerNpcKeyOf(e) });
     }
   } else {
     // 跳扑循环(:29208-29234)

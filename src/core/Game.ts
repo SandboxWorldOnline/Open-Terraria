@@ -445,6 +445,7 @@ import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
+import { VanillaClient } from '../net/vanilla/VanillaClient';
 import { isDomUiTarget, DOM_UI_TARGET_SELECTOR } from './input/domTargets';
 import {
   MapPingStore, isMapPingDoubleClick, BestiarySub, PylonSub, ParticleOrchestraType,
@@ -498,7 +499,7 @@ import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { MagnetSphereProj, BeamBoltProj, HEAT_RAY_BOLT, MAGNET_SPHERE_BALL } from '../entities/MagnetSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
-import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample, bannerDamageDealtMultOf } from '../entities/projTargets';
+import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample, bannerDamageDealtMultOf, bannerNpcKeyOf, EXPERT_EOW_FIFTH_PROJS } from '../entities/projTargets';   // ★BJ716-A：EXPERT_EOW_FIFTH_PROJS 弹域单源（R18-F1）
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import { grantCollisionAttackImmunity } from '../entities/MountCombat';
 // ★BJ494：stellarTuneCritChance 生产调用面退役（冻结载体摘除）→ 移出 import;
@@ -3518,6 +3519,33 @@ export function maintainMinionBuffs(
   }
 }
 
+/** ★BJ710-A 分歧锁（2026-10-24 用户明令,带改判史防红蓝翻案）：召唤腾位驱逐序。
+ *  原版行为（1457 Player.cs:52381-52393 锚）= 纯 minionSlots 升序稳定逐杀（最便宜
+ *  先死,同权保 projectile 数组扫描序）→ 满槽异型连召时【刚召出的 0.5 槽双子对
+ *  387/388 永远排池首】,下一按先把上一按召出的双子对自我替换 = 永久 5+1 锁死
+ *  （2535 魔眼法杖用户实报;原版同相——「升序杀便宜」是 1.4.4 混随从设计）。
+ *  用户裁决:按我方预期优化——腾位先逐【异型】（与 incoming 家族不同者,池内保
+ *  原版升序=异型内最便宜+最老优先）,同型（同杖家族）仅在异型耗尽后回落原版升序
+ *  （同杖补召自替换净零语义不变）。帕鲁猫 1093/1112 家族互清占位不释放异型槽
+ *  = 单猫语义（互清后账已 ≤ 需求,分歧支不触发）,维持原版。
+ *  家族口径 = MINION_BUFFS 该杖 projs∪extra ∪ 龙族 {625,626,627,628} ∪ 帕鲁两代
+ *  互清对 {1093,1112}/{1094,1113}（与 ① 互清同组）;表外 shoot = 单型 {shoot}。 */
+function minionFamilyOf(shoot: number): ReadonlySet<number> {
+  const fam = new Set<number>([shoot]);
+  for (const { projs, extra } of MINION_BUFFS) {
+    if (projs.includes(shoot) || (extra ?? []).includes(shoot)) {
+      for (const p of projs) fam.add(p);
+      for (const p of extra ?? []) fam.add(p);
+    }
+  }
+  if (shoot === 625 || shoot === 626 || shoot === 627 || shoot === 628) {
+    fam.add(625); fam.add(626); fam.add(627); fam.add(628);   // 龙族全链同家族（延伸段与头一体）
+  }
+  if (shoot === 1093 || shoot === 1112) { fam.add(1093); fam.add(1112); }
+  if (shoot === 1094 || shoot === 1113) { fam.add(1094); fam.add(1113); }
+  return fam;
+}
+
 /** FreeUpPetsAndMinions 驱逐核（Player.cs:52335-52458，召唤出手时腾位）：
  *  ① 帕鲁家族互清（:52340-52360——1093/1112 同族互清；1094↔1113 跨型互清，
  *     1457 扩为四件两对）；
@@ -3530,6 +3558,9 @@ export function maintainMinionBuffs(
  *     max−num2；该表全件=1，ItemID.cs:1106 无覆写）——保护 625 龙头/628 龙尾/623
  *     星尘守护者（:52434）+ num4 双子交替门（:52429 初值 388；杀 387→护 387、杀
  *     388→护 388，:52435-52440 翻转——双子按对死，孤残单只不补杀）。
+ *     ★BJ710-A 分歧（用户 2026-10-24 明令,改判史见 minionFamilyOf 注）：驱逐序
+ *     分两遍——先异型（非 incoming 家族）后同型回落,两遍内部各保 ③ 升序稳定序；
+ *     原版无此分区（纯升序）→ 同杖家族 0.5 槽双子恒池首被自我替换（5+1 锁死）。
  *  本仓建模差：基础龙链段 626/627/628 与守护者 623 为 noSlot 不入池（原版入池但
  *  626/627 走 ③' 尾邻对特道、628 受 :52434 保护,净效果同）；延伸段 626/627 实账
  *  0.5/段（:6737-6739）入池走 ③' 特道；龙头 625 计 1 槽（原版头 0 槽 + 基础段对
@@ -3580,7 +3611,17 @@ export function freeUpMinionsForSummon(
   const finalPool = [...body, ...tailPair];
   // ④ 逐杀（:52428-52458）
   let twinGuard = 388;                                   // num4（:52429）
-  for (const victim of finalPool) {
+  // ★BJ710-A 分歧（用户 2026-10-24 明令,改判史见 minionFamilyOf 注）：驱逐序两遍
+  //  = 先异型（非 incoming 家族）后同型回落,两遍内部各保 ③ 池升序稳定序——原版
+  //  纯升序令同杖家族 0.5 槽双子对恒排池首,满槽异型连召时上一按召出的对子先死
+  //  = 永久 5+1（2535 魔眼杖实报）。同型支原样保留（同杖补召净零/双子交替门/
+  //  龙段尾对特道/625·628·623 豁免全不变）。
+  const fam = minionFamilyOf(shoot);
+  const evictOrder = [
+    ...finalPool.filter((m) => !fam.has(m.projId)),
+    ...finalPool.filter((m) => fam.has(m.projId)),
+  ];
+  for (const victim of evictOrder) {
     if (!(used > maxMinions - 1)) break;                 // :52432
     const t = victim.projId;
     if (t === twinGuard || t === 625 || t === 628 || t === 623) continue;   // :52434
@@ -3726,6 +3767,23 @@ export class Game implements GameHooks {
       return new URLSearchParams(location.search).get('interp') !== '0';
     } catch { return true; }
   })();
+  /** ★interp 收益门（2026-10-24 用户实报「30fps 行走时画面幻影感/体验更差」定谳）：
+   *  插值只在【渲染率>逻辑率 60Hz】时有中间帧收益。锁 30/60 档下 dt 抖动经 acc
+   *  累计器本已整步补偿（位移节奏完美均匀——探针 _interp-30fps-judder-probe：
+   *  锁 30 量化形态 41.67/25ms 对 OFF=逐帧 2 步恒定），interp 的
+   *  alpha=acc/FIXED_DT 反而随抖动游走 [0,1)，把完美节奏【制造】出 9/5 交替步长
+   *  =3:2 pulldown 式重影（同探针 ON=std 1.04/33% 不规则帧,用户「幻影感」）;
+   *  且渲染位恒滞后 ≤1 tick（16.7ms 输入延迟）零收益。60Hz 档同族（1 步/帧
+   *  alpha≈0 恒滞后 + 偶发 0 步帧 alpha 跳变）。门=true 才插值;false=渲染 curr
+   *  位（与 ?interp=0 同路径,零摆动零延迟）。数据源=_renderDtEmaMs 迟滞门:
+   *  开<13.4ms（120/144/90/75Hz 档）/关>14.6ms（60/50/48/30 档）,带内保持防
+   *  拍频翻转（75Hz=13.33 贴带内沿,EMA 平滑+迟滞保恒开）。FrameBeat 自动降档
+   *  （120→90→60→30）时门随 EMA 自适应翻转;翻转帧有 ≤1 步位移单帧跳变（档位
+   *  切换事件本身可见,可接受）。 */
+  private _interpGate = true;
+  /** 渲染帧距 EMA（ms;0<dt<100 才入账——停顿帧不污染;首帧直填=开门即时正确）——
+   *  interp 收益门数据源 */
+  private _renderDtEmaMs = -1;
   /** 插值快照（fixedUpdate 头拍=上一步末态）;-Infinity=未就绪（首步前不插） */
   private _iPX = -Infinity;
   private _iPY = -Infinity;
@@ -6032,9 +6090,41 @@ export class Game implements GameHooks {
     p.ridingCart = false;
     p.cart = null;
     p.cartDefenseBonus = 0;   // Mount.UpdateEffects 停跑（Mount.cs:4797-4798 加成解除）
+    p.cartLavaMaxBonus = 0;   // ★BJ709-G34（G32-D2）：Hell 车 lavaMax 提帽解除（:5138）
     cart.mounted = false;
     cart.dead = true;
     this.minecart = null;
+  }
+
+  /** ★BJ713-A（G34 登记债①清偿）:传送时矿车随迁。vanilla 定谳（1457 亲读,1458
+   *  同域 diff=same）:Teleport（Player.cs:37698-37780）与 Spawn（:37819-37995,魔镜
+   *  族/回忆药水 :43324/:43459 召回链）全文【零】mount/Dismount 面——矿车在原版=
+   *  MountID.Sets.Cart 族 mount 状态（非实体）,position 迁移即整体随迁,落点仍在
+   *  车上;矿车亦不在 dismountsOnItemUse 三员（55/56/61,Mount.cs:2376/:2434/:2498）
+   *  → 使用魔镜不提前卸车;Mount.cs 零 teleport 引用/零脱轨强卸。仓内车=props 实体
+   *  且 fixedUpdate 每拍把玩家锁回车位（玩家坐骑位回写段,实体更新在 player 之后
+   *  同拍即锁回）→ 不随迁=传送位移下一拍被车拖回=传送失效（G34 观察的断路域）。
+   *  架构近似备案:等价面=车实体坐标/速度镜像玩家传送终值（仓 teleport 各面本就
+   *  清 vx——含 vanilla 不清速度的 Teleport 面,既有近似非本刀引入,镜像=不放大）
+   *  + fallStart 重置（Teleport :37739 `fallStart=(int)(position.Y/16f)` / Spawn
+   *  ResetFallDamage :37924——防跨高度传送后脱轨落地按旧落差结摔伤）;rotation/
+   *  onTrack/gfxOffY 下拍重算,trackBoost/jump/cartRampTime 按原版保持（Teleport
+   *  /Spawn 均不清）。oldX/oldY 由 fixedUpdate 头拍快照自愈=无需重置。
+   *  ★BJ714-A（R16-P1 清偿,2026-10-25）:由 private 转公开 = GameHooks.
+   *  migrateMinecartOnTeleport 的结构实现（同名直满足接口,零转包——BJ108
+   *  startCameraTransitionForPlayerTeleport 同先例）——实体侧传送三面
+   *  （Player.doQueenSlimeHookTeleport style10 :22937 / Portal 穿越 style4
+   *  PortalHelper.cs:187=MessageBuffer.cs:3557 同门 / Player.shimmerUnstuck
+   *  style12 :29095）经 game.migrateMinecartOnTeleport 可选钩消费本单源;
+   *  四汇线（fireRecall/teleportToMouse/wormhole/teleportWhenReadyInner,
+   *  BJ713-A 既有）调用点不变。 */
+  migrateMinecartOnTeleport(): void {
+    const cart = this.minecart;
+    if (!cart || !cart.mounted) return;
+    const p = this.player;
+    cart.x = p.x; cart.y = p.y;
+    cart.vx = p.vx; cart.vy = p.vy;
+    cart.fallStart = Math.trunc(cart.y / 16);
   }
 
   /** 坐骑召唤（物品路径 Player.cs:43099-43102：`item.mountType != -1 ∧ flag2 →
@@ -6566,6 +6656,7 @@ export class Game implements GameHooks {
     p.vx = 0; p.vy = 0;
     p.netOffX = 0; p.netOffY = 0;            // 清联机平滑偏移(本地瞬移不插值)
     p.clearFall?.();                         // 清坠落起点:瞬移不结算摔伤
+    this.migrateMinecartOnTeleport();        // ★BJ713-A:骑矿车随迁（混乱之杖 Teleport style1 不卸 mount 同门）
     this.startCameraTransitionForPlayerTeleport(tpOldX, tpOldY, 10);   // ★BJ103-A1b（Style1 → delay=10）
     this.lighting.liquidDirty = true;
     const liq = st.liquid[st.idx(land[0], land[1] - 1)];
@@ -9335,6 +9426,15 @@ export class Game implements GameHooks {
     //  渲染期 miss-bake 不再单帧打穿（巨帧 376ms→≤~8ms+单块溢出,ChunkCache.bakeBudgetMs）
     this.chunks?.beginBakeBudget();
     this.frameDts.push(dtMs);
+    // ★interp 收益门 EMA（2026-10-24「30fps 行走幻影感」;机制全注见 _interpGate
+    //  声明处）:渲染帧距指数平滑(0.15≈7 帧适应),迟滞门开<13.4ms/关>14.6ms,
+    //  带内保持;首帧直填(开门即时正确),停顿帧(≥100ms,后台回前台)不入账。
+    if (dtMs > 0 && dtMs < 100) {
+      this._renderDtEmaMs = this._renderDtEmaMs < 0 ? dtMs
+        : this._renderDtEmaMs + (dtMs - this._renderDtEmaMs) * 0.15;
+      if (this._renderDtEmaMs < 13.4) this._interpGate = true;
+      else if (this._renderDtEmaMs > 14.6) this._interpGate = false;
+    }
     // 帧冻结取证(2026-09-01 用户报"按住的键断一下"):>100ms 的渲染帧停顿在
     // 游戏内观感恰是"移动/智能选取断一下"(rAF 停摆=逻辑不步进,角色原地定住),
     // 与真键沿(key 事件)可分辨——节流 1s/条防风暴刷环淹没证据
@@ -20274,17 +20374,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 池域含 noSlot 实体（freeUpMinionsForSummon 内部再剥：账/池剥 noSlot,
         // 链扫描保 628 尾——尾邻延伸对判定 :52406-52416 需要）
         const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry) as MinionProj[];
-        // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（SpawnMinionOnCursor :47906-47963）
-        if (cw.shoot === 625) {
-          const head = minions.find((m) => m.projId === 625);
-          if (head && !head.dead) {
-            head.extendDragon(this);
-            this.player.useTime = this.cycleCooldown(critVid, cw.useTime);   // R26 GAP-07:rd2 后摇收口
-            this.playUseSound(critVid, 'summon');   // UseSound 数据驱动（缺表兜 Item_44）
-            this.input.mouseDown = false;
-            break;
-          }
-        }
+        // ★BJ710-A（2026-10-24）：腾位先行 = 原版时序（FreeUpPetsAndMinions 于出手
+        //  起点 Player.cs:43111，先于 ItemCheck_StartActualUse :43115 → ItemCheck_Shoot
+        //  一切分派——含 3531 龙延伸支 :48990-49047）。曾把腾位排在 625 龙延伸支
+        //  之后：满槽再召龙只延伸不腾位 → +1 槽延伸段被每 tick 上限自裁网回杀
+        //  → 永久 5+1 锁死（用户实报 BJ710-A；延伸段吃腾出的槽 = 原版 FreeUp→
+        //  Shoot 同拍同账）
         if (!cw.sentry) {
           // 腾位全链 = FreeUpPetsAndMinions（Player.cs:50954-51050，核已抽
           // freeUpMinionsForSummon）：1093 清同型（:50955）→ MinionSacrificable 门
@@ -20295,6 +20390,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         } else {
           const sentries = this.entities.projectiles.filter((e) => e instanceof MinionProj && e.sentry) as MinionProj[];
           if (sentries.length >= this.player.maxSentries) sentries[0].dead = true;
+        }
+        // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（:48990-49047 extend 支）
+        if (cw.shoot === 625) {
+          const head = minions.find((m) => m.projId === 625);
+          if (head && !head.dead) {
+            head.extendDragon(this);
+            this.player.useTime = this.cycleCooldown(critVid, cw.useTime);   // R26 GAP-07:rd2 后摇收口
+            this.playUseSound(critVid, 'summon');   // UseSound 数据驱动（缺表兜 Item_44）
+            this.input.mouseDown = false;
+            break;
+          }
         }
         const owner = this.player;
         // ★BJ651-R2 站⑤（2026-10-12）：词缀烘定=Item.cs:577 roundCSf32Mul（f32 银行家）
@@ -33218,8 +33324,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   // SW-M1 2026-09-03（清偿②）：expert EoW 虫段 /5 的 20 弹型表（Projectile.cs:13392-13398,条件行 :13394
   //  逐项照抄,顺序保持原文）——`Main.expertMode && 表含弹型 && targetNPC.type 13-15 →
   //  dmg /= 5`。181/183/281/566 等 4 型不走本 face（explodeAt 无投掷点）,全表收录=1:1。
-  static readonly EXPERT_EOW_FIFTH_PROJS = new Set([30, 397, 517, 28, 37, 516, 29, 470, 637,
-    1086, 1087, 108, 281, 588, 519, 773, 183, 181, 566, 1002]);
+  //  ★BJ716-A（R18-F1，2026-10-25）：表体提为弹域单源（projTargets.
+  //  EXPERT_EOW_FIFTH_PROJS——dealContacts/Arrow 主环/Dart 三直击面同批接 /5 臂,
+  //  非爆炸面曾全 5× 超伤）;此处静态字段转发保 API（多副本漂移收敛,BJ712-B 判例1）。
+  static readonly EXPERT_EOW_FIFTH_PROJS = EXPERT_EOW_FIFTH_PROJS;
   /** SW-M1 2026-09-03（清偿②）：`Projectile.trap=true`（SetDefaults :1966/:9536）∩ 本 face
    *  爆炸圈 = {108 电路炸药, 1002 TNT 桶}；其余 trap 成员（12/98/99 族/184-188/654/655/
    *  980/1005/1007/1048/1049/1073/1078/1091）不经 explodeAt 结算。 */
@@ -34752,6 +34860,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const oldX = p.x, oldY = p.y;        // ★BJ103-A1b：过渡旧位（vector=position pre-move,Teleport :37706）
     p.x = destX; p.y = destY;
     p.fallStartY = null;                 // fallStart 重置（:37026）
+    this.migrateMinecartOnTeleport();    // ★BJ713-A:骑矿车随迁（Teleport style3 不卸 mount 同门）
     this.setSpectating(-1);              // SetOrRequestSpectating(-1)（:37019）
     fx3(p.x, p.y);                       // Exit（新位）
     this.startCameraTransitionForPlayerTeleport(oldX, oldY);   // ★BJ103-A1b 相机过渡（UnityTeleport style3,近滑行/远黑幕）
@@ -34856,6 +34965,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.x = dest.x; p.y = dest.y; p.vx = 0; p.vy = conchFailBoth ? 0.001 : 0;   // ★SW-BJ43 双败 0.001f（:56824/:56914）
     if (c.vid === 2350 || c.vid === 4870) p.iframes = keepIframes;
     p.fallStartY = null;      // fallStart 重置（Teleport :37730；Spawn ResetFallDamage :37906）
+    this.migrateMinecartOnTeleport();   // ★BJ713-A:骑矿车随迁（vanilla 传送不卸 mount,见该函数头注）
+    // ★BJ707-G29（G26 债①清偿）:Spawn(RecallFromItem) 无条件复位段 :37875
+    //  lavaOpacity=1f——魔镜/回忆药水/回归药水三 Spawn face（:37789/:43324/:43459）
+    //  均过本支;Teleport 面（ocean/hell/random/worldSpawn）无此复位=不写
+    if (c.kind === 'spawn') p.lavaOpacity = 1;
+    // ★BJ707-G31（G29 登记债1清偿;★BJ713-A 扩聚合=G34 登记债①任务书）:同段邻行
+    //  :37874 lavaTime=lavaMax——岩浆宽限随 recall 直回满。vanilla 同拍 lavaMax 含
+    //  坐骑面（UpdateEffects :25855 先于 ItemCheck :43324,骑 Hell 车 +420 :5138;
+    //  传送不卸 mount=随迁后仍骑乘,帽持续含 420 钳不回吞）→ 读聚合 equipStats.
+    //  lavaMax+cartLavaMaxBonus。respawn face 死亡已卸=equip 面单读;Teleport 面
+    //  无 Spawn 复位段=同 lavaOpacity 不写。
+    if (c.kind === 'spawn') p.lavaImmuneTicks = p.equipStats.lavaMax + p.cartLavaMaxBonus;
     this.player.updateUnbreakableWallScan(this.world, true);   // ★SW-RB10a：DoUnbreakableWallScan（Teleport :37733）落点即扫
     if (c.kind === 'random') this.teleportStyle2Dust(p.x, p.y);   // Exit 尘（:37752 TeleportEffect Exit）
     else if (c.kind === 'ocean') this.conchWaterDust(p.x, p.y, true);   // Exit（:37752）
@@ -37036,9 +37157,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   damage=(int)(damage×effect.DamageDealt.Sample(Main.Difficulty))）：
       //   BannerStrength 普通族 BannerEffect(1f)：DamageDealt 曲线 keys
       //   {Classic:1.5, Expert:2}（ItemID.cs:23-31）；DD2 族 itemId 3837-3846 →
-      //   BannerEffect(0.2)：keys{1.1,1.2}；Sample=分段线性+越尾键外推。
-      if (e.vanillaId != null && this.bannerNpcActive(e.vanillaId)) {
-        const bItem = bannerItemId(bannerOfNpc(e.vanillaId));
+      //   BannerEffect(0.2)：keys{1.1,1.2}；Sample=分段线性+【双端钳界】（★BJ716-A
+      //   2026-10-25 勘误：越尾键=末键 num=0 早退返末键值,非外推——大师恒 ×2.0/
+      //   DD2 ×1.2,bannerDamageDealtSample 体内已改）。
+      //   ★BJ716-A（R15-P1-2）：键域 bannerNpcKeyOf（原版攻端 GetBannerBuffEffect(npc)
+      //   →NPCtoBanner(npc.BannerID())=netID≥-10 域;旧裸读 vanillaId=变体史莱姆
+      //   -1..-10 双向错——projTargets 三消费位同批归队）
+      const bKeyMelee = bannerNpcKeyOf(e as Parameters<typeof bannerNpcKeyOf>[0]);
+      if (bKeyMelee && bKeyMelee !== 0 && this.bannerNpcActive(bKeyMelee)) {
+        const bItem = bannerItemId(bannerOfNpc(bKeyMelee));
         if (bItem > 0) {
           chainDmg = Math.trunc(chainDmg * bannerDamageDealtSample(bItem, mainDifficulty(this.world)));
         }
@@ -44632,8 +44759,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★Notes①（四轮蓝队）：原文 `(int)((float)num4 * …)` = (int) 截断非四舍五入
     //   （round 会把 ×0.5/×0.75 的 .5 中点抬 +1）；连带反射基准随 dmg 微漂移——
     //   反射量 = trunc(num4×num2)，num4 本身截断后也向零收紧 ≤1 点，方向一致非反向。
-    if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
-      dmg = Math.max(1, Math.trunc(dmg * bannerReceivedMult(mainExpertMode(this.world))));
+    // ★BJ710-G35 D3（2026-10-25）：两勘正——①键域改 bannerNpcKeyOf（原版
+    //  GetBannerBuffEffect(npc) → NPCtoBanner(npc.BannerID()),BannerID()=netID≥-10?
+    //  netID:type——旧门裸读 vanillaId：-5 宝宝史莱姆（type 1 蓝史莱姆域）会误吃
+    //  蓝史莱姆旗、-12 getGood 僵尸丢僵尸旗）;②乘区带 itemId 档（bannerItemId(
+    //  bannerOfNpc(key))——DD2 旗 3837-3846 → 0.917/0.833,普通 0.75/0.5;旧门
+    //  无参=DD2 怪（552-578 接触伤）错用普通档,弹幕面 BJ710-C 已带档,本面对齐）。
+    if (attacker && contactOnly) {
+      const bKey = bannerNpcKeyOf(attacker);
+      if (bKey && bKey !== 0 && this.bannerNpcActive(bKey)) {
+        // ★BJ716-A（R15-P2-4，2026-10-25）：布尔档 → mainDifficulty 曲线式——旅程滑杆
+        //  分数难度∈(1,2) 连续插值（DamageReceived 曲线 Sample）;非旅程整数值两式
+        //  逐值相同（bannerReceivedMult 体内钳界,端点三位小数 D6 锁零扰动）
+        dmg = Math.max(1, Math.trunc(dmg
+          * bannerReceivedMult(mainDifficulty(this.world), bannerItemId(bannerOfNpc(bKey)))));
+      }
     }
     // ★A1 荆棘反射前置面（1457 Player.cs Update_NPCCollision :31605-31668，
     //   位次=【banner 后 / resistCold·防御·闪避·Hurt 前】逐值钉死）：
@@ -45032,6 +45172,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const guard = p as unknown as { __swDeathSettled?: boolean };
     if (guard.__swDeathSettled || !p.dead) return;   // 已结算 / 非致死调用直接早退
     guard.__swDeathSettled = true;
+    // ★BJ713-A（G34 登记债②清偿）:KillMe :39209 `mount.Dismount(this)`——死亡无条件
+    //  卸坐骑（矿车 Cart mount 无特例分支;原版序=尘爆后、dead=true 前,仓内死亡置位
+    //  在调用方先行=等价序）。仓内等价=dismountMinecart（车实体消亡+ridingCart/cart/
+    //  cartDefenseBonus/cartLavaMaxBonus 四清位;玩家位不漂——车每拍锁玩家位,死拍两者
+    //  同位,且仓玩家盒恒 20×42 无 vanilla Dismount 底锚尺寸复位面）。不卸=尸体随车
+    //  （车 fixedUpdate 死亡相照跑,每拍回写 p.x/p.y）+重生被拖回（重生拍 placePlayer
+    //  AtSpawn 后同拍 entities.update 锁回旧车位）。重生拍 mount 初值=vanilla 步行
+    //  （Spawn 无 mount 面,死亡已卸）。常规坐骑（MountInstance.mount.active）同锚
+    //  死亡不卸=重生仍骑乘,系邻域域缺口另案登记（本刀矿车域,不扩刀）。
+    if (this.minecart) this.dismountMinecart();
     // KillMe :39107 起（1456 注 :38228-38235）：pvpDeath 分道计数
     if (pvp) p.deathsPvp++;
     else p.deathsPve++;           // numberOfDeathsPVE（PL:53840,存档持久化）
@@ -46648,9 +46798,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★石化旁路（H2-2）：石化路径原文无交互门（NPC.cs:56456-56462 不经 NPCLoot
       // 的 :79653 GetWereThereAnyInteractions）→ 直通旗杀
       if (enemy.playerInteracted === true || opts?.petrifyBypassInteractionGate === true) {
-        const grant = recordBannerKill(this.world.bannerKills, enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+        // ★BJ710-G35 D3b：击杀计账键 = BannerID() 投影（NPC.cs:80636 AddNPCKillBy(
+        //  BannerID())——netID≥-10?netID:type）。旧裸读 vanillaNetId：-12 getGood
+        //  僵尸（type 6）计 bannerOfNpc(-12)=0 丢僵尸旗 27 击杀账。图鉴 killNetId
+        //  （上行）是 netID 域,两键域并存勿混。
+        const killBannerKey = bannerNpcKeyOf(enemy) ?? 0;
+        const grant = recordBannerKill(this.world.bannerKills, killBannerKey);
         if (grant) {
-          const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+          const banner = bannerOfNpc(killBannerKey);
           // 规范名 = BannerToNPC(banner)（BannerSystem.cs:249-255 `Lang.GetNPCName(
           // BannerToNPC(num))`）——同旗多 NPC（蓝史莱姆 74/297/298 → 旗 8）统一
           // "Blue Slime",非被杀变体名（曾取被杀 id 名=变体旗达标公告错名）
@@ -52865,6 +53020,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       await a.preloadTileSheetsFor(tileSheets, wallIds);
     }
     if (this.teleportNear(tx, ty)) {
+      this.migrateMinecartOnTeleport();   // ★BJ713-A:骑矿车随迁（晶塔 style9/地图选点同门,teleportNear 三落位支单口汇线）
       this._tpTarget = null;
       this.renderer.tpMark = null;
       this.renderer.fullMap.open = false;
@@ -53242,6 +53398,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     p.breath = p.breathMax;
     p.breathCD = 0;
     p.lavaImmuneTicks = p.equipStats.lavaMax;
+    // ★BJ707-G29（G26 债①清偿）:Spawn 无条件复位段 :37875 lavaOpacity=1f——熔岩
+    //  潜水镜渐变斜坡（Player 湿段）残值随重生直清（旧=≤15 拍自愈）
+    p.lavaOpacity = 1;
   }
 
   // ================= 渲染 =================
@@ -53371,8 +53530,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //  捕获 running=false）,残留位无害;避免 120 行调用体缩进重排=并行会话 diff 面）。
     //  暂停门:回 curr 位=与旧行为逐位（防暂停瞬间画面半步跳变;paused 时 fixedUpdate
     //  冻结 prev/curr 不变,lerp 本恒等——门是防「暂停拍 acc 残值」的边缘半步偏移）。
-    const iA = Game.interp && this._iPX > -Infinity && !this.paused
-      ? Math.min(1, this.acc / FIXED_DT) : -1;   // 钳 1:steps≥5 雪崩残 acc 外推防御
+    const iA = Game.interp && this._interpGate && this._iPX > -Infinity && !this.paused
+      ? Math.min(1, this.acc / FIXED_DT) : -1;   // 钳 1:steps≥5 雪崩残 acc 外推防御;★收益门(2026-10-24 渲染率≤逻辑率档禁插——机制见 _interpGate)
     this.renderer.interpA = iA;   // ★实体绘制端消费（SwingArc trail 补偿相位退回）
     let iRX = 0, iRY = 0, iRCamX = 0, iRCamY = 0;
     if (iA >= 0) {
@@ -54120,6 +54279,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           }
         },
         onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
+
         // ---- SW-FX42 渔夫任务/季节位/在用箱（module15 + msg80）----
         onAnglerQuest: (quest) => this.netApplyAnglerQuest(quest),
         onAnglerFinished: (slot) => this.netApplyAnglerFinished(slot),
@@ -54143,14 +54303,188 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           }
           applyModTESnapshot(entries);
         },
-        onMapPing: (x, y) => this.mapPings.add(x, y, performance.now()),
-        onParticleOrchestra: (type, settings) => this.netApplyParticleOrchestra(type, settings),
-        onAmbienceSpawn: (slot, seed, type) => this.netApplyAmbience(slot, seed, type),
+
       });
       net.connect(url, hostToken);
       // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）
       timer = setTimeout(() => {
         if (!settled && !net.gameWorld) fail(Lang.text('Mods.SandboxWorld.Toast.ConnectTimeout'));
+      }, 30000);
+    });
+  }
+
+  /** 加入原版 1.4.5.8 服务器（vanilla interop，2026-10-24）。
+   *  url = 桥 WS 地址（server/src/vanillaBridge.ts，?host=&port= 指向原版服）。
+   *  弹道已在 rig 实弹定谳（probe-join.mjs 129 收官）；VanillaClient 鸭型顶 ClientNet
+   *  消费面（调用面普查见 net/vanilla/VanillaClient.ts 文件头）。 */
+  /** vanilla 物品 vid → SW 内部 id（联机钩子域;未知返 0） */
+  private itemByVidForNet(vid: number): number {
+    for (let i = 0; i < ITEM_DEFS.length; i++) {
+      if (ITEM_DEFS[i]?.vid === vid) return i;
+    }
+    return 0;
+  }
+
+  joinVanillaGame(url: string, onProgress?: (label: string, p: number) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (reason: string) => {
+        if (settled) return;
+        settled = true;
+        vc.disconnect();
+        if (this.net === (vc as unknown as ClientNet)) this.net = null;
+        reject(new Error(reason));
+      };
+      const vc = new VanillaClient(this, {
+        onProgress: (label, p) => onProgress?.(label, p),
+        onWorldReady: (world) => {
+          this.net = vc as unknown as ClientNet; // 鸭型顶替（vanilla 模式引擎门 = net?.active）
+          vc.gameWorld = world;
+          this.netDropSeen.clear();
+          this.netNpcPuppets.clear();
+          this.netDropPuppets.clear();
+          this.netProjPuppets.clear();
+          this.netNpcLast.clear();
+          this.netProjLast.clear();
+          this.netChestWatch.length = 0;
+          this.remotePlayerProxies = [];
+          // ★P1-B（2026-10-25）：本地 tile 编辑上报链（msg17 TileManipulation）——
+          // 净流入（msg17 重放/msg20 矩形/段解码）全走数组直写不经 setTile API,
+          // netReporter 不触发=无回声;服务器中继时 ignoreClient=发送者亦双保险
+          world.store.netReporter = (op) => vc.reportTileOp(op);
+          // ★P2-A（2026-10-25）：傀儡受击上报（Enemy.hurt 傀儡分支 → msg28 DamageNPC）
+          entityNet.reportStrike = (netId, rawDmg, kbx, kby) => vc.sendStrike(netId, rawDmg, kbx, kby);
+          this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
+            if (settled) return;
+            settled = true;
+            resolve();
+          }, (e) => fail(`世界装载失败：${(e as Error).message}`));
+        },
+        onSectionArrived: (rect) => {
+          // 晚到段标脏（同 joinNetGame R3 面;200×150 段 4 格步进）。
+          // ★卫门（2026-10-25 rig 实弹×4）：loadWorld 进行中（129 后、chunks 建立
+          // 前）他人 msg17/20 中继即到达——this.chunks 未建裸读即炸 PAGE-EXC
+          if (!this.world?.store || !this.chunks) return;
+          const st = this.world.store;
+          for (let y = rect.y0; y < rect.y0 + rect.h; y += 4) {
+            for (let x = rect.x0; x < rect.x0 + rect.w; x += 4) {
+              if (st.inBounds(x, y)) this.chunks.markDirtyAround(x, y);
+            }
+          }
+          // ★视口门（2026-10-25 联机卡顿归因定谳）：光照引擎 dirty=同 tick 快进整个
+          // 4 态周期（视口域全量）——联机时他人每笔 tile 变更都置位=持续全量光照
+          // （实测 22s 窗 710 次=32 次/秒）。光照计算域=相机视口+padding,视口外的
+          // 变更此拍无需重算（下次视口到达时段流/瓦片重绘自然刷新）——按视口相交
+          // 门控,联机流量主干（他人远处挖掘/建造）不再触发任何光照重算。
+          // Camera 语义:x/y=中心,世界域宽=viewW/zoom（Camera.clamp halfW 同式）
+          const cam = this.camera;
+          const halfW = cam.viewW / 2 / (cam.zoom || 1) + 40 * TILE;
+          const halfH = cam.viewH / 2 / (cam.zoom || 1) + 40 * TILE;
+          if (rect.x0 * TILE < cam.x + halfW && (rect.x0 + rect.w) * TILE > cam.x - halfW
+            && rect.y0 * TILE < cam.y + halfH && (rect.y0 + rect.h) * TILE > cam.y - halfH) {
+            this.lighting.dirty = true;
+          }
+        },
+        onKick: (reason) => {
+          this.cb.onToast?.(reason);
+          fail(reason);
+        },
+        // P1-A（2026-10-25）：NPC 傀儡/聊天进 SW 联机同管线（netApplyNpcSnaps/newText）
+        onNpcSnapshot: (snaps) => this.netApplyNpcSnaps(snaps),
+        onChat: (text, r2, g2, b2) => this.newText(text, r2, g2, b2),
+        onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
+        // P3-A（2026-10-25）：掉落物傀儡（msg21/151 → netApplyItemOp 管线;
+        // 拾取上报=VC sendItemOp→背包终拍重传+服务器自清收敛）
+        onItemOp: (op) => this.netApplyItemOp(op),
+        // P3-B（2026-10-25）：箱子（msg32 缓冲+msg33 拼合 → netApplyChest
+        // 登记 world.chests+netPendingChest 命中开面板——SW 联机同管线）
+        onChestSync: (chestIdx, x, y, items) => this.netApplyChest(chestIdx, x, y, items),
+        // 箱名（msg33 名段 → SW 箱名管线同镜像）
+        onChestName: (chestIdx, x, y, name) => this.netApplyChestName(chestIdx, x, y, name),
+        // P4（2026-10-25）：Ping/图鉴/晶塔/编排粒子（vanilla id 分发,SW 联机同钩子）
+        onMapPing: (x, y) => this.mapPings.add(x, y, performance.now()),
+        onBestiaryEvent: (events) => this.netApplyBestiary(events),
+        onPylonMessage: (msg) => this.netApplyPylon(msg),
+        onParticleOrchestra: (type, settings) => this.netApplyParticleOrchestra(type, settings),
+        // P1-B（2026-10-25）：服务器权威受伤/致死——终值直扣（vanilla 服侧已全链结算,
+        // 本端防具未上传前服务器按 0 防御算,本地二次减免会与服务器 hp 账分叉）;
+        // 死亡走 settlePlayerDeath 与 damagePlayer 致死支同管道
+        onPlayerHurt: (damage, hitDir) => {
+          const p = this.player;
+          if (!p || p.dead) return;
+          p.hp = Math.max(0, p.hp - damage);
+          p.iframes = Math.max(p.iframes ?? 0, 40); // 原版 General 免疫窗 40t
+          void hitDir; // 击退表现 P2（服务器 msg13 速度位已带）
+          this.addDamageNumber(p.cx, p.y, Math.round(Math.min(damage, p.maxHp)), false, '#FF5050');
+          if (p.hp <= 0) {
+            p.dead = true;
+            this.settlePlayerDeath(false);
+          }
+        },
+        // CreativeUnlocks(5) 旅程服全量研究进度（服务器权威直写——幂等合并,已满不动）
+        onJourneyUnlocksBulk: (entries) => {
+          for (const e of entries) {
+            const id = this.itemByVidForNet(e.vid);
+            if (id) this.research.sacrifice(id, e.amount);
+          }
+          journeyBrowserNotifyResearchChanged();
+        },
+        // 旅程三员（vanilla id 5/6/10,消费体照 SW joinNetGame 同款）
+        onJourneyWorldState: (st) => this.netApplyJourneyWorld(st),
+        onJourneyPersonalState: (slot, st) => { if (slot === vc.mySlot) this.netApplyJourneyPersonal(st); },
+        onJourneyTimeSkip: (which) => {
+          const T: Record<1 | 2 | 3 | 4, [number, boolean]> = {
+            1: [Clock.DAWN, true], 2: [0.5, true], 3: [Clock.DUSK, false], 4: [0, false],
+          };
+          const [tod, isDay] = T[which];
+          this.skipToTime(tod, isDay);
+        },
+        onJourneyUnlock: (slot, itemId, amount) => {
+          const myTeam = (this.player as unknown as { team: number }).team;
+          const theirTeam = vc.players.get(slot)?.team ?? 0;
+          if (myTeam > 0 && myTeam === theirTeam) {
+            this.research.sacrifice(itemId, amount);
+            journeyBrowserNotifyResearchChanged();
+          }
+        },
+        onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
+        onAmbienceSpawn: (slot, seed, type) => this.netApplyAmbience(slot, seed, type),
+        // LeashedEntity(13) vanilla 格式适配（msg82-13 → LeashedNetMsg → netApplyLeashed）
+        onLeashedSync: (msg) => this.netApplyLeashed(msg),
+        // msg86 挂物族 TE（单槽族 → world.furnitureItems 记录,渲染面照单机链）
+        onFurnitureTE: (x, y, kind, item) => {
+          if (!kind || !this.world) return;
+          const fid = item && item.vid ? this.itemByVidForNet(item.vid) : 0;
+          const rec = this.world.furnitureItems.find((f) => f.x === x && f.y === y && f.kind === kind);
+          if (rec) {
+            rec.slots[0] = fid ? { id: fid, stack: 1, prefix: item?.prefix || undefined } : null;
+          } else if (fid) {
+            this.world.furnitureItems.push({
+              x, y, kind: kind as never,
+              slots: [{ id: fid, stack: 1, prefix: item?.prefix || undefined }],
+            });
+          }
+        },
+        // msg86 多槽挂物族 TE（帽架 4 槽/模特 19 槽——SW furnitureItems 同构直挂）
+        onFurnitureMultiTE: (x, y, kind, slots) => {
+          if (!this.world) return;
+          const count = kind === 'display_doll' ? 19 : 4;
+          const rec = this.world.furnitureItems.find((f) => f.x === x && f.y === y && f.kind === kind);
+          const conv = (sl: { vid: number; stack: number; prefix: number } | null) => {
+            const id = sl && sl.vid ? this.itemByVidForNet(sl.vid) : 0;
+            return id ? { id, stack: 1, prefix: sl!.prefix || undefined } : null;
+          };
+          const arr = Array.from({ length: count }, (_, i) => conv(slots[i] ?? null));
+          if (rec) {
+            for (let i = 0; i < count; i++) rec.slots[i] = arr[i];
+          } else if (arr.some(Boolean)) {
+            this.world.furnitureItems.push({ x, y, kind: kind as never, slots: arr });
+          }
+        },
+      });
+      vc.connect(url);
+      setTimeout(() => {
+        if (!settled && !vc.gameWorld) fail('连接原版服务器超时');
       }, 30000);
     });
   }

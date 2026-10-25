@@ -246,6 +246,25 @@ export const FACE_FLOWER_HELMET_HIDE = new Set([92, 275]);
  *  （:2596 头层路径;本仓 face 单层合并,两门并此一处） */
 export const HEAD_HIDES_HEAD = new Set([38, 135, 269, 282, 288]);
 
+/** ★BJ709-G32② Head.Sets.CanDrawOnVelociraptorMount（ArmorIDs.cs:30,
+ *  Factory.CreateBoolSet(false, …) 136 头白名单——逐值对勘 1457 原行,脚本核
+ *  count=136/无重复）——DrawPlayer_21_Head 头层总门（PlayerDrawLayers.cs:2106
+ *  -2111：骑 54 ∧ head≥0 ∧ !表[head] → flag4=false 整头层跳过=头盔+发全隐;
+ *  head=0（无盔/Familiar Wig）∉表 → 骑迅猛龙无盔时头层同隐）。消费=Renderer
+ *  veloHead 块;★Face.Sets.CanDrawOnVelociraptorMount（ArmorIDs.cs:2194 {1,6,
+ *  9,8,19,7,20,21,23}）系脸饰门（:2585/:2131）,本仓无 face 槽=不建。 */
+export const HEAD_CAN_DRAW_ON_RAPTOR = new Set([
+  212, 241, 274, 277, 5, 278, 34, 205, 41, 42, 30, 8, 84, 79, 33, 91, 90, 99,
+  35, 4, 256, 257, 36, 85, 80, 1, 112, 2, 215, 201, 202, 199, 194, 206, 262,
+  259, 234, 226, 238, 250, 280, 232, 225, 223, 224, 219, 220, 216, 263, 273,
+  264, 267, 18, 19, 24, 21, 26, 25, 16, 14, 12, 275, 65, 51, 56, 40, 29, 81,
+  94, 95, 62, 67, 44, 68, 121, 114, 116, 113, 92, 106, 100, 96, 97, 141, 143,
+  145, 139, 140, 144, 126, 130, 133, 159, 158, 161, 166, 183, 181, 178, 184,
+  182, 13, 64, 60, 59, 73, 63, 117, 138, 160, 10, 235, 197, 195, 203, 191, 228,
+  233, 227, 217, 218, 245, 243, 244, 242, 231, 229, 222, 265, 272, 279, 15,
+  163, 288, 289, 290,
+]);
+
 /** Head.Sets.PreventBeardDraw（ArmorIDs.cs:26,48 头）——胡须层头盔门
  *  （PlayerDrawLayers.cs:2429-2433 flag7） */
 export const PREVENT_BEARD_DRAW = new Set([

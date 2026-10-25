@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Wiring } from '../src/world/Wiring';
 import { deviceTable, type DeviceCtx } from '../src/world/wiring/devices';
@@ -261,6 +261,7 @@ describe('TrapShot 炮弹族弹体', () => {
   });
 
   it('炮弹撞块：落点爆炸 72px 半宽纯伤害，不伤玩家（Projectile.Kill :72768-72831）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（TrapShot blast 首掷 ×1.0）
     const { game, hits, playerHits } = makeGame();
     game.world.store.setTileSilent(5, 5, TILE_BY_KEY['stone']!); // 命中 (5,5)=80..96px
     const p = new TrapShot(40, 80, 8, 0, 300, 'cannonball');

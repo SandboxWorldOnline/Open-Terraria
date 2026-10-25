@@ -100,12 +100,14 @@ describe('BJ344 spawnNPC stat×scale 运行时派生（f32 逐拍金标）', () 
     expect(e.def.defense).toBe(11);
   });
 
-  it('flag=true 硬置族不进派生块（-1 hp/dmg/def/kbr 全硬置零漂移）', () => {
+  it('flag=true 硬置族不进派生块（-1 hp/dmg/def 硬置零漂移 + kbr ×1.2 case 乘子）', () => {
     const e = s.spawnNPC(100, 100, -1, new RNG(17))!;
     expect(e.maxHp).toBe(90);
     expect(e.def.damage).toBe(45);
     expect(e.def.defense).toBe(10);
-    // ★N2 变异判别位：门摘除时 -1 的 kbr 会被 ×(2−0.6f) 污染（基底 81 无 kbr → 缺省 1 → 1.4）
-    expect(e.def.knockbackResist).toBeCloseTo(1, 6);
+    // ★BJ720-A（issue #19 D12）：case -1 体 knockBackResist ×=1.2f（NPC.cs:7694）——
+    //  经典档基底 81 无 kbr（缺省 1）×1.2=1.2。旧断言 1 系 case 乘子漏接期定值。
+    // ★N2 变异判别位保留：门摘除时 -1 的 kbr 会被 ×(2−0.6f) 污染（→1.68）
+    expect(e.def.knockbackResist).toBeCloseTo(1.2, 6);
   });
 });

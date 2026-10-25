@@ -255,6 +255,7 @@ describe('MinionShot tag/proc 继承', () => {
   };
 
   it('whipTagShot 箭命中 tag 敌：+TagDamage 并触发 proc 首跳（5476 → 1037 陨石 ×1.33）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（tag 支首掷 ×1.0）
     const e = mkEnemy(9, 60 * 16 + 100, 90 * 16);
     const { hooks, player, added } = makeHooks([e]);
     tagEnemy(player, e, 5476);   // 星陨鞭 TagDamage=2（ItemID.cs:1341）
@@ -378,6 +379,7 @@ describe('沙漠虎 818 多段链', () => {
   });
 
   it('818 伤害 ×(1.5+0.4×(宝石数-1))：1 宝石 dmg10 → 15（:12107-12111），每敌一次', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（随从弹首掷 ×1.0）
     const e = mkEnemy(24, 60 * 16 + 160, 90 * 16);
     const { hooks } = makeHooks([e]);
     const tiger = mkTiger(hooks, 1, [e]);
@@ -408,6 +410,7 @@ describe('沙漠虎 818 多段链', () => {
 // ============ 5 AI_120 星尘守护者（:41969-42299） ============
 describe('AI_120 星尘守护者', () => {
   it('500 内敌进入冲刺态并受拳伤；600 外敌全程无伤（:42036-42073/:14294-14300）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（随从弹首掷 ×1.0）
     const near = mkEnemy(30, 60 * 16 + 250, 90 * 16);
     const far = mkEnemy(31, 60 * 16 + 700, 90 * 16);
     const { hooks, player } = makeHooks([near, far]);
@@ -444,6 +447,7 @@ describe('localNPCImmunity（:15330/:11878/:13153）', () => {
   });
 
   it('闪电光环：净空 12 格 → 方形场 320px，每 3t 一跳；场外敌无伤（AI_137 :65972-65981/:14537-14553）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（随从弹首掷 ×1.0）
     const inE = mkEnemy(40, 60 * 16, 100 * 16 - 40);
     const outE = mkEnemy(41, 60 * 16 + 200, 100 * 16 - 40);
     const { hooks, player } = makeHooks([inE, outE]);
@@ -466,6 +470,7 @@ describe('乌鸦 317（:3825-3836 minion / AI :27383-27590）', () => {
   });
 
   it('扑击：命中敌造成接触伤并重置扑击计时（:27568-27580/:12777-12780）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（随从弹首掷 ×1.0）
     const e = mkEnemy(50, 60 * 16 + 250, 90 * 16);
     const { hooks, player } = makeHooks([e]);
     const r = new MinionProj(player.x, player.y, 317, 12, 1.5, false, 0, false, () => player);

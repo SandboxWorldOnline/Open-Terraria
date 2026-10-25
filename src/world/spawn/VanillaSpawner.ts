@@ -18,7 +18,7 @@ import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore, LIQUID_TYPE } from '../TileStore';
-import { f32, mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
+import { f32, mainExpertMode, netIdSpawnScale, netIdFlagTrueRescale, scaleStatsWorld } from '../../stats/ScaleStats';
 import { applyModSpawnStats } from '../../mods/hooks';   // ★二百七十八刀:rev/death HP 乘表(自然刷怪漏斗)
 import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollOnlyBadLuck, rollBadLuck, rollLuck } from '../../stats/Luck';
@@ -216,22 +216,30 @@ const NET_ID_OVERRIDE: Record<string, { scale?: number; color?: number[]; alpha?
 export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number;
   /** ★BJ344：dmg/life 双精度 ×1.1 链旗（case -14 :7830-7831 / case -15 dmg :7840——
    *  `(int)((double)((float)v×scale)×1.1)`：f32 乘 scale 后拓宽 f64 乘 1.1 再截断） */
-  x11?: boolean }> = {
+  x11?: boolean;
+  /** ★BJ720-A（issue #19 D12）：flag=true 族（-1..-10）case 体硬置 value
+   *  （NPC.cs:7695/:7704/:7714/:7724/:7736/:7745/:7755/:7764/:7773/:7782——
+   *  100/100/3/10000/10/20/10/8/10/500），入尾段 ScaleStats 吃钱币乘区 */
+  value?: number;
+  /** ★BJ720-A：case 体 knockBackResist 乘子（:7694/:7703/:7713/:7722/:7733/:7753——
+   *  -1/-2/-3 ×1.2、-4 ×1.4、-5 ×0.95、-7 ×0.9；-6/-8/-9/-10 无此行=1） */
+  kb?: number }> = {
   // ★BJ337(2026-09-24)：-1/-2 base 16（母史莱姆）系旧表误值——原版 FromNetId(-1/-2)
   //  → NetIdMap[0]/[1]=81 腐化史莱姆（NPCID.cs:10450/:12478-12484；SetDefaultsFromNetId
   //  case -1/-2 :7687-7702 只做 SetDefaults_ForNetId(81, scale)+硬置 life/damage/defense）。
   //  真刷出点在 Enemy.ts BJ263 死亡分裂链（base 81 已硬编码正确）——刷生侧无 D(-1/-2)
   //  掷点=纯潜伏数据,但值以原版为准。hp/dmg/def=case 硬置值（1:1）。
-  '-1': { base: 81, scale: 0.6, hp: 90, dmg: 45, def: 10 },   // Slimeling 小腐化史莱姆
-  '-2': { base: 81, scale: 0.9, hp: 90, dmg: 45, def: 20 },   // Slimer2 大腐化史莱姆
-  '-3': { base: 1, scale: 0.9, hp: 14, dmg: 6, def: 0 },   // 绿史莱姆
-  '-4': { base: 1, scale: 0.6, hp: 150, dmg: 5, def: 5 },
-  '-5': { base: 1, scale: 0.9, hp: 30, dmg: 13, def: 4 },  // 黑史莱姆
-  '-6': { base: 1, scale: 1.05, hp: 45, dmg: 15, def: 4 },
-  '-7': { base: 1, scale: 1.2, hp: 40, dmg: 12, def: 6 },
-  '-8': { base: 1, scale: 1.025, hp: 35, dmg: 12, def: 4 }, // 红（母史莱姆子代）
-  '-9': { base: 1, scale: 1.2, hp: 45, dmg: 15, def: 7 },   // 黄
-  '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6 },  // 丛林
+  //  ★BJ720-A D12：value/kb=case 体 value 硬置与 kbr 乘子（尾段 flag=true 重排消费）。
+  '-1': { base: 81, scale: 0.6, hp: 90, dmg: 45, def: 10, value: 100, kb: 1.2 },   // Slimeling 小腐化史莱姆
+  '-2': { base: 81, scale: 0.9, hp: 90, dmg: 45, def: 20, value: 100, kb: 1.2 },   // Slimer2 大腐化史莱姆
+  '-3': { base: 1, scale: 0.9, hp: 14, dmg: 6, def: 0, value: 3, kb: 1.2 },   // 绿史莱姆
+  '-4': { base: 1, scale: 0.6, hp: 150, dmg: 5, def: 5, value: 10000, kb: 1.4 },
+  '-5': { base: 1, scale: 0.9, hp: 30, dmg: 13, def: 4, value: 10, kb: 0.95 },  // 黑史莱姆
+  '-6': { base: 1, scale: 1.05, hp: 45, dmg: 15, def: 4, value: 20 },
+  '-7': { base: 1, scale: 1.2, hp: 40, dmg: 12, def: 6, value: 10, kb: 0.9 },
+  '-8': { base: 1, scale: 1.025, hp: 35, dmg: 12, def: 4, value: 8 }, // 红（母史莱姆子代）
+  '-9': { base: 1, scale: 1.2, hp: 45, dmg: 15, def: 7, value: 10 },   // 黄
+  '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6, value: 500 },  // 丛林
   '-11': { base: 6, scale: 0.85 },   // 小噬魂怪
   '-12': { base: 6, scale: 1.15 },   // 大噬魂怪
   // 黄蜂族大小变体（FromNetId NetIdMap[55..64]：两两一族 231-235；scale 取 netid 表）
@@ -757,6 +765,26 @@ export class VanillaSpawner {
       if (map.hp != null) e.hp = e.maxHp = map.hp;
       if (map.dmg != null) e.def.damage = map.dmg;
       if (map.def != null) e.def.defense = map.def;
+      // ★BJ720-A（issue #19 D12，2026-10-25）：flag=true 族（-1..-10 三值全硬置）尾段
+      //  重排（NPC.cs:8363-8372 `if (flag) { ScaleStats(...); life = lifeMax; }`）——
+      //  case 体的 kbr ×乘子/value 硬置与尾段完整难度链（专家/大师乘区 + 肉后
+      //  ForExpertHardmode 兜底（世花后 80→100 阈值）+ lifeMax<6 下限）此前全缺=
+      //  三档停经典硬编码（实测 -1..-10 三档同值）。单源=netIdFlagTrueRescale
+      //  （分裂幼体/风气球 594 携带变体同源消费）。
+      if (map.hp != null && map.dmg != null && map.def != null) {
+        const vBase = e.vanilla!;
+        const fin = netIdFlagTrueRescale(
+          { type: baseId, boss: !!e.def.boss, friendly: !!vBase.friendly, townNPC: !!vBase.townNPC,
+            scale: netScale ?? (vBase.scale ?? 1) },   // npc.scale 终态（盒链后）
+          { life: map.hp, damage: map.dmg, defense: map.def,
+            value: map.value ?? e.def.value ?? 0, kbMul: map.kb },
+          e.def.knockbackResist ?? 1, scaleStatsWorld());
+        e.hp = e.maxHp = fin.lifeMax;
+        e.def.damage = fin.damage;
+        e.def.defense = fin.defense;
+        e.def.value = fin.value;
+        e.def.knockbackResist = fin.knockbackResist;
+      }
     }
     // ★BJ344（spawn-parity-gaps「flag=false netID 族 case 体 stat×scale」清偿）：
     //  SetDefaultsFromNetId 各 case 体（NPC.cs:7784-8360）在基底完整 SetDefaults

@@ -293,7 +293,7 @@ describe('1457 数值大改', () => {
     expect(petals.every((p) => p.damage === Math.ceil(Math.trunc(50 * 2.25) / 6))).toBe(true);
     // 瓣预置 localNPCImmunity[target]=30（:29）：花瓣自目标体内出生,30t 内不得命中
     // 目标本体（Update 先递减后跑命中 → 第 30 拍起可命中）——按在目标身上驱动
-    const rvi2 = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 播种:非暴击档(15%)
+    const rvi2 = vi.spyOn(Math, 'random').mockReturnValue(0.5);    // 非暴击档(15%);★BJ716-A:DV 中性档(×1.0,播种面已在 rvi 完成)
     const petal = petals[0];
     petal.vx = 0; petal.vy = 0;                    // 钉在出生点（=目标体内）不动
     for (let t = 0; t < 29; t++) petal.fixedUpdate(1, hooks);

@@ -96,13 +96,15 @@ describe('R5-F9/F10 多段跳高度表+优先序', () => {
     p.inputJump = false;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     // ★BJ705-G25 迁移:tap→holdJumpRead（G23 松键即清后 tap 读数恒 0）;持 2 拍读数
-    //   = round(base×mult) − 2（瓶族起跳拍 sustain 同拍 −1 + 持跳 1 拍 −1）同算术。
+    //   = round(base×mult) − 1（★BJ717-A F6 迁移 2026-10-25:起跳拍 sustain 不再同拍跑
+    //   =只余持跳 1 拍 −1;旧 −2=起跳拍同拍 −1 + 持跳 1 拍 −1,oracle S3:fire 拍
+    //   jumpHold 原值入次拍递减）同算术。
     const s1 = holdJumpRead(p, w, 2);                  // 空中 1：Sandstorm ×3
-    expect(s1).toBe(Math.round(base * 3) - 2);
+    expect(s1).toBe(Math.round(base * 3) - 1);
     const s2 = holdJumpRead(p, w, 2);                  // 空中 2：Blizzard ×1.5
-    expect(s2).toBe(Math.round(base * 1.5) - 2);
+    expect(s2).toBe(Math.round(base * 1.5) - 1);
     const s3 = holdJumpRead(p, w, 2);                  // 空中 3：Cloud ×0.75（兜底档）
-    expect(s3).toBe(Math.round(base * 0.75) - 2);
+    expect(s3).toBe(Math.round(base * 0.75) - 1);
     expect(p.extraJumps.length).toBe(0);
     const s4 = holdJumpRead(p, w, 2);                  // 段耗尽：不再跳（无新段=0,
     expect(s4).toBe(0);                                //  误发第 4 段=s4≠0 必红）
@@ -120,7 +122,7 @@ describe('R5-F9/F10 多段跳高度表+优先序', () => {
       expect(base).toBe(PLAYER_JUMP_TICKS);
       p.inputJump = false;
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-      expect(holdJumpRead(p, w, 2)).toBe(Math.round(base * mult) - 2);   // ★BJ705-G25 持跳读数（tap 恒 0）
+      expect(holdJumpRead(p, w, 2)).toBe(Math.round(base * mult) - 1);   // ★BJ705-G25 持跳读数（tap 恒 0;★BJ717-A F6 −2→−1 迁移）
     }
   });
 });
@@ -472,7 +474,9 @@ describe('R5-F21/F22 DamageVar', () => {
     }
   });
 
-  it('F22 敌弹吃旗减伤（Projectile.cs:14905-14907——Dart.ownerNpcId → bannerNpcActive）', async () => {
+  it('F22 敌弹吃旗减伤（1457 Projectile.cs:14905-14908——bannerNpcId（类型域）→ bannerNpcActive。'
+    + '★BJ710-C 2026-10-25 域勘正：旧夹具读 Dart.ownerNpcId=实体 id 喂类型 id 键域（合成闸掩错），'
+    + '修后统一走 bannerNpcId + applyBannerDamageReceivedOnProj 单源（trunc+itemId 档））', async () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     settle(p, w);
@@ -481,11 +485,11 @@ describe('R5-F21/F22 DamageVar', () => {
     const hooks = {
       ...fakeHooks(w, p),
       damagePlayer: (d: number): number => { got.push(d); return 0; },
-      bannerNpcActive: (id: number) => id === 50,      // 僵尸旗在栏
+      bannerNpcActive: (id: number) => id === 16,      // 史莱姆旗在栏（类型域键,16→旗 146→item 2955 普通档）
     };
-    const self = { x: p.x, y: p.y, w: 8, h: 8, ownerNpcId: 50, projId: 12 };
+    const self = { x: p.x, y: p.y, w: 8, h: 8, bannerNpcId: 16, projId: 12 };
     hitPlayer(self, hooks as never, 100);
-    // 经典：DamageVar(100)=100 → 旗 ×0.75=75 → 缩放 ×1 → EVP ×2 = 150
+    // 经典：DamageVar(100)=100 → 旗 ×0.75=trunc(75) → 缩放 ×1 → EVP ×2 = 150
     expect(got[0]).toBe(150);
     // 无旗对照：100 → ×2 = 200
     const hooks2 = { ...fakeHooks(w, p), damagePlayer: (d: number): number => { got.push(d); return 0; } };

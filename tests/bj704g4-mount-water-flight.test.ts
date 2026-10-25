@@ -221,11 +221,13 @@ describe('BJ704-G4 C 迅猛龙 54 水下（canFly=allowedToFly 闩 :2871）', ()
     //   常规重力臂照加）= -5.81
     expect(p.vy).toBeCloseTo(-6.01 + 0.2, 5);
     expect(p.jumpHold).toBe(15);
-    for (let i = 0; i < 109; i++) p.fixedUpdate(1 / 60, game);  // 15 钉拍 + 94 飞拍
+    for (let i = 0; i < 109; i++) p.fixedUpdate(1 / 60, game);  // 14 钉拍 + 95 飞拍（★BJ717-A F1 相位迁移）
     expect(p.vy).toBeLessThanOrEqual(-8.99);      // 爬升帽 -9.015（坐骑档 6.01）
     expect(p.vy).toBeGreaterThanOrEqual(-9.05);
-    // 燃料账：跳拍/钉拍（jumpHold>0）链不消费（canFly 门 jump==0）;钉尽起 1/t ×94
-    expect(p.mount.flyTime).toBe(100 - 94);
+    // 燃料账：跳拍/钉拍（jumpHold>0）链不消费（canFly 门 jump==0）;★BJ717-A F1:
+    //   sustain 钉迁重力前=耗尽拍当拍可开门（≙原版 JumpMovement :26945→坐骑链 :27158
+    //   序,jump-- 到 0 的拍 Flight 即接管,旧=晚一拍=94 飞拍）→ 95 飞拍
+    expect(p.mount.flyTime).toBe(100 - 95);
     expect(p.mount.frameState).toBe(3);           // 扇翼帧态（16-20 帧组的态位）
   }, 30000);
 });
@@ -331,10 +333,12 @@ describe('BJ704-G4 H 结构锁（Player.ts/Mounts.ts 源文本锚）', () => {
   it('湿重力段让位门 + 滑翔骑乘门 + 平台钉让位门（三处门表达式逐字）', () => {
     expect(playerSrc).toContain('if (!flying && !mountFlight && (this.rocketDelay === 0 || this.cced)) {');   // ★G16 CCed 平重力放行（vanilla :27005 无湿门）
     expect(playerSrc).toContain('!!eqWet.wing && wingsLogicW > 0 && this.wingTime <= 0');
-    // ★BJ705-G23 迁移:sustain 块重构后钉让位门=else-if(!inputJump) 松键清零支之后的
-    // 持键支内 `if (!mountFlight)`（inputJump 由分支承载——语义同旧双门合取）
+    // ★BJ717-A F8 迁移（2026-10-25,R13 清偿）:平台钉让位门 !mountFlight【退役】——
+    //   F1 钉位迁重力/坐骑链【前】（sustainPin 闭包=JumpMovement :26945 序）后,坐骑
+    //   vy 链（:27158）自然覆写钉值=让位语义由序承载;旧门副作用=吞 merman swimTime
+    //   刷新（oracle S8c:骑 49 液中持跳 swimTime 10→29 周期刷新）。锁防门回潮。
     expect(playerSrc).toContain('else if (!this.inputJump) {');
-    expect(playerSrc).toContain('if (!mountFlight) {');
+    expect(playerSrc).not.toContain('if (!mountFlight) {');
   });
 
   it('Mounts.ts 61 飞行帧态门与 56 分立（:3370-3373 vs :3366-3369）', () => {

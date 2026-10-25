@@ -14,7 +14,7 @@
 //     gore61-63×4+damage>0 门 128×128 Damage()（idStatic 窗）。
 //   · Kill 162（:77391-77453）:Item14+64×64 Damage()+尘31×20+尘6×50+尘6×10+
 //     gore×4+144×144 再 Damage()（两段间 immune[owner]=10 窗——162 pen=4≠1 末档）。
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -113,6 +113,7 @@ describe('§0 源锚（共享桶单源 / 私表停笔 / Kill 精确面）', () =
 // ================================================================ §1 直击共享桶
 describe('§1 281 直击：全场共享桶（多兔同敌 10t 一跳）', () => {
   it('[A] 同拍双兔同敌：只结算一只（旧私表=双跳）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（281 直击 DV 首掷 ×1.0）
     const { hooks, hurts } = idStaticWorld([7]);
     const b1 = new TrapShot(40 * TILE, 40 * TILE, 5, 0, 350, 'bunny');
     const b2 = new TrapShot(40 * TILE + 1, 40 * TILE, -5, 0, 350, 'bunny');
@@ -185,6 +186,7 @@ describe('§2 281/162 timeLeft 尽爆（Kill 精确 FX + 伤害窗）', () => {
     expect(hurts).toHaveLength(1);
   });
   it('[B] 162：Item14+尘 31×20 / 6×50 / 6×10（恰 80 尘）+ 两段盒各敌恰一跳', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（TrapShot blast DV 首掷 ×1.0）
     // 内盒敌（距心 <32）+ 外环敌（距心 32..72）——两段 Damage 各结算一次,内盒敌不二跳
     const w = new World(80, 60, 42, 'open');
     const hurts: number[] = [];

@@ -58,6 +58,12 @@ describe('wingTexSource 缓存条目独立性（翼案锁）', () => {
   const fakeThis = () => ({
     wingBakeCache: new Map<string, HTMLCanvasElement>(),
     wingBakeCachePruneAt: 0,
+    // ★BJ719-A 域回归分诊:补 2026-10-12/14 池化刀新增的 wingBakeFree 池/
+    //   wingBakePoolGive 归池面（旧夹具缺字段=wingTexSource :20258 TypeError 存量红,
+    //   与 BJ719-A 本刀无关;池面 no-op 桩=miss 恒新分配,本锁「条目互异/内容不被
+    //   覆写」断言语义不变——池复用只在淘汰后发生,本夹具无淘汰进池）
+    wingBakeFree: new Map<string, HTMLCanvasElement[]>(),
+    wingBakePoolGive: () => {},
     wingTintScratch: makeCanvas(),   // 共享单槽（新代码零触碰;旧病=条目===它）
     applyDyeToImageData: () => {},
     applyDyeLitToImageData: () => {},

@@ -229,7 +229,7 @@ describe('BJ236 ④vanillaProjAlpha.ts 写后自证守卫（tools/guard-vanilla-
     }
   }
 
-  it('真文件四道断言全绿（wc-l=384/闭合/300 唯一/末项 1110 钉死）', () => {
+  it('真文件四道断言全绿（wc-l=529/闭合/300 唯一/末项 1110 钉死;★BJ708-G33 重钉 515→529=BJ668b 尾批头注 +14 合法登记面）', () => {
     const r = runGuard();
     expect(r.code).toBe(0);
     expect(r.out).toContain('GUARD GREEN');

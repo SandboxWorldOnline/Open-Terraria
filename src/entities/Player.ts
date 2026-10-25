@@ -538,8 +538,9 @@ export function beetleOrbDrawPlan(
  *  scale×(1+Next(40)×.01)、fadeIn=.5+Next(20)×.01、noGravity、velX+=facing×1.5、
  *  color=Lerp((229,178,255)→White,f³)（63/65 Ignis=Lerp((255,178,127)→White,f³)）
  *  ——XNA Color(float) 构造 0.9/0.7/1×255 截断=229/178/255,Lerp 逐通道含 A=255。
- *  坐骑染料 shader（GetSecondaryShader(cMount)）缺省 cMount=0=null——仓内无坐骑
- *  染料槽位=缺省相零建模（登记:接线须随 miscDyes[3] 一并）。
+ *  坐骑染料 shader（:21539 GetSecondaryShader(cMount)——非 ArmorSetDye）★BJ707-G29
+ *  接线：dash6 支染料=dyeVid 入参（调用方传 mountDyeVid()=miscDyes[3]→d.dyeVid）;
+ *  dash3/5 支仍 ArmorSetDye（:21470/:21515）。缺省 cMount=0→null=无染同相。
  *  其余 dash 档零尘（dash2 循环 m<0/dash4 死支）。返回实发粒数。 */
 export function emitDashSlideDust(
   pool: BJ595DustPool | undefined,
@@ -612,6 +613,7 @@ export function emitDashSlideDust(
         d.scale *= 1 + Math.floor(rand() * 40) * 0.01;  // :21536 Next(40)×0.01
         d.fadeIn = 0.5 + Math.floor(rand() * 20) * 0.01;   // :21537 .5+Next(20)×.01
         d.noGravity = true;                             // :21538
+        d.dyeVid = dyeVid;                              // :21539 shader=GetSecondaryShader(cMount)（★BJ707-G29）
         d.vx += facing * 1.5;                           // :21540
         const t3 = rand() ** 3;                         // :21541-21542 num38³ Lerp 权
         // Color.Lerp 逐通道 (int) 截断（XNA Color.Lerp）:a=(229,178,255)/(255,178,127),b=White
@@ -1596,6 +1598,23 @@ export class Player extends Entity {
   /** SuperCart 矿车坐骑防御加成（Mount.cs:4797-4798 UpdateEffects 每帧写入：
    *  statDefense += (int)(2×(1+|vx|/RunSpeed×2.5))；下车清零）——Minecart 持有 */
   cartDefenseBonus = 0;
+  /** ★BJ709-G34（G32-D2 清偿）:Hell 矿车（mountId 22）骑乘期岩浆宽限提帽 +420
+   *  （Mount.cs:5138 UpdateEffects `mountedPlayer.lavaMax += 420`）——Minecart.
+   *  fixedUpdate 逐拍写（cartDefenseBonus 同模式）,下车三位清零;消费面=岩浆段
+   *  lavaMax 聚合（eqM.lavaMax+本字段）与 :27930-27932 无条件钳。提帽非回填:
+   *  宽限只经离浆恢复 +1/tick 灌满（vanilla lavaTime 同相）。recall Spawn face
+   *  读同一聚合（★BJ713-A=G34 登记债①清偿:传送随迁后仍骑乘,帽持续含 420）;
+   *  respawn face 死亡已卸=equip 面单读。 */
+  cartLavaMaxBonus = 0;
+  /** ★BJ714-A（R16-P2①）:vanilla lavaMax 单帧累计字段的聚合读口——ResetEffects
+   *  :18779 清零→ApplyEquips 配饰面（Player.cs:15286/:15295）→Mount.UpdateEffects
+   *  :25855 坐骑面（Mount.cs:5138 Hell 车 +420）→岩浆段 :27880 消费,同帧序。
+   *  第四消费位=BreathMeter 火焰条（原版 DrawInterface_Resources_Breath 读
+   *  player.lavaMax 字段含坐骑面,Main.cs:42829-42932）——旧 equipStats.lavaMax
+   *  单读=骑 Hell 车 grace 窗 [equip,equip+420) 条不显示/刻度错。既有两内联
+   *  聚合位（岩浆段 const lavaMax / Game fireRecall spawn 支）语义同式,由
+   *  bj709g34 B6/bj713a A5 结构锁钉面,不随本刀改写（防热文件扰动）。 */
+  get lavaMaxTotal(): number { return this.equipStats.lavaMax + this.cartLavaMaxBonus; }
   /** accMerman 人鱼化态（:22965 merman=true，水中呼吸；本作仅标志，变身渲染后续） */
   merman = false;
   inLava = false;
@@ -2417,6 +2436,28 @@ export class Player extends Entity {
     const pick = Math.floor(Math.random() * 3);
     const dye = this.inv.getEffectiveDye(pick === 0 ? 0 : pick === 1 ? 1 : 2)
       ?? this.inv.getEffectiveDye(1);   // LoadoutShare（GetEffectiveDye :5736）
+    if (!dye) return -1;
+    return (ITEM_DEFS[dye.id]?.vid ?? -1);
+  }
+
+  /** ★BJ707-G29 坐骑染料 vid（Player.cs:9689 UpdateDyes `cMount = miscDyes[3].dye`
+   *  ——坐骑染料槽下标 3，直读无掷；无染料/槽空 → -1=GetSecondaryShader(0)=null
+   *  同相（ArmorShaderDataSet.cs:63-70 id==0 早退 null）。零 RNG=掷流中立
+   *  （vanilla cMount 消费面全链无掷）。消费=cMount 尘发射方五处（dashDust 环/
+   *  dashDustBody 尾/dash6 尾尘/坐骑特跳尘环/独角兽上升尾迹——GetSecondaryShader
+   *  (cMount) :3920/:3931/:4138/:4168/:21064/:21092/:21120/:21539/:22126） */
+  mountDyeVid(): number {
+    const dye = this.inv.miscDyes[3];
+    if (!dye) return -1;
+    return (ITEM_DEFS[dye.id]?.vid ?? -1);
+  }
+
+  /** ★BJ709-G32③ 矿车染料 vid（Player.cs:9688 UpdateDyes `cMinecart = miscDyes[2].dye`
+   *  ——矿车染料槽下标 2（cMount 是 3,勿混）,直读无掷同径;无染料/槽空 → -1 同相
+   *  （GetSecondaryShader(0)=null）。消费=矿车七尘面 d.dyeVid（Minecart.
+   *  updateEffectsDust,Minecart.ts census 注 BJ707-G31④） */
+  minecartDyeVid(): number {
+    const dye = this.inv.miscDyes[2];
     if (!dye) return -1;
     return (ITEM_DEFS[dye.id]?.vid ?? -1);
   }
@@ -4287,8 +4328,9 @@ export class Player extends Entity {
       //     ×frameExtra×2, 0)（此前 ×4 环向均匀+恒定 runSpeed 为近似式）；
       //   · 尘参 noGravity/scale 1+r0.8/fadeIn r2 一致；山羊 noLightEmittance。
       //   独角兽额外追尾尘（:3924-3932）：dashing 每 tick 盒内 1 粒（vel=0、scale
-      //   0.5+r0.8、fadeIn 1+r2）。 dye shader GetSecondaryShader(cMount) 引擎无宿主,
-      //   登记不接。缺省池回退程序粒子环向爆发保持原状
+      //   0.5+r0.8、fadeIn 1+r2）。 dye shader GetSecondaryShader(cMount)（:3920）
+      //   ★BJ707-G29 接线：尘池 dyeVid 面（d.dyeVid）+mountDyeVid()（miscDyes[3]）。
+      //   缺省池回退程序粒子环向爆发保持原状
       dashDust: (x, y, n, spread, type) => {
         void x; void y; void n;   // 入参退役：原版几何由下方 mount 态自算（兼容旧签名）
         const pool = game.vanillaDust;
@@ -4300,6 +4342,7 @@ export class Player extends Entity {
         void spread;
         const ax = this.cx + this.w * this.facing, ay = this.cy;
         const phase = Math.random() * Math.PI * 2;               // num22 = rand·2π
+        const mDyeVid = this.mountDyeVid();                      // cMount（:3920，环外取一次）
         for (let i = 0; i < 14; i++) {                           // num23 <14f（:3906）
           const ang = i * (Math.PI * 2) / 14 + phase;            // :3909
           let ux = -Math.sin(ang), uy = Math.cos(ang);           // UnitY.RotatedBy
@@ -4313,12 +4356,13 @@ export class Player extends Entity {
             if (type === 6 && this.mount.type === 47) d.noLightEmittance = true;
             d.scale = 1 + Math.random() * 0.8;
             d.fadeIn = Math.random() * 2;
+            d.dyeVid = mDyeVid;                                  // :3920 shader=GetSecondaryShader(cMount)
           }
         }
       },
       // 独角兽追尾尘（UpdateFrame case 10 :3924-3932）：dashing 每 tick 玩家盒内
       // 1 粒——position=NewDust(整盒)、velocity=Zero、noGravity、scale .5+r×.8、
-      // fadeIn 1+r×2；dye shader 同 dashDust 登记不接
+      // fadeIn 1+r×2；dye shader（:3931 obj3.shader=cMount）★BJ707-G29 同 dashDust 接线
       dashDustBody: (type) => {
         const pool = game.vanillaDust;
         if (!pool) return;
@@ -4328,6 +4372,7 @@ export class Player extends Entity {
           d.noGravity = true;
           d.scale = 0.5 + Math.random() * 0.8;
           d.fadeIn = 1 + Math.random() * 2;
+          d.dyeVid = this.mountDyeVid();                         // :3931 shader=GetSecondaryShader(cMount)
         }
       },
       // 山羊火焰（ParticleOrchestrator.WallOfFleshGoatMountFlames :3892-3895 引用，
@@ -4402,6 +4447,28 @@ export class Player extends Entity {
         const color = TILE_DEFS[st2.type[i]]?.mapColor ?? '#8B7553';
         game.spawnParticles(wx, wy, color, 1, 1,
           { vx: kickDir + (Math.random() - 0.5) * 0.6, vy: -1 + (Math.random() - 0.5) * 0.6 });
+      },
+      // ★BJ707-G31（G29 登记债②清偿）:cMount 尘发射面通道——海盗船 44（尘 228×2 面）/
+      //  惊魂木 45（d6/d31×2 面）/扫帚 23（星尘 43×2 面）/蜥蜴 14（d31×2+蓄能 d6 环）
+      //  的发射几何全在 Mounts.updateMountEffects（updateFrame 写沿闩/速度门旗）,
+      //  落池走本 typed 尘池直入（NewDust 同构,后置字段调用侧覆写——goatFlames/
+      //  pixieTrailDust 同惯例）;染料 = mountDyeVid()（miscDyes[3] 单源零掷,G29
+      //  通道勿重建——尘池 d.dyeVid+Renderer 染料 pass 既有）。
+      vanillaDust: game.vanillaDust,
+      mountDyeVid: () => this.mountDyeVid(),
+      // 扫帚挂件风摆两项（GetWitchBroomTrinketRotation :3591-3604 与 mountLights
+      // case 23 同式共享）:WindForVisuals=windSpeedCurrent;露天档=mountWindExposed
+      // （InAPlaceWithWind 中心格快照,扫帚挂件批既有位）
+      wind: game.world?.weather?.windSpeedCurrent ?? 0,
+      windExposed: this.mountWindExposed === true,
+      // 蜥蜴 14 面 1 的 cMount==0 地板尘（:4140-4148 `position ±num2×24 移位
+      //  FloorVisuals(Falling:true)`——MakeFloorDust 落地 20 连发;旗块面仓内为
+      //  即时读无持久旗=等效只尘面;±24 移位内联本闭包,finally 语义还原）
+      basiliskFloorDust: (shiftX) => {
+        const ox = this.x;
+        this.x += shiftX;
+        this.makeFloorDust(game, true, game.world);
+        this.x = ox;
       },
     };
   }
@@ -5419,8 +5486,12 @@ export class Player extends Entity {
     //   ridingMount && mount.buff === 305,同 lavaTotalImmune 腿 BJ704-G20）;
     //   lavaVision∧lavaWet∧>0.4 → −0.04/t 钳 0.4（入浆 15 拍渐透）;else <1 →
     //   +0.04/t 钳 1（出浆/下鞍 15 拍渐复）。Spawn 复位面 :37875 lavaOpacity=1
-    //   （vanilla 重生清零;本仓无 Spawn 重置段——残值 ≤15 拍自愈=不可感知微面,
-    //   登记于测试注防再查）。
+    //   （★BJ707-G29 清偿：Game.respawnPlayer 与 fireRecallTeleport 'spawn' 支两
+    //   Spawn face 已落 lavaOpacity=1;★BJ707-G31 清偿:邻行 :37874 lavaTime=lavaMax
+    //   同两支落 lavaImmuneTicks=equipStats.lavaMax——同段同相,债清;★BJ713-A:recall
+    //   支改读聚合 equipStats.lavaMax+cartLavaMaxBonus——vanilla 同拍 lavaMax 含
+    //   坐骑面（UpdateEffects :25855 先于 ItemCheck :43324,骑 Hell 车 +420 随传送
+    //   不卸 mount 保全;respawn 支死亡已卸=equip 面单读原式））。
     const lavaVision = this.ridingMount && this.mount.buff === 305;
     if (lavaVision && this.splashLavaWet && this.lavaOpacity > 0.4) {
       this.lavaOpacity = Math.max(0.4, this.lavaOpacity - 0.04);
@@ -5718,8 +5789,14 @@ export class Player extends Entity {
       || this.modLavaImmune === true   // ★五百八十六:mod van.lavaImmune 面
       || (eqM.ashWood === true && !!eqM.lavaRose)
       || (this.ridingMount && this.mount.buff === 305);   // ★BJ704-G20:buff305（mount 49）
+    // ★BJ709-G34（G32-D2 清偿）:lavaMax 聚合 = 配饰 fx 面（equipStats.lavaMax,
+    //  熔岩护身符族 906/4038/3999/4003 + 908/5000 lavaRose 面,Player.cs:15286/
+    //  :15295）+ 坐骑动态面 p.cartLavaMaxBonus（Hell 矿车 +420,Mount.cs:5138
+    //  UpdateEffects case 22 首行,Minecart.fixedUpdate 逐拍写）= 原版单帧累计
+    //  字段现值（ResetEffects :18779 清零 → ApplyEquips 加配饰 → mount.
+    //  UpdateEffects :25855 加坐骑 → 岩浆段 :27880 消费,同帧序）。
+    const lavaMax = eqM.lavaMax + this.cartLavaMaxBonus;
     if (this.inLava && !lavaTotalImmune) {
-      const lavaMax = eqM.lavaMax;
       if (lavaMax > 0 && this.lavaImmuneTicks > 0) {
         this.lavaImmuneTicks--;
       } else if (this.lavaBucketOpen()) {
@@ -5759,13 +5836,20 @@ export class Player extends Entity {
           game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
       }
-    } else if (!this.inLava) {
+    } else if (!this.inLava || lavaTotalImmune) {
       this.lavaAccum = 0;
-      // 离浆宽限逐步恢复(Player.cs:27405:lavaTime < lavaMax 时每 tick +1,
-      // 非立即回满——护身符 7s 宽限需要等价时间回充)
-      const lavaMax = eqM.lavaMax;
+      // 离浆/浸浆免疫态宽限逐步恢复（Player.cs:27884 flag26=true → :27886
+      //  `if (flag25 && !lavaImmune) flag26=false` → :27926 `if (flag26 &&
+      //  lavaTime < lavaMax) lavaTime++`——浸浆但免疫态（黑曜石皮 :9573/
+      //  buff305 熔岩鲨坐骑/modLavaImmune）原版照回充,旧 !inLava 单门=冻结。
+      //  每 tick +1 非立即回满——护身符 7s 宽限需要等价时间回充）
       if (lavaMax > 0 && this.lavaImmuneTicks < lavaMax) this.lavaImmuneTicks++;
     }
+    // ★BJ709-G34（G32-D2 清偿连带）::27930-27932 无条件钳 `lavaTime > lavaMax
+    //  → lavaTime = lavaMax`（岩浆段尾原行）——lavaMax 动态面（下车卸帽/卸护身符）
+    //  立即截断超额宽限。仓内原缺:护身符域静止面不可达（lavaImmuneTicks 只由
+    //  恢复/Spawn 写入且均以 lavaMax 为帽）,坐骑动态面落地后下车拍即需本行。
+    if (this.lavaImmuneTicks > lavaMax) this.lavaImmuneTicks = lavaMax;
     // ★SW-RB20a F6①/②（2026-09-15）：OnFire/Stinky 入液清洗收口到 num86 探针
     //  （原版两臂都在 `if (num86)` 支内、先于溅花段 :27982——本仓随湿流程迁入湿流程头,
     //  消费位=下方 if (wetNow) 块首;探针基面由「inWater&&!inLava / 三桶并集」改
@@ -6257,6 +6341,12 @@ export class Player extends Entity {
     //      carpetFlying（≙ carpetFrame>=0「本拍在展开」,R4-P2②）同位每拍先清,
     //      毯姿门由此单一真源（旧渲染门 !onGround&&carpetTime>0 的余油/卸毯残留窗
     //      退役,Renderer 腿 0/身 6 门改读本位）。 ----
+    // ★BJ717-A F2（2026-10-25）：carpetFramePrev=上一拍毯展开位快照——vanilla 横移
+    //   加速消费位（:26813 `if (carpetFrame != -1)`）在 CarpetMovement(:26967)【前】
+    //   跑=读上一拍 carpetFrame；本仓 carpetFlying 每拍头清+垂直链置位,运动参数链
+    //   （本拍头）读清后值恒 false——快照位让参数链读到上一拍展开态≙原文（oracle
+    //   S6:carpet 激活次拍起 maxRun=4.5/runAcc=0.1,vx 收敛 4.58）。
+    this.carpetFramePrev = this.carpetFlying;
     this.carpetFlying = false;
     if (!eqM.carpet) this.canCarpet = false;
     else if (this.vy === 0 || this.wallCling) { this.canCarpet = true; this.carpetTime = 0; }
@@ -6563,8 +6653,17 @@ export class Player extends Entity {
     //   （加速/爬坡/摩擦）保 1456 形内门（下方 `if (this.dashDelay >= 0)`——滑行反向
     //   制动面由 dashMovement 滑行支承载+四字段直通;滑行期 else 摩擦缺失面已随
     //   BJ705-G26 清偿——本门下方 else-if/else 两臂补摩擦支,见 glideElseFriction 注）。
-    // ★SW-FX40（e）：!pogoFired——弹跳座命中拍 HorizontalMovement 余段 return（:19921）
-    if (!pogoFired) {
+    // ★BJ717-A F7（2026-10-25,R13 清偿）：pogoFired 门改辖【整合段】（下方内嵌
+    //   `if (!pogoFired)`）——原版弹跳臂在 HorizontalMovement 头（:19909-21）return
+    //   的是 HM 余段（加速/爬坡/摩擦）,而 run 参数链（:26694-26888,坐骑覆写/
+    //   sticky 钳/毯/刀全含）在 HM【前】=弹跳拍照跑,四字段终值=坐骑档（mount 43:
+    //   :26828 !CanUseWings → runSlowdown=0.2 平值复位族）。旧仓整链跳过=弹跳拍
+    //   四字段裸装面（消费面=dashMovement num15/制动,骑 43+冲刺+落地震荡拍）。
+    //   ★R13-F5 勘误随刀：vanilla :26718-21 mount43∧vy≠0→runSlowdown=0 与
+    //   :26824-28 !CanUseWings→runSlowdown=0.2 同链后者覆写前者=死码（1456 :26202
+    //   →:26310 同序,oracle S5 实测空中 runSlow=0.2/vx 0.1t 衰减）——「空中零摩擦」
+    //   系 R13 误读,不移植。
+    {
       // ---- 原版两段加速模型（Player.cs:19559-19800 HorizontalMovement Run 段）----
       // maxRunSpeed=3×moveSpeed（常规上限）;accRunSpeed=6（靴族 6/6.75,冲刺爬坡上限）
       // 全速段（:19559:|vx|<maxRun）runAcceleration=0.08 全力;慢爬坡段（:19675:
@@ -6827,6 +6926,33 @@ export class Player extends Entity {
         else if (this.performingJump === 'Fart' && eqM.jumpOpts.includes('Fart')) { runAcc = mulPreAdd(runAcc, 3, additiveAcc); maxRun = mulPreAdd(maxRun, 1.75, additiveRun); }
         else if (this.performingJump === 'Sail' && eqM.jumpOpts.includes('Sail')) { runAcc = mulPreAdd(runAcc, 1.5, additiveAcc); maxRun = mulPreAdd(maxRun, 1.25, additiveRun); }
       }
+      // ★BJ717-A F2（2026-10-25,R13 清偿）：飞毯横移加速——vanilla :26813-26817
+      //   `if (carpetFrame != -1) { runAcceleration *= 1.25f; maxRunSpeed *= 1.5f; }`
+      //   （瓶族 boost 与变态刀之间,坐骑覆写块前=覆写前乘区）。消费位=carpetFramePrev
+      //   （上一拍展开快照,≙ 原文链先于 CarpetMovement 的滞后一拍读法;oracle S6:
+      //   毯飞横移 maxRun 3→4.5、runAcc 0.08→0.1,vx 收敛 4.58px/t——修前 SW 整缺
+      //   =2/3 速 3.06,probe1 实测）。!mntWipeBoost=BJ705-B 覆写前乘区家族门
+      //   （非叠加骑乘期被 :26852-54 覆写冲掉;实际毯与骑乘互斥 :22025,门为家族
+      //   一致性保险）。mulPreAdd=加法坐骑乘叠加前基底（毯态恒 add=0,退化纯乘）。
+      if (this.carpetFramePrev && !mntWipeBoost) {
+        runAcc = mulPreAdd(runAcc, 1.25, additiveAcc);
+        maxRun = mulPreAdd(maxRun, 1.5, additiveRun);
+      }
+      // ★BJ717-A F4（2026-10-25,R13 清偿）：变态刀 3106 潜行移速惩罚——vanilla
+      //   :26818-26823 `if (inventory[selectedItem].type == 3106 && stealth < 1f)
+      //   { num41 = maxRunSpeed/2*(1-stealth); maxRunSpeed -= num41;
+      //   accRunSpeed = maxRunSpeed; }`（毯行后、坐骑覆写块前）。heldPsychoKnife
+      //   =手持位单源（:3974/:4260 消费同源）;stealth<1 潜行斜坡（满潜行减半+
+      //   accRun 压平——oracle S4:stealth=0 时 maxRun 3→1.5、accRun=1.5、run 收敛
+      //   ~1.5,修前 SW 移速面零消费=3.04 恒速）。乘叠加前基底（原文本臂在
+      //   :26838-42 坐骑加法【前】）;accRun 置换=减后值+坐骑加法（≙原序）。
+      //   !mntWipeBoost=同族覆写前乘区门（非叠加骑乘期整段被冲掉）。
+      if (this.heldPsychoKnife && this.stealth < 1 && !mntWipeBoost) {
+        const preKnife = maxRun - additiveRun;
+        const num41 = preKnife / 2 * (1 - this.stealth);
+        maxRun = preKnife - num41 + additiveRun;
+        accRun = preKnife - num41 + additiveDash;
+      }
       // ★滚轴鞋滑行分支（Player.RollerSkateMovement :28736-28778，台账批 A×2+B）：
       // 无输入阻尼带（减速带 accRun−1f + 空中门 flag2）+ runSlowdown 尾钳 + 沥青
       // ×2.25/×1.6 特支——替换此前“坐骑无专属滑行段走通用阻尼链”的近似。glideCap
@@ -6876,6 +7002,10 @@ export class Player extends Entity {
       //   ③无 !onGround 项——坡面瞬态（onGround∧vy≠0）持翼 ramp 照跑（vy==0 支
       //     已覆盖常态地面）。
       //   旧 wingAir=`!onGround && wing && wingTime>0 && !mnt` 三重窄化全数退役。
+      // ★BJ717-A F7：!pogoFired 内门——弹跳臂命中拍 HorizontalMovement 余段 return
+      //   （:19909-21,pogo 臂自身已写 vy/jumpHold）=整合段（加速/爬坡/摩擦/火花/
+      //   风推）跳过,参数链（上方）照跑。滑行门 dashDelay 族语义不变（G25/G26 既有面）。
+      if (!pogoFired) {
       // 水平链 1:1（:19559-19800）：两段加速 + 【超额回落摩擦】。原版整链不设
       // 硬钳（仅 sticky :26211 钳 maxRun）——持方向键越过帽（全速段 +0.08 过冲
       // 到 3.04）时落入摩擦分支（地面 −0.2/空中 −0.1）→ 2.84 → 再 +0.08……
@@ -7005,6 +7135,7 @@ export class Player extends Entity {
           else if (push > 0 && this.vx < push) { this.vx += push; if (this.vx > push) this.vx = push; }
         }
       }
+      }   // ★BJ717-A F7:!pogoFired 整合段门闭
     }
     // （★BJ705-G25 退役:旧「滑行期朝向」else-if 支——参数链随 !pogoFired 放行后,
     //   朝向随 :19963-77 ChangeDir 位在主块内承载（滑行照跑）,本支不可达零删;
@@ -7219,6 +7350,49 @@ export class Player extends Entity {
       // （用户行为日志 2026-09-03 Starter World：Red's Wings+脚蹼，池底到水面仅 3 格
       // 仍无法脱离飞起）。湿侧核心见下方湿分支 ★湿态翅膀核心段。
       let flying = false;
+      // ★BJ717-A F1+F8（2026-10-25,R13 P0/P2 清偿）：长跳平台段 sustain 钉——
+      //   原版序=JumpMovement 钉(:20831,Update 内调用位 :26945)→重力(:27556
+      //   `velocity.Y += gravity*gravDir`)→积分(:28385),平台拍积分速度=-js+grav
+      //   （地表 -4.61）;旧仓钉位在重力【后】=钉覆写重力,平台拍恒 -5.01,全持跳
+      //   apex +10.6px≈+11%（SW 108.7 vs vanilla 98.07）。本闭包随两分支臂段尾调用
+      //   （湿 :7641 前/干 :8134 前,≙原版 JumpMovement 位=飞行链/重力【前】）。
+      //   oracle 双证:vanilla-headless harness（tools/voracle,S1 全持跳逐拍
+      //   vy=-4.61×16t+弹道,apex=98.07px=6.13 格恰合「裸跳六格」）+解析模型
+      //   108.68 自证（probe4b 修前 108.7 逐位吻合=SW 侧测量面可靠）。
+      //   ★F8 连带：钉写去 !mountFlight 门——原版钉无条件（:20831）,坐骑 vy 链
+      //   （:27158）在其后覆写 vy=终值同,而 sustain 副作用（jump--/swimTime 刷 30
+      //   :20832-36）照跑;旧仓门=吞 merman swimTime 刷新（oracle S8c:骑 49 熔岩鲨
+      //   水中持跳,swimTime 10→29 周期刷新,vy 由坐骑悬停接管 -5.9 恒速=两写并存）。
+      //   ★相位族连带（G23 备案「自然耗尽一拍滞后」就此根治）:翼飞行/飞毯/坐骑
+      //   canFly 各门读 sustain【后】jumpHold（≙原版 :26987/:26945 序）,耗尽拍当拍
+      //   可开门;boost 窗（:6953 域）在参数链=读 sustain 前值,两版同序不动。
+      const sustainPin = () => {
+        // ★BJ705-G25 [g23-sustain-grapple-freeze] 清偿（:26692 else-if 门）:原版
+        //   JumpMovement 在 grappling/tongued 支【整段不跑】=挂爪/舌缚期预算【冻结】
+        //   （不钉速、不流逝、不清零——vy 由 GrappleMovement/WoFTongue 独占）;收爪后
+        //   冻结余量续跑。旧仓 sustain 常规支照跑=滑行中烧预算+松键清（G25 已清偿）。
+        if (this.jumpHold > 0 && !jumpStartedThisTick
+        && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue)) {
+          if (this.vy === 0) this.jumpHold = 0;
+          else if (!this.inputJump) {
+            // ★BJ705-G23 [g19-jump-release-zero] 清偿：原版 else 支（:21201-21208）松键即
+            //   jump=0——剩余预算丢弃,半空再按不恢复钉速;CCed 同构（:25432-34）。
+            this.jumpHold = 0;
+          } else {
+            // ★BJ705-G25 [g23-merman-sustain-infinite] 清偿（:20832-36）:merman&&!cart
+            //   支原版【不减计数】（if/else 同体:swimTime≤10 刷 30 置换 jump--）=湿态
+            //   无限 sustain——持跳水中恒钉 -jumpSpeed 连续泳升;旧仓照减=15 拍脉冲化
+            //   （泳升须反复点按）。防再登记:勿以「计数器必须流逝」直觉回加 jump--
+            //   （ramp 消费面读 wingsLogic 不读 jump）。
+            const mermanSustain = this.merman && !this.ridingCart;   // :20832 原文读 merman 变身态
+            this.vy = -effJumpSpd * gd;          // :20831 钉（重力在链后 +grav → 净 -js+grav,BJ717-A F1）
+            if (mermanSustain) {
+              if (this.swimTime <= 10) this.swimTime = 30;   // :20834-36 无条件（BJ717-A F8:去 mountFlight 门）
+            }
+            if (!mermanSustain) this.jumpHold--;  // :20838 jump--（controlJump 门内）
+          }
+        }
+      };
     // ---- ★F2/Note① 移动相三段时序归位：HorizontalMovement 尾五分块
     //      （1457 Player.cs:20238-20320 CollideWithNPCs，随 HorizontalMovement :26889 跑）
     //      先于 JumpMovement 三踩踏循环（:20693-20801，JumpMovement :26945 头部），
@@ -7448,6 +7622,7 @@ export class Player extends Entity {
         this.performingJump = mnt2.jumpOption;   // isPerformingJump_*（尾迹/CCed 清位族）
         this.vy = -mJumpSpd * gd;
         this.jumpHold = this.mount.mountJumpTicks();
+        jumpStartedThisTick = true;   // ★BJ717-A F6（R13 清偿）：原版 JumpMovement 单块 if/else-if（:20823 钉支 vs :20845 起跳支同拍互斥）——坐骑跳臂起跳拍 sustain 不跑（jump-- 次拍起）;旧缺=起跳拍 sustain 同拍 −1+钉冗余=平台短 1 拍。oracle S3:瓶臂拍 jump=22 原值入次拍递减。
         this.isDownDashing = false;   // ★BJ704-G22（g20 微残清偿）：:20934 无条件 flag13=false——坐骑跳清下砸（残留旗会吃 0.85 重力+封翼,湿干两支同补）
         this.mountJumpBurstFx(game, mnt2.jumpOption);   // ★BJ704-G22（g20-mountjump-firefx 清偿）：起跳帧爆发特效（湿干两支同拍;else-if 链=与下砸/瓶族同帧互斥）
       } else if (jumpEdge && !this.onGround && vyAtJumpGate !== 0 && this.inputDown
@@ -7485,6 +7660,7 @@ export class Player extends Entity {
         const hMult = jumpHMultOf(opt);   // ★C5-B7 单源（:20899-21197 各档）
         this.vy = -lJSpd * gd;
         this.jumpHold = Math.round(lJT * hMult);
+        jumpStartedThisTick = true;   // ★BJ717-A F6（湿瓶臂同款）：起跳拍 sustain 不跑（原版 if/else-if 同拍互斥;oracle S3:Blizzard 拍 jump=22,(int) 截断 vs 仓 Math.round=+1t 既有登记偏差不动）
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
         this.isDownDashing = false;                         // :20934 门帧写 flag13=false——双跳打断下砸（★BJ534,干支同款）
         if (opt === 'Fart') game.playSfxWav?.('Item_16', 1, this.cx, this.cy);
@@ -7517,6 +7693,9 @@ export class Player extends Entity {
           }
         }
       }
+      // ★BJ717-A F1：sustain 钉=JumpMovement 位（:26945,原版序 钉→DashMovement
+      //   :26958→Wallslide/CarpetMovement→DoubleJumpVisuals :26968→飞行链/重力）。
+      sustainPin();
       // 多段跳上升尾迹（DoubleJumpVisuals :26971 每帧无条件调用——原版无 wet 门,
       //  旧湿支整缺=水中尾迹随臂一并补齐；干支同款调用位 :6328）
       this.doubleJumpVisuals(game);
@@ -7555,7 +7734,11 @@ export class Player extends Entity {
       // :26974-26976 canRocket 门（湿档 jumpSpeed）——★SW-FX34 补倒挂臂（同干支）
       if ((this.gravDir === -1 ? this.vy < effJumpSpd : this.vy > -effJumpSpd) && this.vy !== 0) this.canRocket = true;
       flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
-        || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
+        // ★BJ717-A F9（2026-10-25,R13 清偿）：inputDown→tryingToHoverDown——原版
+        //   :26991 flag19 悬浮臂谓词=TryingToHoverDown（:3920-3927=controlDown∨
+        //   tryKeepingHoveringDown 锁存,★SW-FX14 干支同款已接）。湿臂旧读裸
+        //   inputDown=Click 悬停锁存模式+湿态漏触（干支 :8232 同位读 hoverDown）。
+        || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.tryingToHoverDown && this.wingTime > 0);
       if (this.isDownDashing) flying = false;   // ★BJ534：flag20 → flag19=false（:26995-26998——下砸期扇动/滑翔全让位）
       if (flying) this.wingMovement(wingsW, this.tryingToHoverDown, effJumpSpd, eqWet.wing ? eqWet.wing.time : 0);   // ★SW-FX14 :22410 TryingToHoverDown + ★BJ216 wingMax 回满上限（湿链同吃徽章）
       // ★BJ704-G19（G16 债④b 湿侧）：CCed 冻结翼帧机——vanilla 唯一 WingFrame 调用位
@@ -7602,8 +7785,15 @@ export class Player extends Entity {
         this.rocketTime = 0;
       }
       // 火箭靴（:27069）：翅膀不可用（无翅或时间尽）才接管——湿态同链无 wet 门
+      // ★BJ717-A F3（2026-10-25,R13 清偿）：!isDownDashing=第 7 项 CanUseBootFlyingAbilities
+      //   （:3972 `=> !isPerformingJump_DownDash`;BJ534 同波漏员——flying 门有 :26995-98
+      //   下砸旗,火箭门漏）。vanilla 下砸旗 :20934 置位后持到落地（:23053 RefreshDoubleJumps
+      //   清）/:26956 CancelAll(includeDownDash:false) 不清——下砸期整门拒点火。
+      //   oracle S7:下砸中重按跳 rocketTime 恒 7/rocketDelay 恒 0;S7b 对照（无下砸）
+      //   同拍 7→6/delay=9。
       if (!flying && !mnt2 && (this.wingTime <= 0 || wingsW === 0) && eqWet.rocketBoots > 0
-        && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
+        && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease
+        && !this.isDownDashing) {
         if (this.rocketTime > 0) {
           this.rocketTime--;
           this.rocketDelay = 10;    // 推力脉冲段（:27074）
@@ -7662,9 +7852,13 @@ export class Player extends Entity {
           }
         }
       }
-      // 悬浮缓降（:27083-27102）：hover 族 + ↓+跳 + wingTime>0 → vy×0.9（45=0.8）；
-      // CanUseWingAbilities = !merman（:27606——湿态人鱼挡悬浮）
-      if (eqWet.wing?.hover && this.inputDown && this.inputJump && this.wingTime > 0 && !this.merman) {
+      // 悬浮缓降（真锚 :27607-27619,重力后公共段——旧注「:27083-27102」系误锚,序差
+      //   见 BJ717-A 登记）：hover 族 + TryingToHoverDown + 跳 + wingTime>0 → vy×0.9
+      //   （45=0.8）;canUseWingAbilities=CanUseWingAbilities(:3975)=!merman∧!downDash
+      //   （湿臂 !merman 既有,干支缺 downDash 腿=BJ717-A 登记债,两臂谓词槽位集差另册）。
+      // ★BJ717-A F9（R13 清偿）：inputDown→tryingToHoverDown——原文谓词=TryingToHoverDown
+      //   锁存（Click 悬停锁存模式湿态漏触;干支 :8321 同位 hoverDown 已对）。
+      if (eqWet.wing?.hover && this.tryingToHoverDown && this.inputJump && this.wingTime > 0 && !this.merman) {
         this.vy *= wingsW === 45 ? 0.8 : 0.9;
         if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
       }
@@ -7687,7 +7881,9 @@ export class Player extends Entity {
       // ★BJ704-G16（G15 登记债①湿面）：CCed 坐骑链让位（同干支 :7695 注——
       //   vanilla CCed 臂替换整条 else 链,湿支同构:56/61 拒下坐骑者液体中不悬停,
       //   落下方湿重力段平 lGrav 坠）。
-      if (mnt2 && !this.cced) {
+      // ★BJ717-A F10（湿支同款）:!rocketDelay=原版 :27158 else-if 互斥——推力脉冲
+      //   期坐骑 Hover/Flight 整链不跑（flyTime/fatigue 不静默消耗）。
+      if (mnt2 && !this.cced && this.rocketDelay === 0) {
         // ★BJ704-G5（G4-⑤a/G4-②）：重力源=lGrav（液体档×num6 字段并源,上方
         //   G5 段已乘;旧就地 num6W 重算收编）——hover 疲劳率/非飞行臂重力场感知
         //   消费同一值（Mounts.hover 第二参）。
@@ -7875,6 +8071,7 @@ export class Player extends Entity {
           this.performingJump = mnt2.jumpOption;   // ★BJ704-G20:isPerformingJump_*（:22119 独角兽上升尾迹,湿支同拍接线）
           this.vy = -mJumpSpd * gd;
           this.jumpHold = this.mount.mountJumpTicks();
+          jumpStartedThisTick = true;   // ★BJ717-A F6（干坐骑跳臂同款）：起跳拍 sustain 不跑（原版 :20823/:20845 同拍互斥——jump-- 次拍起）
           this.isDownDashing = false;   // ★BJ704-G22（g20 微残清偿）：:20934 无条件 flag13=false——坐骑跳清下砸（干支;残留旗吃 0.85 重力+封翼）
           this.mountJumpBurstFx(game, mnt2.jumpOption);   // ★BJ704-G22（g20-mountjump-firefx 清偿）：起跳帧爆发特效（干支,湿支同拍接线）
           mountJumpFired = true;   // 与装备多段跳同帧互斥（原版 :20935 else-if 单分支）
@@ -7951,6 +8148,7 @@ export class Player extends Entity {
         const hMult = jumpHMultOf(opt);   // ★C5-B7 单源（:20899-21197 各档,湿支同表）
         this.vy = -mJumpSpd * gd;
         this.jumpHold = Math.round(mJumpTicks * hMult);
+        jumpStartedThisTick = true;   // ★BJ717-A F6（干瓶臂同款）：起跳拍 sustain 不跑（原版 :20823/:20845 同拍互斥,jump-- 次拍起;redblue-r5 高度表 −2 期望随刀迁移）
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
         this.isDownDashing = false;                         // :20934 门帧写 flag13=false——双跳打断下砸（★BJ534）
         // 双跳音分流（Player.cs:20689/:20966 族 SoundEngine.PlaySound(16)=cue16
@@ -7992,6 +8190,8 @@ export class Player extends Entity {
           }
         }
       }
+      // ★BJ717-A F1：sustain 钉=JumpMovement 位（干支同款,臂段尾/飞行链与重力前）。
+      sustainPin();
       // 多段跳上升尾迹（DoubleJumpVisuals，Update :26445 每帧调用位）
       this.doubleJumpVisuals(game);
       // ★BJ704-G15（G13 登记债⑦）：CCed 臂尾视觉复位两笔（vanilla :27011-27012,湿支
@@ -8029,7 +8229,11 @@ export class Player extends Entity {
       //   承载）CCed 中不悬停:56 蝙蝠/61 仙灵 hover() 静置 -0.001 收敛+位补=静悬浮
       //   vs vanilla 平重力下坠。canFly 支 inputJump 已被 CCed 清零段(:6107)压死,
       //   门只为 canHover 支而设（两支合并门=零非 CCed 扰动）。
-      if (mnt2 && !this.cced) {
+      // ★BJ717-A F10（2026-10-25,R13 清偿）：!rocketDelay=原版 :27158 else-if 互斥
+      //   （`if (rocketDelay > 0) {推力} else if (!flag19) {坐骑链}`）——推力脉冲期
+      //   坐骑 Hover/Flight 整链【不跑】（flyTime/fatigue 不烧;vanilla 终 vy=推力值
+      //   同,旧仓先跑坐骑再被推力覆写=能量静默消耗,唯副作用差）。
+      if (mnt2 && !this.cced && this.rocketDelay === 0) {
         if (mnt2.canHover(this)) {
           mnt2.hover(this, mountGField);   // ★BJ704-G5（G4-②）重力场感知（当拍 fresh）
           mountFlight = true;
@@ -8131,8 +8335,11 @@ export class Player extends Entity {
           this.rocketTime = 0;
         }
         // ---- 火箭靴（:26548-26628）：翅膀不可用（无翅或时间尽）才接管 ----
+        // ★BJ717-A F3（湿支同款,干支补腿）：!isDownDashing=CanUseBootFlyingAbilities
+        //   （:27069 第 7 项/:3972 `!isPerformingJump_DownDash`,BJ534 同波漏员）。
         if (!flying && !mnt2 && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
-          && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
+          && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease
+          && !this.isDownDashing) {
           if (this.rocketTime > 0) {
             this.rocketTime--;
             this.rocketDelay = 10;    // 推力脉冲段（:26556）
@@ -8470,60 +8677,12 @@ export class Player extends Entity {
         this.gField = (this.tryingToHoverUp ? this.gField / 10 : this.gField / 3) * this.gravDir;
       }
     }
-    // ★原版长跳平台段（:20384-20396；湿/干同链——JumpMovement 不分液体，2026-08-16
-    //   从干燥分支提出为公共段）：vy==0（撞顶/落地）→ jump=0（:20386 平台段终止）；
-    //   否则按住跳期间 vy 恒钉 -jumpSpeed（:20391 每 tick 重置，非累加）+ jump--；
-    //   人鱼湿态 swimTime≤10 刷 30（:20392-20400）。钉速用当帧 effJumpSpd（湿态=
-    //   液体档，如水中 6.01；出水瞬间自动切回干燥档——原版 jumpSpeed 是玩家字段
-    //   的天然结果）。曾自制 vy-=0.22 累加（2026-08-15 审计）；曾在干燥分支内使
-    //   水下跳丢平台段（2026-08-16 水中跳对齐批修）。
-    // ★BJ705-G25 [g23-sustain-grapple-freeze] 清偿（:26692 else-if 门）:原版
-    //   JumpMovement 在 grappling/tongued 支【整段不跑】=挂爪/舌缚期预算【冻结】
-    //   （不钉速、不流逝、不清零——vy 由 GrappleMovement/WoFTongue 独占）;收爪后
-    //   冻结余量续跑（快脱离臂 vy+=0.01 不覆写 jump,持跳即续钉剩余拍）。旧仓 sustain
-    //   常规支照跑=滑行中烧预算+松键清（超窄面:跳窗中挂钩+松键/持跳烧尽）。
-    if (this.jumpHold > 0 && !jumpStartedThisTick
-      && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue)) {
-      if (this.vy === 0) this.jumpHold = 0;
-      else if (!this.inputJump) {
-        // ★BJ705-G23（2026-10-22）[g19-jump-release-zero] 清偿：原版 JumpMovement
-        //   else 支（:21201-21208）松键即 jump=0——剩余预算【丢弃】,半空再按不恢复
-        //   钉速（重按须走起跳门=vy==0/多段跳余量/坐骑选项/翼-毯-坐骑飞行门）;
-        //   CCed 亦入此支（:25432-34 controlJump 清零=冻结拍预算同弃,原版同构）。
-        //   旧「耗尽制」=松键后余量照跑:窗口消费者（瓶/坐骑 boost、翼飞行门、
-        //   飞毯门、坐骑飞行门、mountJump 门、沙暴窗）在松键后多开 ≤jumpHold 拍
-        //   +半空重按恢复钉速=免费二段跳残余——2026-08-19 行为录制只修了「冻结」
-        //   变体（松键冻结预算）,「松键归零」该刀补齐;旧注「:22446 jump-- 在
-        //   controlJump 门外」系 1456 GrappleMovement 区误锚,1457/1456 两版 jump--
-        //   均在 controlJump 门内（:20823-20838）,勘误随刀。
-        //   ★相位边界（既有近似族备案）:翼飞行/飞毯/坐骑飞行各门在 sustain【前】
-        //   读数=松键清零晚一拍生效（≙耗尽面同族一拍滞后;boost 窗在读数相位上与
-        //   原版逐拍一致——run 块先于 JumpMovement 两版同序）。
-        this.jumpHold = 0;
-      } else {
-        // ★BJ704-G4（BJ703-D2b）：钉写让位 mountFlight——原版序=JumpMovement sustain
-        //   （:20823-20838,含本钉）先于坐骑 vy 链（:27158）,链互斥坐骑胜=悬停/飞行
-        //   接管期钉速不可见;本仓钉位在两支【后】跑,无门则骑悬停族水下起跳后
-        //   30 拍恒钉 -effJumpSpd 掩蔽悬停带。计数器照耗（jump-- 无条件,原版同）。
-        // ★BJ705-G25 [g23-merman-sustain-infinite] 清偿（:20832-36）:merman&&!cart
-        //   支原版【不减计数】（if/else 同体:swimTime≤10 刷 30 置换 jump--）=湿态
-        //   无限 sustain——持跳水中恒钉 -jumpSpeed 连续泳升;旧仓照减=15 拍脉冲化
-        //   （泳升须反复点按）。谓词统一原版裸面:merman 变身态 ⊆ inWater（:5520
-        //   置位域）,旧复合门 (inWater||inLava)∧!ridingMountSwimFree 两冗余/超窄项
-        //   随刀退役（swimFree 坐骑骑乘人鱼 vanilla 照走本支）。防再登记:勿以
-        //   「计数器必须流逝」直觉回加 jump--（ramp 消费面读 wingsLogic 不读 jump）。
-        const mermanSustain = this.merman && !this.ridingCart;   // :20832 原文读 merman 变身态
-        if (!mountFlight) {
-          this.vy = -effJumpSpd * gd;
-          if (mermanSustain) {
-            if (this.swimTime <= 10) this.swimTime = 30;
-          }
-        }
-        // 平台计时器流逝（原版 jump-- :20838 在 controlJump 门内=按住才耗）——
-        //   merman&&!cart 支不流逝（:20832-36 else 位,G25 清偿）。
-        if (!mermanSustain) this.jumpHold--;
-      }
-    }
+    // ★BJ717-A F1（2026-10-25）：长跳平台段 sustain 钉已迁至分支内臂段尾（sustainPin
+    //   闭包,湿/干各一调用位≙原版 JumpMovement :26945 序——钉→重力→积分;旧公共位
+    //   在重力【后】=平台拍 -5.01 vs vanilla -4.61,全持跳 apex +10.6px。历史注与
+    //   G23/G25 判语随闭包迁移,详见声明位注释）。grappling/tongued 冻结门
+    //   （[g23-sustain-grapple-freeze]）随闭包保留;松键归零（[g19-jump-release-zero]）
+    //   同。
     if (this.swimTime > 0) this.swimTime--;   // PlayerFrame :35307-35312
 
     // ---- ★回满/清零公共段（2026-09-03 备案清偿③；原版 :26947-26953 + :27060-27063 +
@@ -9679,7 +9838,10 @@ export class Player extends Entity {
           //  （时序机本体 1:1:实测全周期 51 拍≈手算 vanilla 52,冷却 20/收敛 30）。
           //  光照段（:21530 AddLight(0.5,0.1,0.6)/(0.6,0.3,0.1)）在 mountLights
           //  case 62-65 渲染端承载（p.dash>0∧dashDelay<0 同门同拍）。dashDelay 保持 -1 继续阻尼。
-          emitDashSlideDust(game.vanillaDust, this, 6, this.armorSetDyeVid());
+          // ★BJ707-G29：dash6 尘染料=cMount（:21539 非 ArmorSetDye——换道为
+          //  mountDyeVid()=miscDyes 直读零掷,旧 armorSetDyeVid() 的 Next(3) 掷
+          //  在 vanilla 该拍不存在=顺手撤除掷流多耗）
+          emitDashSlideDust(game.vanillaDust, this, 6, this.mountDyeVid());
         }
       }
       // ★F1 滑行参数基础档化：覆写表按【滑行发起源的 dash 档】查（原文 num13-17 只认
@@ -10253,8 +10415,9 @@ export class Player extends Entity {
    *    （:21096-21123）三族同构 5×14 椭圆尘环——phase=2π·rand;n 环 0..4 × k 点
    *    0..13:dir=UnitY 旋 (k·2π/14+phase) 再 ×0.2n,出生=Center+dir·(50,20) 椭圆,
    *    速度=dir+(0,gravDir·4),noGravity、scale=1+rand·0.8、fadeIn=rand·2。尘型:
-   *    独角兽 SelectRandom(176,177,179)/山羊 6/蜥蜴 31。armor shader（cMount 染色）
-   *    本仓无坐骑染色域,略（登记近似,同 dye 族）。
+   *    独角兽 SelectRandom(176,177,179)/山羊 6/蜥蜴 31。armor shader（:21064/
+   *    :21092/:21120 obj.shader=GetSecondaryShader(cMount)）★BJ707-G29 接线尘池
+   *    dyeVid=mountDyeVid()（miscDyes[3];圣诞坦克支原版无 shader 不接）。
    *  · 圣诞坦克 flag10（:21124-21169）：15×（尘4 色(250,230,230,150) α100 s1.5 +
    *    尘6 α20 vy−1 偶数序 fadeIn=rand·2）@盒下带 (x−34,y+h−16) 102×32 + gore
    *    61|62×3（Next(61,63) 右开=61..62,G20 注「61-63」勘正）@（心−16/x−36/右+4,
@@ -10290,6 +10453,7 @@ export class Player extends Entity {
     const type = opt === 'Unicorn' ? [176, 177, 179][Math.floor(Math.random() * 3)]!
       : opt === 'WallOfFleshGoat' ? 6 : 31;
     const phase = Math.random() * Math.PI * 2;   // num12/num14/num17 = 2π·NextFloat
+    const mDyeVid = this.mountDyeVid();          // :21064/:21092/:21120 shader=cMount（环外取一次,零掷）
     for (let n = 0; n < 5; n++) {
       for (let k = 0; k < 14; k++) {
         const d = D ? D.spawn(this.cx, this.cy, 0, 0, type) : null;
@@ -10301,6 +10465,7 @@ export class Player extends Entity {
         d.noGravity = true;
         d.scale = 1 + Math.random() * 0.8;
         d.fadeIn = Math.random() * 2;
+        d.dyeVid = mDyeVid;                     // ★BJ707-G29 :21064/:21092/:21120
       }
     }
   }
@@ -10482,6 +10647,9 @@ export class Player extends Entity {
     this.y = py;
     this.vx = 0;
     this.vy = 0;
+    // ★BJ714-A（R16-P1 面1）:骑矿车随迁（Teleport style10 :22937→:37698-37780
+    //  零 Dismount 同门——不随迁=下一拍被车「玩家坐骑位回写段」锁回=道具废）
+    game.migrateMinecartOnTeleport?.();
     game.startCameraTransitionForPlayerTeleport?.(tpOldX, tpOldY);   // ★BJ108 债①（Teleport(vector,10)→:37747,delay=0）
     game.spawnBurst?.(this.cx, this.cy, '#58B8E8', 14, 3, -Math.PI / 2, Math.PI, { life: 24 });
   }
@@ -10860,12 +11028,13 @@ export class Player extends Entity {
       const d = mk(this.x - 4, cy, this.w + 8, 4, 188, 100, 1.5, -this.vx * 0.5, this.vy * 0.5);
       if (d) { d.vx = d.vx * 0.5 - this.vx * 0.1; d.vy = d.vy * 0.5 - this.vy * 0.3; d.vx *= 0.5; d.vy *= 0.5; }
     } else if (opt === 'Unicorn' && rising) {
-      // ★SW-FX34 补整支（:21663-21669 独角兽双跳尾迹：全身盒尘 176/177/179 随机,
+      // ★SW-FX34 补整支（:22119-22126 独角兽上升尾迹：全身盒尘 176/177/179 随机,
       //  velocity 清零 + noGravity + scale 0.5+NextFloat×0.8 + fadeIn 1+NextFloat×2；
-      //  原文无 gravDir 分臂=gd 无关。仓 Dust 池无独立 fadeIn 面=备案）
+      //  原文无 gravDir 分臂=gd 无关。仓 Dust 池无独立 fadeIn 面=备案。
+      //  :22126 obj.shader=GetSecondaryShader(cMount)——★BJ707-G29 接线尘池 dyeVid）
       const type = [176, 177, 179][Math.random() * 3 | 0];
       const d = mk(this.x, this.y, this.w, this.h, type);
-      if (d) { d.vx = 0; d.vy = 0; d.noGravity = true; d.scale = 0.5 + Math.random() * 0.8; d.fadeIn = 1 + Math.random() * 2; }
+      if (d) { d.vx = 0; d.vy = 0; d.noGravity = true; d.scale = 0.5 + Math.random() * 0.8; d.fadeIn = 1 + Math.random() * 2; d.dyeVid = this.mountDyeVid(); }
     } else if (opt === 'Blizzard' && rising) {
       // :21701-21743 三段尘76：2 粒慢散 + 3 粒顺速 + 3 粒逆速（noGravity/noLight）
       const by = gd === 1 ? this.y + this.h - 6 : this.y + 6;
@@ -11377,12 +11546,26 @@ export class Player extends Entity {
       this.spX[1] = this.spX[0]; this.spY[1] = this.spY[0];
     } else if (this.shadowCount >= 3) {
       this.shadowCount = 0;
-      this.spX[0] = this.x; this.spY[0] = this.y + this.gfxOffY;
+      // ★BJ709-G34（G32-D3 清偿）:骑矿车时轨面 gfxOffY 并入采样——vanilla 单
+      //  字段 gfxOffY 在 onTrack 拍被 TrackRotation 返回值整体覆写（Player.cs:
+      //  28325）,仓内贴轨值存 cart.gfxOffY（Minecart fixedUpdate :485）→ 聚合=
+      //  this.gfxOffY + cart.gfxOffY（三态互斥口径,PositionInWorld :10119 聚合
+      //  同式;滚轴鞋贴轨仍写玩家字段=已含）。平轨 gfxOffY=0 零变化,坡面 Hell
+      //  尾焰轨迹起点 Y 差（≤轨 gfxOffY）就此闭合。
+      this.spX[0] = this.x;
+      this.spY[0] = this.y + this.gfxOffY + (this.ridingCart && this.cart ? this.cart.gfxOffY : 0);
     }
   }
   /** 网格淡出驱动 = |position − shadowPos[2]|（Main.cs:47152 Vector2.Distance） */
   shadowLagDist(): number {
     return Math.hypot(this.x - this.spX[2], this.y - this.spY[2]);
+  }
+  /** shadowPos[2] 原值（顶左角系,采样含 gfxOffY——SW-FX36 域）。★BJ709-G32③ 消费=
+   *  Hell 矿车尾焰轨迹起点（Mount.cs:5145 `value = shadowPos[2] - position +
+   *  vector2`,Minecart.hellMinecartDust）;骑矿车时贴轨 gfxOffY 存 cart.gfxOffY
+   *  → 采样已并入该轨面项（★BJ709-G34（G32-D3）窄修,见 updateSocialShadow 注） */
+  socialShadowPos2(): { x: number; y: number } {
+    return { x: this.spX[2], y: this.spY[2] };
   }
   /** itemFlame（LegacyPlayerRenderer :493-502：每 5t 重掷 7 组，仅翅膀 22 在用时更新；
    *  绘制端 :683-694 消费 (X, −Y)×0.5 偏移） */
@@ -11400,6 +11583,11 @@ export class Player extends Entity {
    *  carpetFrame = -1`）。毯姿门（Renderer 腿 0/身 6）的单一真源——旧渲染门
    *  `!onGround && carpetTime>0` 无按跳条件=松跳带余油/空中卸毯毯姿残留。 */
   carpetFlying = false;
+  /** ★BJ717-A F2：上一拍毯展开位快照（≙ 原版横移加速消费位 :26813 读到的
+   *  carpetFrame——run 参数链先于 CarpetMovement :26967=天然滞后一拍）。
+   *  fixedUpdate 头部先于 carpetFlying 清零快照,运动参数链（横移 ×1.25/×1.5）
+   *  读本字段；既有 carpetFlying 消费面（Renderer/毯姿门）不动。 */
+  carpetFramePrev = false;
   /** 冲刺头部将撞墙探测（DashMovement :21132-21137）：身前 dir×半宽+2px 的
    *  头部点（gravDir 对应侧 h/2−2）与身体中点格任一 SolidOrSlopedTile → true
    *  （触发帧 velocity.X /= 2）。探测点恒在身体行内——对整砖随后必撞停（原版同），
@@ -12975,6 +13163,10 @@ export class Player extends Entity {
     game.startCameraTransitionForPlayerTeleport?.(tpOldX, tpOldY);   // ★BJ108 债①（:37747,delay=0）
     this.vx = 0;
     this.vy = 0.0001;
+    // ★BJ714-A（R16-P1 面3）:骑/坠车入微光滞留脱困传送随迁（Teleport style12
+    //  :29095 零 Dismount 同门——不随迁=脱困被拖回+timeShimmering 归零重累,
+    //  每 3600t 空转一次）。镜像取速度终值 (0,0.0001),故列于 vy 写后。
+    game.migrateMinecartOnTeleport?.();
     this.shimmering = false;
     this.inShimmer = false;
     this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化

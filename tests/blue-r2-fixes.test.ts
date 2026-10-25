@@ -3,7 +3,7 @@
 // R2-02 Colliding 视线门 + FastThenSlow 拖尾扫掠 / R2-12 转向衰减 /
 // R2-13 低速 scale 收缩 Kill / R2-08 1126 ownerHitCheck 300px + usesOwnerMeleeHitCD。
 // 权威 = Terarria1457（行号见各断言）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { newWiresRadialState } from '../src/stats/wiresRadial';   // ★BJ662 桩族补齐（BJ626 newWiresRadialState 先例）
 import { Arrow } from '../src/entities/Arrow';
 import { ChloroClaymoreBlade } from '../src/entities/proj1457';
@@ -83,6 +83,7 @@ describe('R2-03/R2-05 PackGemStaffFeatures 特性位（Player.cs:49990-50012 + :
 
 describe('R2-06 伤害乘区落点（Player.cs:49813-49814 发射侧 (int) 截断）', () => {
   it('命中侧不再乘：SwirlTwins 弹 damage=13 直击结算 13（曾 round(13×0.6)=8）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0）
     const e = mkEnemy(1, 505, 795);
     const g = makeHooks([e]);
     // 发射侧已乘语义：Game.fireGemStaffBolts 传 trunc(13×0.6)=7——此处直接以

@@ -247,8 +247,19 @@ export function bannerDamageMult(expert: boolean, itemId = 0): number {
   if (dd2) return expert ? 1.2 : 1.1;
   return expert ? 2 : 1.5;
 }
-export function bannerReceivedMult(expert: boolean, itemId = 0): number {
+export function bannerReceivedMult(difficulty: number, itemId = 0): number {
+  // ★BJ716-A（R15-P2-4，2026-10-25）：布尔档 → 曲线式——原版 DamageReceived 曲线
+  //  keys{Classic(1):k1, Expert(2):k2}（ItemID.cs:28-31）,Sample 双端钳界+段内线性
+  //  （GameDifficultyData.cs:35-55——R15 判例1）;旅程滑杆分数难度∈(1,2) 连续插值,
+  //  旧布尔档 mainExpertMode 在 (1,2) 恒 k1=旗减伤弱于原版（R15 判例3「布尔档
+  //  只在整数难度轴等价」）。非旅程整数值两式逐值相同;k1/k2 端点保持三位小数
+  //  不动（G35 D6 锁——0.917/0.833 vs 0.9166667/0.8333333 分歧带不可达,零扰动）。
+  //  消费位传 mainDifficulty(world)（projTargets applyBannerDamageReceivedOnProj +
+  //  Game.ts 接触面 :44764）;难度≤1（含旅程 0.5）→ k1,≥2（专家/大师/传奇）→ k2。
   const dd2 = DD2_BANNER_ITEMS.has(itemId);
-  if (dd2) return expert ? 0.833 : 0.917;
-  return expert ? 0.5 : 0.75;
+  const k1 = dd2 ? 0.917 : 0.75;
+  const k2 = dd2 ? 0.833 : 0.5;
+  if (difficulty <= 1) return k1;
+  if (difficulty >= 2) return k2;
+  return k1 + (k2 - k1) * (difficulty - 1);
 }

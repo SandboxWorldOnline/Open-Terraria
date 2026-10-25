@@ -119,6 +119,7 @@ describe('BJ395 ① Arrow:9431 受理面=!vanillaGated（普通未致命命中�
   afterEach(() => vi.restoreAllMocks());
 
   it('A1 普通命中形态（hurt 返假+实扣+iframes=10）：IDStatic 三跳节拍保持+清窗照写+GC1(numHits 同面)+穿透耗尽', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0,三跳同值）
     const e = mkNormalHitEnemy(39501, PX, PY);   // 189 idStaticGroup=189,pierceInit=3
     const { hooks, bridge } = makeGame([e]);
     const wasp = new Arrow(PX, PY, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });

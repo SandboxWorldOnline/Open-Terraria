@@ -21,7 +21,7 @@
 //  hurtFx 汇出收集,主命中受理+写梯后 darkHarvestChain 落地链电（伤落其他敌）。
 //  判别力（旧码必红项）：§B1/§C1 主伤丢+双记+序面;§B2 门拒跳链电旁落;
 //  §A1-A5 链面语义（若直调旧形则链面整缺）。
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -187,6 +187,7 @@ describe('W5-§A：darkHarvestChain 链面（:45878-45936/:8684-8686）', () => 
 // ---- §B 敌怪环 contact() 面（:13711 位次+目标面） ----
 describe('W5-§B：contact() 敌怪环（乌鸦 317 直驱）', () => {
   it('B1 主伤+链电双落、源敌零双记、主先链后（:13702→:13711）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（R18-F2 主环首掷 ×1.0）
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     const { hooks, player } = makeHooks([src, e1]);
@@ -233,6 +234,7 @@ describe('W5-§B：contact() 敌怪环（乌鸦 317 直驱）', () => {
 // ---- §C Arrow whipTagShot 面（塔射/随从弹 tag 通道） ----
 describe('W5-§C：Arrow whipTagShot 命中区（374 MinionShot 载体）', () => {
   it('C1 主伤+tag 单记于被命中敌、链电落其他敌、主先链后', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     const { hooks, player } = makeHooks([src, e1]);
@@ -247,6 +249,7 @@ describe('W5-§C：Arrow whipTagShot 命中区（374 MinionShot 载体）', () =
   });
 
   it('C2 非 whipTagShot 弹零 tag 零链（通道整门）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     const { hooks, player } = makeHooks([src, e1]);

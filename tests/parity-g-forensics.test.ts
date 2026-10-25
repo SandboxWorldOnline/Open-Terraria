@@ -3,7 +3,8 @@
 //（1405 NPC.AI() 主体反编译缺失："The method is too long to display"）。
 // 驱动方式 = 原型直调（drive 私有 AI 方法）+ Dart/MLDeathray 弹体直驱 +
 // Renderer.prototype.drawEnemy 记录型 ctx 代理（G4 翻面通道）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+afterEach(() => { vi.restoreAllMocks(); });   // ★BJ712-C
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { Dart } from '../src/entities/Dart';
@@ -126,6 +127,9 @@ describe('G3 弹-NPC 绑定通道（537 激光 / 573 蓄能弹）', () => {
   });
 
   it('537：束线段命中伤害 = 原值 × 难度 ×2（:13770-13781；难度乘区随难度档）', () => {
+  // ★BJ712-C：DamageVar 首掷入参包装（P.cs:14904）后链带 ±15% 掷——mock 0.5
+  // = tier 0 档（×1.0）,表值即掷中值;掷形面由 tests/bj712c-martian-dmg 三掷形承载
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
     for (const [diff, want] of [[0, 120], [1, 240]] as const) {
       const w = makeWorld(diff);
       const h = makeHooks(w, { x: 120, y: FLOOR - 6 });
@@ -347,6 +351,9 @@ describe('G8 月总死光伤害乘区', () => {
   }
 
   it('NewProjectile 原值 75 → 经敌弹标准乘区（难度×2）：经典 150 / 专家 300', () => {
+  // ★BJ712-C：DamageVar 首掷入参包装（P.cs:14904）后链带 ±15% 掷——mock 0.5
+  // = tier 0 档（×1.0）,表值即掷中值;掷形面由 tests/bj712c-martian-dmg 三掷形承载
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
     expect(deathrayHit(0)).toBe(150);   // 75 ×1×2（:13770-13781）
     expect(deathrayHit(1)).toBe(300);   // 75 ×2×2
   });

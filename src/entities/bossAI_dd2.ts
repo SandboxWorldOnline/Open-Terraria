@@ -88,10 +88,13 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow, projSprite } from './Arrow';
 import { segHitsRect } from './bossAI_duke_moonlord';
-import { statusPlayer } from './projTargets';
+import { statusPlayer, evpDirectDmg, bannerNpcKeyOf } from './projTargets';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
-import { GDL, getKnockbackMultiplierScaledByDifficulty, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import {
+  getAttackDamageForProjectiles, getAttackDamageScaledByDifficulty, damageVar,
+  getKnockbackMultiplierScaledByDifficulty,
+} from '../stats/ScaleStats';
 import { GorePiece } from './GorePiece';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -1527,7 +1530,10 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
     e.w = 192; e.h = 192;
     e.x -= e.w / 2; e.y -= e.h / 2;
     e.vx = 0; e.vy = 0;
-    e.def.damage = 80;                              // GetAttackDamage_ScaledByDifficulty(80)
+    // ★BJ712-B：GetAttackDamage_ScaledByDifficulty(80)（NPC.cs:66491）＝80×
+    //  EnemyDamageMultiplier.Sample(difficulty)——经典 80/专家 160/大师 240（旅程 40）。
+    //  曾钉死 80 = 三个难度档同值（漏难度倍率,外部核报 BJ712-B 件 2）。
+    e.def.damage = getAttackDamageScaledByDifficulty(80, e.difficulty);
     e.spawnAlpha = 255;
     if (e.ai1 === 0) {
       game.spawnParticles(e.cx, e.cy, '#FFD24A', 20, 4, { life: 30, grav: -0.05 });
@@ -1704,6 +1710,9 @@ export class DD2BetsyFireball extends Entity {
   w = 30;
   h = 30;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影，Betsy 551 无旗 →
+   *  恒 null 零行为；接线保直调站门序单源）。null = 未冻结。 */
+  bannerNpcId: number | null = null;
   /** NewProjectile 伤害参数（DMG_FIREBALL=35 经典；公共字段名对齐 dd2 弹族
    *  DD2GoblinBomb.damage——bossAI-dd2.test.ts 的 projectiles 桶断言面） */
   readonly damage: number;
@@ -1792,7 +1801,9 @@ export class DD2BetsyFireball extends Entity {
         if ((tr.x !== 0 || tr.y !== 0) && projTargetsOverlap(tr.x, tr.y, this.w, this.h, n)) { cHit = true; break; }
       }
       if (!cHit) continue;
-      n.hurt(this.damage, 0, 0, game);
+      // ★BJ713-R14 P2-2:vanilla Damage_PVE_Inner（P.cs:12970）对一切 PVE 命中掷
+      //  DamageVar（±15%/luck）——水晶面旧直传平值。
+      n.hurt(damageVar(this.damage, -(game.player.luck ?? 0)), 0, 0, game);
       n.npcImmune255 = 10;                            // :14182 immune[255]=10
     }
     // ---- Damage_EVP 命中面（player 盒 vs 当前盒∪尾迹盒;General 免疫帧内部去重）----
@@ -1806,7 +1817,7 @@ export class DD2BetsyFireball extends Entity {
     if (hit) {
       // 弹幕命中：attacker 缺省仅做死亡归因（contactOnly=false 不触发荆棘反伤）
       const dealt = game.damagePlayer(
-        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,   // :14912-14917
+        evpDirectDmg(game, damageVar(this.damage, -(game.player.luck ?? 0)), this.bannerNpcId),   // ★BJ710-C：banner→缩放→×2 门序单源（:14905-14918）
         this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 686 });   // ★R-B-F10(第4=knockback 位,opts 第5)
       if (dealt > 0) statusPlayer(game, 686);        // 实扣落地才走 statusPlayer 链
     }
@@ -1912,6 +1923,9 @@ function betsyTint(
 export class BetsyBreath extends Entity {
   w = 30;
   h = 30;
+  /** ★BJ710-C：发射者旗追踪键（Betsy 551 无旗 → 恒 null 零行为；构造期自 src 冻结
+   *  ——原版 FindBannerToAssociateTo 同拍，宿主死后保留） */
+  bannerNpcId: number | null = null;
   /** 锚定 Betsy（ai[1]=whoAmI 语义 → 本地 id 引用） */
   private srcId: number;
   /** ai[0]（:65911 ≥78 Kill） */
@@ -1952,6 +1966,7 @@ export class BetsyBreath extends Entity {
     super();
     this.srcId = src.id;
     this.dmg = dmg;
+    this.bannerNpcId = bannerNpcKeyOf(src);   // ★BJ710-C：发射者旗冻结
     this.x = src.cx - this.w / 2;
     this.y = src.cy - this.h / 2;
   }
@@ -2001,7 +2016,7 @@ export class BetsyBreath extends Entity {
         dx * segLen, dy * segLen, 40, p)) {
       // Damage_EVP：命中不消耗弹体；OnFire 420-600t（:11515-11517 statusPlayer 687 表）
       // Damage_EVP：687 基础 35（:62449 段生成值）
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 687 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -(game.player.luck ?? 0)), this.bannerNpcId), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 687 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op);★BJ710-C:dmg 走 evpDirectDmg 门序单源
       statusPlayer(game, 687);
     }
     // 尘（:65874-65896）：渐显期焰头 3 尘 6 + 每 t 焰体 1 尘 31（沿焰体随机分布）
@@ -2259,7 +2274,10 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
         // oldPos 全轨迹扫掠命中（见 DD2BetsyFireball 头注）；曾走 Arrow 单盒
         // 单测命中=高速掠射漏检尾迹走廊
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-          .entities.add(new DD2BetsyFireball(game, rx, ry, e.vx, e.vy, DMG_FIREBALL), 'projectiles');
+          .entities.add(Object.assign(
+            new DD2BetsyFireball(game, rx, ry, e.vx, e.vy, DMG_FIREBALL),
+            { bannerNpcId: bannerNpcKeyOf(e) }),   // ★BJ710-C：发射者旗冻结（Betsy 551 无旗=null 零行为）
+            'projectiles');
       }
     }
     if (e.ai1 > BOMB_TOTAL - TAIL_T) e.vy -= 0.1;   // 尾段拉起（:62545-62547）
@@ -2471,7 +2489,10 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
         // 682 电弧：timeLeft=30 / 无重力（SetDefaults :7281-7285 timeLeft=30+aiStyle1
         // 但 flag3 表豁免 ai[0] 自增=无重力支；数据列 tl:30）——旧 life300/pierce3
         // 近似退役（台账⑦同批）；scale 1.2 视觉档未接（C 面，登记）
-        shootD2(game, muzzleX, muzzleY, sx, sy, ZAP_DMG, ZAP_PROJ, 3600, {});
+        // ★BJ710-G35 D1：578 Etherian Lightning Bug T3（banner 266=DD2 档 0.917/0.833）
+        //  发射者旗冻结（FindBannerToAssociateTo P.cs:11106-11119）
+        shootD2(game, muzzleX, muzzleY, sx, sy, ZAP_DMG, ZAP_PROJ, 3600,
+          { bannerNpcId: bannerNpcKeyOf(e) });
       }
     }
   }
@@ -2506,13 +2527,16 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
 //   noGravity+noTileCollide 直飞——walker 翻山越壑奔水晶的原版机制。
 // ---------------------------------------------------------------------------
 
-/** GetAttackDamage_ForProjectiles（NPC.cs:7031-7034）：npc.difficulty 在
- *  Classic(1)→Expert(2) 区间的 Utils.Remap（GameDifficultyLevel.cs:7-9;不钳界,
- *  Master=3 外推照录）。Enemy.difficulty 即原版 npc.difficulty（ScaleStats 投影）。 */
-function projDmgOf(e: Enemy, normal: number, expert: number): number {
-  const t = e.difficulty - GDL.CLASSIC;   // 区间归零:Classic 0 / Expert 1 / Master 2
-  return Math.round(normal + (expert - normal) * t);
-}
+/** GetAttackDamage_ForProjectiles（NPC.cs:7079-7082）：npc.difficulty 在
+ *  Classic(1)→Expert(2) 区间的 Utils.Remap——★BJ712-B（2026-10-25）定谳勘正：
+ *  Utils.Remap（Utils.cs:345-348）**默认 clamped=true**（GetLerpValue(Utils.cs:315)
+ *  钳 [0,1]）→ **Master=3 落专家值、Journey=0.5 落经典值**,不外推。旧本地实现按
+ *  「不钳界外推」自算（Master=2×expert−normal、Journey 反向外插）系多副本漂移——
+ *  单源 getAttackDamageForProjectiles（ScaleStats.ts:336,remap 带 clamp）才是真身
+ *  （scale-stats.test.ts:298-301 毁灭者激光 22/18/18 大师钳位锁同判例）。
+ *  Enemy.difficulty 即原版 npc.difficulty（ScaleStats 投影）。 */
+export const projDmgOf = (e: Enemy, normal: number, expert: number): number =>
+  getAttackDamageForProjectiles(normal, expert, e.difficulty);
 
 /** SW-Q1 2026-09-03：681 专支尾焰尘锚点纯函数（AI_016 :48324-48330 逐参）。
  *  position = Center + (6×sign(vx), −h/2−6).RotBy(rot)×1.1（炸弹尾焰位,随滚转
@@ -2714,11 +2738,17 @@ function fireWalkerProj(
     if (p.proj === 681) {
       // 681 哥布林炸弹（aiStyle 16,SetDefaults :6984-6991）——引信/反弹/80² 爆盒
       (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-        .entities.add(new DD2GoblinBomb(sx, sy, jx, jy, p.projDmg), 'projectiles');
+        .entities.add(Object.assign(
+          new DD2GoblinBomb(sx, sy, jx, jy, p.projDmg),
+          { bannerNpcId: bannerNpcKeyOf(e) }),   // ★BJ710-C：发射者旗冻结（DD2 哥布林族带旗=DD2 档减伤）
+          'projectiles');
     } else if (p.proj === 683) {
       // 683 食人魔跺地波（aiStyle 135,SetDefaults :7003+）——原地 80→640 扩盒
       (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-        .entities.add(new DD2OgreSmash(sx, sy, p.projDmg), 'projectiles');
+        .entities.add(Object.assign(
+          new DD2OgreSmash(sx, sy, p.projDmg),
+          { bannerNpcId: bannerNpcKeyOf(e) }),   // ★BJ710-C：发射者旗冻结（Ogre 无旗=null 零行为）
+          'projectiles');
     } else {
       // 662/685 标枪、671 德拉肯弹、676 食人魔涎（均 aiStyle 1）——★台账⑦(2026-08-31)
       // 重力日程逐型回归：显式 grav/life/pierce 覆盖全部退役，改由 projGravSpec +
@@ -2731,8 +2761,11 @@ function fireWalkerProj(
       // · timeLeft=3600 / penetrate=-1 均取数据列（SetDefaults :7124-7132/:7188-7201/
       //   :7233-7244 未覆写；-1=无限穿透按通用 immune 冷却再命中，旧 pierce 999 近似退役）
       const javelin = p.proj === 662 || p.proj === 685;
+      // ★BJ710-G35 D1：发射者旗冻结——662/685 标枪（561-563 标枪手,banner 265）/
+      //  671 德拉肯弹（570/571,banner 260）/676 食人魔涎（576/577 无旗=null 零行为）。
+      //  同族 681 炸弹/683 跺地波两支已在 BJ710-C 落旗,本支为 fireWalkerProj 收尾。
       shootD2(game, sx, sy, jx, jy, p.projDmg, p.proj, 3600,
-        javelin ? { drag: 0.98 } : {});
+        { ...(javelin ? { drag: 0.98 } : {}), bannerNpcId: bannerNpcKeyOf(e) });
     }
   }
 }
@@ -2840,26 +2873,67 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
   } else if (x[3] < 60) {
     x[3] += 1;                             // 非渐显族也推进（各族出生爬坡读 x[3]）
   }
-  // ---- 枯萎兽灵气态（cs:63861-63935）:ai[0]==1 进入,此后 1↔2 振荡驻留 ----
+  // ---- 枯萎兽灵气态（NPC.cs:64050-64135,1457/1458 同行号;旧注 cs:63861 系
+  //      陈旧行号）:ai[0]==1 进入,此后 1↔2 振荡驻留 ----
   if (id === 568 || id === 569) {
     if (e.ai0 === 0) x[1] = 0;
     if (e.ai0 === 1) {
-      e.def.hitSound = soundTrackFiles('dd2_wither_beast_crystal_impact');  // HitSound（:63871）
+      e.def.hitSound = soundTrackFiles('dd2_wither_beast_crystal_impact');  // HitSound（:64078）
       e.ai0 += 1;                          // →2,由下方 flag5 块减回 1 形成驻留
-      x[0] += 1;
+      // ★BJ715-A-⑤ 尘面 1/2:d271 自闪耀（:64080-64086）——1/10 无目标门,
+      // NewDustDirect(TopLeft,w,h,271,0,−3,α0,Transparent,0.6)+后置 vx/=2、
+      // noGravity、fadeIn 1.5、y+=4（Tail Glow 族尘）
+      if (Math.random() < 0.1) {
+        const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 271, 0, -3, 0,
+          { r: 0, g: 0, b: 0, a: 0 }, 0.6, true);
+        if (d) { d.vx /= 2; d.fadeIn = 1.5; d.y += 4; }
+      }
+      // ★BJ715-A-⑤ 音面【登记债 D-⑤S,窄判备案】原版 :64087-64095 =
+      // GetActiveSound(localAI[1]) 空则 PlayTrackedSound(DD2_WitherBeastAuraPulse,
+      // Center)（:64088,音量=CreateTrackable 缺省 1,2 变体每播随机）+在播仅
+      // Position 跟随——非循环音(2.3/3.0s)整段灵气期连续重触发。本仓 x[1] 单闩
+      // 只响一声;真值落地需 Sfx.startTrackedOneShot（onended done 门+随机变体+
+      // setPos）+ GameHooks 可选方法 + Game.ts 三行代理——Game.ts 系 BJ714-A 在途
+      // 域本轮禁触,勿以 startTrackedLoop(loop=true,丢变体随机+无重触发节拍)近似顶替。
       if (x[1] === 0) {
         x[1] = 1;
         game.playSfxFiles(soundTrackFiles('dd2_wither_beast_aura_pulse'), 0.5, e.cx, e.cy);
       }
+      x[0] += 1;                           // localAI[0]++（:64096,环带门计数）
+      // ★BJ715-A-⑤ 尘面 2/2:d27 灵气环带（:64097-64109）——localAI[0]>60 ∧ 1/10
+      // 无目标门:Center+随机角×400×(0.3+0.7r) 环点,落点非实心格（WorldGen.SolidTile
+      // :70642 严格式）才发;NewDustPerfect(27,(0,−3),α0,(255,255,255,127),1.5) 后
+      // velocity=DirectionTo(尘位)×3 径向外向,fadeIn 1.5。旧「目标 400px 内 ±20px
+      // 单粒子」合并近似（无锚）退役。
+      if (x[0] > 60 && Math.random() < 0.1) {
+        const th = Math.random() * Math.PI * 2;
+        const dist = 400 * (0.3 + 0.7 * Math.random());
+        const px = e.cx + Math.cos(th) * dist, py = e.cy + Math.sin(th) * dist;
+        if (!game.world.store.isSolidStrict(Math.trunc(px / 16), Math.trunc(py / 16))) {
+          const d = game.spawnDust?.(px, py, 0, 0, 27, 0, -3, 0,
+            { r: 255, g: 255, b: 255, a: 127 }, 1.5, false, true);
+          if (d) {
+            const dl = Math.hypot(d.x - e.cx, d.y - e.cy) || 1;
+            d.vx = (d.x - e.cx) / dl * 3;
+            d.vy = (d.y - e.cy) / dl * 3;
+            d.fadeIn = 1.5;
+          }
+        }
+      }
       // 400px 内玩家削甲 debuff（buff 195 WitheredArmor 3t，Player.cs:11436 施加链；
       //   本仓 BuffType.WitheredArmor=101 已建模，defense 终值减半）—— aura 期间每 tick 续期
+      //   ★BJ712-B 判定域勘正：原版（NPC.cs:64110）＝`(player.Center - Center).Length()
+      //   < 400f` **圆形**（欧氏距,严格 <）——旧实现 |Δx|≤400 ∧ |Δy|≤400 方形（切比雪
+      //   夫距）在对角方向多吃到 √2−1≈41% 半径（对角 ~495px 仍被削甲,外部核报件 3）。
+      //   原版另有 !player.creativeGodMode 门（旅程上帝模式,本仓 journeyGodmodeActive
+      //   未导出——旅程单机低面,登记债勿在此扩刀）。
       {
         const pl = (game as unknown as { player: { buffs: { apply: (t: number, secs: number) => void } | null; cx: number; cy: number } }).player;
-        if (pl?.buffs && Math.abs(pl.cx - e.cx) <= 400 && Math.abs(pl.cy - e.cy) <= 400) {
+        if (pl?.buffs && Math.hypot(pl.cx - e.cx, pl.cy - e.cy) < 400) {
           pl.buffs.apply(101 /* BuffType.WitheredArmor */, 0.06);   // 3t ≈ 0.05s
         }
       }
-      // 60t 自疗 lifeMax/20（:63912-63934）
+      // 60t 自疗 lifeMax/20（:64120-64134）
       if (e.ai1 > 0) e.ai1 -= 1;
       if (e.ai1 <= 0) {
         e.ai1 = 60;
@@ -2868,11 +2942,6 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
           e.hp += heal;
           game.addDamageNumber(e.cx, e.cy - 10, -heal, false, '#7CFF6A');
         }
-      }
-      // 目标在 400px 内 → 灵气脉动尘
-      if (tgt && Math.hypot(tgt.cx - e.cx, tgt.cy - e.cy) < 400
-        && Math.random() < 0.1) {
-        game.spawnParticles(e.cx + (Math.random() - 0.5) * 40, e.cy - 20, '#C060FF', 1, 0.8, { life: 30 });
       }
     }
   }
@@ -2885,7 +2954,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       e.w = 192; e.h = 192;
       e.x -= e.w / 2; e.y -= e.h / 2;
       e.vx = 0; e.vy = 0;
-      e.def.damage = 80;                   // GetAttackDamage_ScaledByDifficulty(80)
+      // ★BJ712-B：GetAttackDamage_ScaledByDifficulty(80)（NPC.cs:63903）＝80×
+      //  EnemyDamageMultiplier.Sample(difficulty)——经典 80/专家 160/大师 240。
+      //  曾钉死 80 = 漏难度倍率（外部核报 BJ712-B 件 2,574/575 滑翔型同式同修）。
+      e.def.damage = getAttackDamageScaledByDifficulty(80, e.difficulty);
       e.spawnAlpha = 255;
       if (e.ai0 === 0) {
         game.spawnParticles(e.cx, e.cy, '#FFD24A', 20, 4, { life: 30, grav: -0.05 });
@@ -3241,6 +3313,9 @@ export class DD2GoblinBomb extends Entity {
   vy: number;
   damage: number;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影）——fireWalkerProj
+   *  发射位冻结（DD2 哥布林 566-575 族多带旗，DD2 档 0.917/0.833）。null=未冻结。 */
+  bannerNpcId: number | null = null;
   private fuse: number;
   private rot = 0;
   private cxPx = 0; private cyPx = 0;
@@ -3415,7 +3490,13 @@ export class DD2GoblinBomb extends Entity {
     if (pl && !pl.dead
       && pl.x < bx + 80 && pl.x + pl.w > bx && pl.y < by + 80 && pl.y + pl.h > by) {
       // Damage_EVP：projDmg=GetAttackDamage 生成基础值，命中再过乘区×2
-      game.damagePlayer(hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 681 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ712-B（2026-10-25）：原版链首 = `num3 = Main.DamageVar(damage,
+      //  0f - Main.player[owner].luck)`（Projectile.cs:14904——681 Kill 尾 `Damage()`
+      //  整链同一函数,DamageVar 先掷后进 banner/resistCold/缩放/×2）。曾直结固定值
+      //  = 跳过 ±15% 随机浮动（外部核报件 4）;luck 轴同 hitPlayer（:845 -p.luck,
+      //  NPC 弹 owner=Main.myPlayer=本地玩家）。evpDirectDmg 门序（banner→缩放→×2）
+      //  不动,掷点前置与其一致。
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.damage, -pl.luck), this.bannerNpcId), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 681 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op);★BJ710-C:dmg 走 evpDirectDmg 门序单源
     }
     for (const n of game.enemies() as Enemy[]) {
       // 永恒水晶 548 吃敌对爆伤（DD2 敌怪对水晶的伤害通道）
@@ -3423,7 +3504,7 @@ export class DD2GoblinBomb extends Entity {
       // ——演出期（旗置位）敌对爆伤照拒
       if (n.dead || n.vanillaId !== 548 || n.dontTakeDamageFromHostiles) continue;
       if (n.x < bx + 80 && n.x + n.w > bx && n.y < by + 80 && n.y + n.h > by) {
-        n.hurt(this.damage, 0, 0, game);
+        n.hurt(damageVar(this.damage, -(game.player.luck ?? 0)), 0, 0, game);   // ★BJ713-R14 P2-2
       }
     }
   }
@@ -3455,6 +3536,9 @@ export class DD2GoblinBomb extends Entity {
 export class DD2OgreSmash extends Entity {
   w = 80; h = 80;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（Ogre 576/577 无旗 → 恒 null 零行为；fireWalkerProj
+   *  发射位冻结，接线保直调站门序单源）。null=未冻结。 */
+  bannerNpcId: number | null = null;
   private ai0 = 0;
   private dmg: number;
   private readonly hitIds = new Set<number>();
@@ -3502,7 +3586,9 @@ export class DD2OgreSmash extends Entity {
       && pl.x < this.x + this.w && pl.x + pl.w > this.x
       && pl.y < this.y + this.h && pl.y + pl.h > this.y) {
       // Damage_EVP：projDmg 生成基础值
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 683 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ712-B（2026-10-25）：DamageVar ±15% 首掷（Projectile.cs:14904——683 与 681
+      //  同走 Projectile.Damage() 整链,掷点在 banner/缩放/×2 前）;曾直结固定值。
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -pl.luck), this.bannerNpcId), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 683 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op);★BJ710-C:dmg 走 evpDirectDmg 门序单源
     }
     for (const n of game.enemies() as Enemy[]) {
       // ★BJ450:flag2 门（Projectile.cs:12626）——演出期（旗置位）照拒
@@ -3511,7 +3597,7 @@ export class DD2OgreSmash extends Entity {
       if (n.x < this.x + this.w && n.x + n.w > this.x
         && n.y < this.y + this.h && n.y + n.h > this.y) {
         this.hitIds.add(n.id);
-        n.hurt(this.dmg, 0, 0, game);
+        n.hurt(damageVar(this.dmg, -(game.player.luck ?? 0)), 0, 0, game);   // ★BJ713-R14 P2-2
       }
     }
     if (this.ai0 % 3 === 0) {              // 每 3t 尘爆（:65746-65750）

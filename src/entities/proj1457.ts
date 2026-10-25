@@ -21,7 +21,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★刀4-A:弹命中 NPC 修正链
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll, statusPlayer } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, expertEowFifthDmg, hitCritters, hitCrittersAll, statusPlayer } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
 // ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
 // ★BJ420 幽灵伤害头 ghostHurt 同单源 + 受理面快照（清偿刀 T 族规）
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt,
@@ -546,6 +546,11 @@ export function dealContacts(
     dmg = runModModifyHitNpcByProj(game.player, game, self.projId,
       (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);
     dmg = applyBannerDamageDealt(game, e, dmg);
+    // ★BJ716-A（R18-F1，2026-10-25）：expert EoW 虫段 /5（Projectile.cs:13392-13398）
+    //  ——banner(:13388-90) 后、crit 翻倍（StrikeNPC 内）前原位;20 弹型表×NPC 13-15
+    //  （表=EXPERT_EOW_FIFTH_PROJS 弹域单源,与 Game.explodeNpcDamageChain 爆炸 face
+    //  同源——旧仅爆炸 face 有此臂,281 兔爆/蜂族经 dealContacts 的直击面全 5× 超伤）
+    dmg = expertEowFifthDmg(dmg, self.projId, (e as unknown as { vanillaId?: number }).vanillaId, game.world);
     dmg *= crit ? 2 : 1;
     // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——
     // 本共享结算面承载 1126/1127/1128/1129 等 1457 近战系新弹（数据面 melee），

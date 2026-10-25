@@ -760,6 +760,35 @@ export function eyelidFrame(a: Appearance): Baked | null {
   return tint(r.img as HTMLImageElement, a.skinColor);
 }
 
+/** ★BJ707-G31（G29 登记债③清偿）迅猛龙眼睑帧（PlayerDrawLayers.cs:2655-2658 raptor
+ *  覆写面）:骑 54 时眼睑基色 = (158,92,67) 而非 skinColor（color =
+ *  GetImmuneAlpha(GetColorClamped(MountedCenter 格,(158,92,67)),shadow)——采光乘面
+ *  由实体窗 compositeLight 统一承载,本面只烘基色;immune 闪烁随 bodyAlpha 既有
+ *  globalAlpha）+ shader = cMount（★眼睑唯一吃坐骑染料的绘制面——普通面
+ *  skinDyePacked 在 vanilla 恒 0（Player.cs:9678 唯一写位清零,死字段）=零染料,
+ *  仓内普通面维持无染正确）。染料烘焙 = dyeBakeArmorSprite 同径（dye 先烘后
+ *  基色 tint,甲件族序）;head==288 支（:2660-2663）色改 Black=黑底全闭帧,染料
+ *  保留（vanilla 仅覆写 color/frameY,shader 不动）——black=true 入参。
+ *  dye 烘焙缓存键含 imgId（贴图重载安全）+dyeVid（小集合）。 */
+const raptorEyelidDyeCache = new Map<string, HTMLCanvasElement>();
+export function eyelidFrameRaptor(a: Appearance, dyeVid: number, black = false): Baked | null {
+  const r = UITextures.get(variantSheetName(a.skinVariant, 15, (n) => UITextures.has(n)));
+  if (!r) return null;
+  noteVuiConsumer('PaperDoll.eyelidFrame');
+  const raw = r.img as HTMLImageElement;
+  const base = black ? { r: 0, g: 0, b: 0 } : { r: 158, g: 92, b: 67 };
+  if (dyeVid <= 0) return tint(raw, base);
+  let id = tintImgId.get(raw as object);
+  if (id === undefined) { id = ++tintImgSeq; tintImgId.set(raw as object, id); }
+  const key = `rd${id}|${dyeVid}`;
+  let dyed = raptorEyelidDyeCache.get(key);
+  if (!dyed) {
+    dyed = dyeBakeArmorSprite(raw, dyeVid);
+    raptorEyelidDyeCache.set(key, dyed);
+  }
+  return tint(dyed, base);
+}
+
 /** 取某一帧的绘制参数（供 UISpriteBatch.draw 直接使用） */
 export function dollFrame(doll: Baked, frame: number): { img: Baked; sx: number; sy: number; sw: number; sh: number } {
   const idx = Math.max(0, Math.min(BODY_FRAMES - 1, frame));

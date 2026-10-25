@@ -1,7 +1,8 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, statusPlayer } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, statusPlayer, evpDirectDmg } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2）：全环 DamageVar 首掷（:12970）
 import { InfernoHostileBlast } from './InfernoHostileBlast';
 import { shadowbeamLineFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -19,7 +20,7 @@ import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
 import { projFrameImg, projSprite, projFrameSrcRect } from './Arrow';
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
-import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
+import { mainExpertMode, damageVar } from '../stats/ScaleStats';
 import { applyProjStatus } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装 on-hit 单源
@@ -902,11 +903,20 @@ export class TrapShot extends Entity {
             e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
           // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
-          e.hurt(applyBannerDamageDealt(game, e, this.damage)
+          // ★BJ716-A（R18-F2+R18-F1，2026-10-25）：DamageVar 首掷（:12970,owner luck
+          //  正向——Wiring 发射尾参 owner=Main.myPlayer）→ banner(:13388)→ expert EoW
+          //  虫段 /5(:13392-98,281 兔在表——手工炮/陷阱兔对 EoW 专家 5× 超伤曾缺);
+          //  crit 面省略=TrapShot 族既有登记近似（掷面只 DV,序内零扰）
+          e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
+              damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+              trapProjId, (e as { vanillaId?: number | null }).vanillaId, game.world)
             + (snapBonusTrap ? Math.trunc(snapBonusTrap * 1) : 0),
             Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         } else {
-          e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+          e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
+              damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+              trapProjId ?? -1, (e as { vanillaId?: number | null }).vanillaId, game.world),
+            Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         }
         // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——
         // StrikeNPC 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :711
@@ -1154,7 +1164,11 @@ export class TrapShot extends Entity {
           e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
       }
-      e.hurt(applyBannerDamageDealt(game, e, this.damage)
+      // ★BJ716-A（R18-F2+R18-F1）：DV 首掷（:12970）→banner(:13388)→EoW /5(:13392-98,
+      //  281 兔爆面在表——旧专家 EoW 5× 超伤）;crit 面=TrapShot blast 族既有登记近似
+      e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
+          damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+          blProjId ?? -1, (e as { vanillaId?: number | null }).vanillaId, game.world)
         + (snapBonusBlast ? Math.trunc(snapBonusBlast * 1) : 0),
         Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
       // 命中尾免疫梯（GC1 桥——162 末档写 10 / 281 idStatic 写 0+共享桶已写）
@@ -1226,7 +1240,11 @@ export class TrapShot extends Entity {
           const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
             hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean };
           if (e.dead || !(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-          e.hurt(applyBannerDamageDealt(game, ent, this.damage),
+          // ★BJ716-A（R18-F2）：DV 首掷（:12970）——烟花族（167-170,伤 150）玩家弹
+          //  PVE 命中同链;/5 表无烟花成员（EoW 臂天然 no-op,不接）;crit 面随
+          //  TrapShot blast 族既有登记近似
+          e.hurt(applyBannerDamageDealt(game, ent,
+              damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
             Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);
           this.explodeFirework(game);   // penetrate==0 → Kill()（:17312-17315）
           return;
@@ -1414,6 +1432,12 @@ export class Dart extends Entity {
    *  位锁）/ 424 预言者→573 蓄能弹（:32087 蓄能期宿主死→立即对最近玩家齐射 +
    *  目标继承）。0 = 无绑定（默认，其余发射点原版就不传） */
   ownerNpcId = 0;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影）——NPC 类型/变体
+   *  id 域（bannerNpcKeyOf 产物；bannerNpcActive/_bannerNpcs 同键），构造期由发射
+   *  Enemy 冻结（FindBannerToAssociateTo Projectile.cs:11106-11119，宿主死后保留）。
+   *  消费 = hitPlayer 旗门 + 537/573 直调站（evpDirectDmg）。与 ownerNpcId（实体
+   *  id/G3 宿主绑定域）分域勿混。null = 无发射者面（世界机关/探针/未接线族）。 */
+  bannerNpcId: number | null = null;
   /** ★BJ219 通用 oldPos 残影环（TrailingMode 表驱动;undefined=未初始化/null=无记录式）。
    *  Dart 载体活动集=573 星云弹/811 血弹/814 血鹦鹉螺弹（TrailingMode 全 0,cap 10）。
    *  ai 依赖档（811 ai0 白染预混）以 0 档承载=染侧裁决（★BJ245 勘误：ai0 写入方已证
@@ -3056,6 +3080,7 @@ export class Dart extends Entity {
     this.dead = true;
     this.if291Mirrored = true;
     const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
+    blast.bannerNpcId = this.bannerNpcId;   // ★BJ720-A（issue #19 B01）：派生弹继承父弹旗（P.cs:11108-11113 Entity is Projectile 分支）
     (game as unknown as { entities: { add(e: unknown, b: string): void } })
       .entities.add(blast, 'projectiles');
   }
@@ -3085,6 +3110,7 @@ export class Dart extends Entity {
     if (this.projId === 291 && !this.if291Mirrored) {
       this.if291Mirrored = true;
       const blast = new InfernoHostileBlast(this.cx, this.cy, this.damage);
+      blast.bannerNpcId = this.bannerNpcId;   // ★BJ720-A（issue #19 B01）：镜像口同继承（本地 Kill 口同源）
       (g as unknown as { entities: { add(e: unknown, b: string): void } })
         .entities.add(blast, 'projectiles');
       return;
@@ -3196,7 +3222,7 @@ export class Dart extends Entity {
       && segHitsRect(this.cx, this.cy, dirX * this.beamLen, dirY * this.beamLen,
         22 * this.scale, p)) {
       game.damagePlayer(
-        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
+        evpDirectDmg(game, damageVar(this.damage, -p.luck), this.bannerNpcId),   // ★BJ710-C：banner→缩放→×2 门序单源（411 观星者旗面）
         this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10(第4=knockback 位,opts 第5)
     }
   }
@@ -3264,7 +3290,7 @@ export class Dart extends Entity {
     if (this.hostile && p && !p.dead && p.iframes <= 0
       && projOverlap(this.x, this.y, this.w, this.h, p)) {
       game.damagePlayer(
-        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
+        evpDirectDmg(game, damageVar(this.damage, -p.luck), this.bannerNpcId),   // ★BJ710-C：banner→缩放→×2 门序单源（424 预言者旗面）
         this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10
     }
   }

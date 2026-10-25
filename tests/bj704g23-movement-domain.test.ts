@@ -289,13 +289,20 @@ describe('BJ705-G23 §S 结构锁', () => {
     expect(playerSrc).not.toContain('this.wingTime > 0 && !mnt;');   // 旧 wingAir 谓词绝迹
   });
 
-  it('S3 松键即清支（:21201-08）+ sustain 钉位（inputJump 分支承载）+ G25 挂爪冻结门', () => {
+  it('S3 松键即清支（:21201-08）+ sustain 钉位（sustainPin 闭包=JumpMovement 位,BJ717-A F1 迁移）+ G25 挂爪冻结门', () => {
     expect(playerSrc).toContain('else if (!this.inputJump) {');
     expect(playerSrc).toContain('this.jumpHold = 0;');
     expect(playerSrc).toContain('this.vy = -effJumpSpd * gd;');
-    // 起跳拍互斥（fire 拍不进 sustain）+ 挂爪/舌缚冻结门（G25 [g23-sustain-grapple-freeze]
-    // 清偿:≙原版 :26692 else-if——JumpMovement 整段不跑）在位
-    expect(playerSrc).toContain('if (this.jumpHold > 0 && !jumpStartedThisTick\n      && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue)) {');
+    // ★BJ717-A F1（2026-10-25）：钉位从公共段（重力后）迁分支内 sustainPin 闭包
+    //   （≙原版 JumpMovement :26945 序=重力 :27556【前】,平台拍 vy=-js+grav=-4.61;
+    //   oracle 双证 apex 98.07px）。闭包内承载起跳拍互斥 + 挂爪/舌缚冻结门
+    //   （G25 [g23-sustain-grapple-freeze] 清偿:≙原版 :26692 else-if）。
+    expect(playerSrc).toContain('const sustainPin = () => {');
+    expect(playerSrc).toContain('if (this.jumpHold > 0 && !jumpStartedThisTick\n        && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue)) {');
+    // 湿/干两分支各一调用位（臂段尾/飞行链与重力前）
+    expect((playerSrc.match(/sustainPin\(\);/g) ?? []).length).toBe(2);
+    // 防回退：重力后公共位旧形（4 空格缩进直书=pin 在重力块后跑）绝迹
+    expect(playerSrc).not.toContain('\n    if (this.jumpHold > 0 && !jumpStartedThisTick\n');
   });
 
   it('S4 vanilla CanUseWings 分型普查:Mount.cs 唯 SetAsRollerSkate 置真+未激活恒真', () => {

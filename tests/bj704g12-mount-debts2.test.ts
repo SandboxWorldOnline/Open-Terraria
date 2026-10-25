@@ -134,8 +134,8 @@ describe('BJ704-G12 A 未骑乘微光=湿支 shimmer 档（:24590-24592 0.15 平
     p.fixedUpdate(1 / 60, game);
     expect(p.vy).toBeCloseTo(-5.51 + 0.15, 8);       // 跳拍：-shimmer 档 5.51 + 同拍湿重力 0.15
     expect(p.jumpHold).toBe(23);                     // shimmer 档 jumpHeight（旧无跳门）
-    p.fixedUpdate(1 / 60, game);                     // 持跳 sustain 钉
-    expect(p.vy).toBeCloseTo(-5.51, 10);
+    p.fixedUpdate(1 / 60, game);                     // 持跳 sustain 钉（★BJ717-A F1:钉→重力序=钉后 +0.15,旧=钉后置恒 -5.51）
+    expect(p.vy).toBeCloseTo(-5.51 + 0.15, 10);      // 平台拍积分速度=-js+grav（oracle S1 同构:-4.61）
     expect(p.jumpHold).toBe(22);
   }, 30000);
 

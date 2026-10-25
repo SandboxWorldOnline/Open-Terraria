@@ -55,15 +55,16 @@ import { projFrameImg, projSprite, volleyPhantomOrbs, nudgePhantomOrbs } from '.
 import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
 import { MLDeathray, MoonLeechProj, type NetProjMeta } from './bossAI_duke_moonlord';
-import { tryReflectProjectile, type ReflectableProj } from './projTargets';
+import { tryReflectProjectile, type ReflectableProj, evpDirectDmg, bannerNpcKeyOf } from './projTargets';
 import { spawnNpcDeathDust } from './NpcHitDust';   // ★BJ503:519 自爆 HitEffect 查表尘
 import { LightningBoltProj } from './LightningBoltProj';
 import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { hostileProjectileDamage, mainDifficulty, getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
+import { mainExpertMode, getKnockbackMultiplierScaledByDifficulty, damageVar } from '../stats/ScaleStats';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { cultistCheckFloorPts } from '../world/evolution/RuntimeEvents';   // ★BJ715-A-③ CheckFloor 单源
 
 /** 原版 localAI[0..3](Enemy 只有 ai0-ai3,localAI 独立 → WeakMap 落盘) */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -457,7 +458,9 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
       x[2] = lerp(x[2], 1, 0.2);
     }
   } else if (e.ai0 === 4) {
-    // ---- 死亡之光 455(:38585-38665):180t 吸能 → MLDeathray('core' 档,50 伤×2) ----
+    // ---- 死亡之光 455(:38585-38665):180t 吸能 → MLDeathray('core' 档,50 伤——
+    //      难度×2 乘区在 MLDeathray 命中时经 evpDirectDmg 结算,出生值=NewProjectile
+    //      原值 50,NPC.cs:43343) ----
     if (t === 0 && player) e.facing = e.seekDirX(player);
     if (t < 180) {
       x[2] = lerp(x[2], 1, 0.2);
@@ -475,8 +478,11 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
         const dd = Math.hypot(dx, dy) || 1;
         const n = dx / dd < 0 ? 1 : -1;                       // num1318
         const ang = Math.atan2(dy, dx) - n * TAU / 6;
+        // ★BJ712-A(2026-10-25 转报件1):出生伤=原版 50(NPC.cs:43343 `455, 50`)——
+        // 难度缩放×恒×2 在 MLDeathray 命中时经 evpDirectDmg 单次结算(经典/专家/
+        // 大师 100/200/300);曾 `50 * 2` 预乘=双倍(200/400/600),预乘退场
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(
-          new MLDeathray(e, 'core', ang, n * TAU / 540, 50 * 2), 'projectiles');
+          new MLDeathray(e, 'core', ang, n * TAU / 540, 50), 'projectiles');
         e.ai2 = (ang + Math.PI * 3) * n;                      // :38649 扫射编码角
       }
       x[1] = Math.min(1, x[1] + 0.05);
@@ -615,27 +621,15 @@ export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
 // 槽位:弓手 id+1 存 ai[0..1](原版同),信徒 id+1 存 localAI[1..2];ai[0]=-1 标记
 // 邪教徒已召(此后 ai[3] 为倒计时)。
 // ---------------------------------------------------------------------------
-/** CultistRitual.CheckFloor(CultistRitual.cs:88-124 1:1):i∈{-5,-3,3,5} → x=tileX+i*2,
- *  y 自 tileY-5 向下扫至 +11,取首个"实心/平台 且上方 3 格净空"的点;不足 4 点 → null */
+/** CultistRitual.CheckFloor(CultistRitual.cs:102-131)——★BJ715-A-③（2026-10-25）
+ *  两副本收编单源:复制面（isSolid 宽谓词+isPlatform 可站顶宽谓词,与 RuntimeEvents
+ *  同病）退役,委托 RuntimeEvents.cultistCheckFloorPts（谓词域勘正:第一臂
+ *  WorldGen.SolidTile :70642 严格式=isSolidStrict;第二臂 TileID.Sets.Platforms[type]
+ *  :117 纯 type=isPlatformsType;净空臂 Collision.SolidTiles=isSolid 原式）。
+ *  本侧 y 界内 break 守卫随收编退役（原版无此门;OOB 经 isSolidStrict/isPlatformsType
+ *  双 false=原版 SolidTile try-catch false / GetTileSafely type 0 同相,扫列继续）。 */
 export function ritualCheckFloor(game: GameHooks, cx: number, cy: number): Array<{ x: number; y: number }> | null {
-  const pts: Array<{ x: number; y: number }> = [];
-  const tx = Math.floor(cx / TILE), ty = Math.floor(cy / TILE);
-  for (const i of [-5, -3, 3, 5]) {
-    const x = tx + i * 2;
-    for (let j = -5; j < 12; j++) {
-      const y = ty + j;
-      if (y < 1 || y >= game.world.store.h - 1) break;
-      const floor = solidTileAt(game, x, y) || game.world.store.isPlatform(x, y);
-      if (!floor) continue;
-      // 净空:本柱 3 格全空,或(本柱空 且 左右柱上两行空)——原版双条件或语义
-      const clearMid = !solidRect(game, x - 1, x + 1, y - 3, y - 1);
-      const clearSide = !solidRect(game, x, x, y - 3, y - 1)
-        && !solidRect(game, x + 1, x + 1, y - 3, y - 2)
-        && !solidRect(game, x - 1, x - 1, y - 3, y - 2);
-      if (clearMid || clearSide) { pts.push({ x, y }); break; }
-    }
-  }
-  return pts.length === 4 ? pts : null;
+  return cultistCheckFloorPts(game.world.store, cx, cy);
 }
 
 export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | null) {
@@ -659,7 +653,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       const child = spawnPart(game, e, isDevotee ? 438 : 379);
       if (!child) continue;
       child.x = pts[k].x * TILE + 8 - child.w / 2;
-      child.y = pts[k].y * TILE - child.h;             // 站上落点面(原版顶锚 y-48)
+      child.y = pts[k].y * TILE - 48 - child.h;        // ★BJ715-A-④:NewNPC Bottom 锚(:81597 nPC.Bottom=(X,Y))——Y=spawnPoints.Y*16-48 → 底=落点面上浮 48px 悬空坠落入场(:37140);旧「顶锚 y-48」系锚语义误读(贴地站)
       child.ai3 = -(e.id + 1);                          // ai[3]=-(碑id+1) 待机锚
       child.bInit = true;
       if (isDevotee) x[1 + devN++] = child.id + 1;      // localAI[1..2]=信徒 id+1
@@ -695,7 +689,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       let ty = Math.floor(e.cy / TILE);
       for (let j = -5; j < 12; j++) {
         const y = Math.floor(e.cy / TILE) + j;
-        if (solidTileAt(game, tx, y) && !solidRect(game, tx - 1, tx + 1, y - 3, y - 1)) { ty = y; break; }
+        if (game.world.store.isSolidStrict(tx, y) && !solidRect(game, tx - 1, tx + 1, y - 3, y - 1)) { ty = y; break; }   // ★BJ715-A-③:WorldGen.SolidTile :37199 严格式(旧 solidTileAt=isSolid 宽谓词,半砖/坡面格误当落地列)
         if (j === 11) ty = y;
       }
       const cultist = spawnPart(game, e, 439);
@@ -703,7 +697,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       // （_cultistTabletDone WeakSet 去重）——勿在此再调,避免双路径
       if (cultist) {
         cultist.x = tx * TILE + 10 - cultist.w / 2;
-        cultist.y = ty * TILE - cultist.h;              // 原版顶锚 y=tileY*16-2,本仓落底对齐
+        cultist.y = ty * TILE - 2 - cultist.h;          // ★BJ715-A-④:NewNPC Bottom 锚——Y=num1244*16-2(:37193) → 底=落地列面上浮 2px;旧注「顶锚」误读,贴地对齐偏差 2px 同刀勘正
         cultist.facing = Math.sign(e.cx - (tx * TILE + 10)) || 1;
         // ★自然石碑链 439 占 boss 槽(F6/召唤链同款)——曾缺:杀教徒后 downed_439/
         // 击败公告/TriggerLunarApocalypse 四塔/月总整链不发=主进度断链(终审 P0 修)。
@@ -782,7 +776,16 @@ export function lunaticDevoteeAI(e: Enemy, game: GameHooks, _player: Player | nu
 // 循环;受击 → 碑 localAI[0]=1。碑置 ai[3]=0 后:ai[0]≥1000 清零 + damage 恢复
 // (:56791-56795),回 AI_003 战士核(射击参数见 Enemy.RANGED_TABLE 379/380 条目)。
 // ---------------------------------------------------------------------------
+const archerDefDamageSnap = new WeakMap<Enemy, number>();
+
 export function cultistArcherStandbyAI(e: Enemy, game: GameHooks) {
+  // ★BJ712-A D2:vanilla 待机只写 damage=0（:56762）,defDamage（ScaleStats 后
+  //  快照 :18197,90/180/270）不动——仓内 def.damage 兼两职,零伤前须快照,
+  //  否则唤醒无缩放值可回。
+  //  ★BJ713-R14 P0-1 勘误:快照必须【首拍 only】——本函数每拍跑,set 无守卫时
+  //  第 2 拍起捕获的是同拍已置 0 的 def.damage（快照中毒→唤醒回 0=弓手全难度
+  //  零接触伤;单拍夹具恰掩盖）。守卫式同 fighterFamilies lungeDefMemory 先例。
+  if (!archerDefDamageSnap.has(e)) archerDefDamageSnap.set(e, e.def.damage);
   e.def.damage = 0;                                      // :56762 damage=0(待机零伤)
   const owner = enemies(game).find((n) => n.id === -e.ai3 - 1 && n.vanillaId === 437);
   if (!owner || owner.dead) { e.dead = true; return; }
@@ -804,7 +807,11 @@ export function cultistArcherStandbyAI(e: Enemy, game: GameHooks) {
 /** 弓手激活复位(:56791-56795):ai[0]≥1000 清零、damage 恢复 defDamage(待机段置 0) */
 export function cultistArcherWake(e: Enemy) {
   if (e.ai0 >= 1000) e.ai0 = 0;
-  e.def.damage = e.vanilla?.damage ?? e.def.damage;
+  // ★BJ712-A D2:vanilla :56794 `damage = defDamage`（缩放终值 90/180/270——
+  //  522 教徒支 num=0.75）——旧回写 vanilla 基值 120=经典也错。快照缺席
+  //  （未待机过）=保持现值（防御性,def.damage 本就是缩放终值）。
+  const snap = archerDefDamageSnap.get(e);
+  if (snap !== undefined) e.def.damage = snap;
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,9 +1106,16 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
 // 1 穿墙追击 / 2 近距缠斗(×0.5 伤,LOS 断→0) / 3+3.1+3.2 侧掠冲刺(×1.3 伤) /
 // 4+4.1+4.2 扫地产卵 478(478+479<7 时;专家孵化 70→52t,不可达)
 // ---------------------------------------------------------------------------
+const mothronBaseDmgSnap = new WeakMap<Enemy, number>();
+
 export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   const p = player && !player.dead ? player : null;
-  const baseDmg = e.vanilla?.damage ?? e.def.damage;
+  // ★BJ713-R14 P1-1:baseDmg 须=【缩放快照】（vanilla :38206 damage=defDamage,
+  //  defDamage=ScaleStats 后值）——旧 `e.vanilla?.damage`（未缩放 JSON 基值）逐拍
+  //  抹回,大师出生 240→80（态 2 ×0.5/态 3 ×1.3 同错基线;经典档恰无差）。
+  //  首拍捕获（bInit 前本函数首跑,def.damage 尚为 ScaleStats 终值）。
+  if (!mothronBaseDmgSnap.has(e)) mothronBaseDmgSnap.set(e, e.def.damage);
+  const baseDmg = mothronBaseDmgSnap.get(e)!;
   e.def.damage = baseDmg;                                 // :38206 damage=defDamage
   const eggCap = 7;                                       // num1412
 
@@ -1178,7 +1192,9 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   if (e.ai0 === 2) {
     // ---- 近距缠斗(:38355-38416):×0.5 伤;4+ai[2]+距/120 速递增;240t 或断视线 → 0 ----
-    e.def.damage = Math.round(baseDmg * 0.5);
+    // ★BJ720-A（issue #19 D07）：`(int)((double)defDamage * 0.5)`（1457 :38388）——
+    //  (int) 截断非 round（.5 中点抬升错档；80/160/240 三档恰整无差,语义对齐）。
+    e.def.damage = Math.trunc(baseDmg * 0.5);
     if (p.cx - 10 < e.cx) e.facing = -1;
     else if (p.cx + 10 > e.cx) e.facing = 1;
     e.spin = (e.spin * 4 + e.vx * 0.1) / 5;
@@ -1225,7 +1241,8 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     } else {
       // 直冲(16+ai[2] 速 ×1.3 伤),过玩家 260px 且不埋块 → 0;埋块且 >800px → 1
-      e.def.damage = Math.round(baseDmg * 1.3);
+      // ★BJ720-A（issue #19 D07）：`(int)((double)defDamage * 1.3)`（1457 :38536）——截断同上
+      e.def.damage = Math.trunc(baseDmg * 1.3);
       e.ai2 += 1 / 30;
       e.vx = (16 + e.ai2) * e.ai1;
       if ((e.ai1 > 0 && e.cx > p.cx + 260) || (e.ai1 < 0 && e.cx < p.cx - 260)) {
@@ -2364,6 +2381,11 @@ export class LunarOrb extends Entity {
   vx: number; vy: number;
   readonly kind: 539 | 574;
   readonly parentId: number;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影——539=Flow Invader/
+   *  574=Nebula Floater 发射,构造期冻结;574 的 576 子弹经 ArrowOpts 继承本键
+   *  =原版 EntitySource_Parent(弹) 继承链 FindBannerToAssociateTo :11110-11113）。
+   *  null=无发射者面（net 傀儡重建/无父）。 */
+  bannerNpcId: number | null = null;
   /** v6 联机：父体 netId（访客端父=msg23 傀儡；0=本端真身走 parentId 查找） */
   parentNetId = 0;
   private ai0 = 0;
@@ -2403,6 +2425,7 @@ export class LunarOrb extends Entity {
     super();
     this.kind = kind;
     this.parentId = parent?.id ?? 0;
+    this.bannerNpcId = bannerNpcKeyOf(parent);   // ★BJ710-C：发射者旗冻结（539=Flow Invader/574=Nebula Floater 族带旗；net 傀儡 parent=null → 无旗面,MP 债登记）
     this.vx = vx; this.vy = vy;
     this.dmg = dmg;
     if (kind === 539) { this.w = 18; this.h = 30; }
@@ -2493,14 +2516,23 @@ export class LunarOrb extends Entity {
           const d = Math.hypot(dx, dy) || 1;
           this.vx = (dx / d) * 16; this.vy = (dy / d) * 16;
         } else {
-          // 线发 576 弹(:32204-32211):CanHitLine 门,8 速 65 伤;发射后重置计时。
+          // 线发 576 弹(:32204-32211):CanHitLine 门,8 速;发射后重置计时。
+          // ★BJ710-B（2026-10-24 用户转报实报「专家模式星云激光 260 vs Wiki 200」）:
+          //  原版 574 支 Projectile.cs:33871-33883 `num824=65; if (Main.expertMode)
+          //  num824=50;`——专家档基础伤 50 覆写（Main.expertMode 在大师档亦真=专家/
+          //  大师双档 50;经典 65）。旧仓硬编码 65 无门 → 专家 65×2×2=260（Wiki 200
+          //  =50×2×2）+30% 偏高。修=mainExpertMode 门对齐（Difficulty 用 journey/
+          //  classic=65,expert/master=50）。
           // v6 傀儡不本地线发——房主的 576 弹经 msg27 同步,双端各发会翻倍
           if (!this.netPuppet && !p.dead && canHitLine(game.world.store, this.cx, this.cy, 0, 0, p.cx, p.cy, 0, 0)) {
             const dx = p.cx - this.cx, dy = p.cy - this.cy;
             const d = Math.hypot(dx, dy) || 1;
+            const dmg576 = mainExpertMode(game.world) ? 50 : 65;   // :33878-33882
+            // ★BJ710-C：574 的 576 子弹继承父弹旗（FindBannerToAssociateTo 父弹分支 :11110-11113）
             (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(
-              new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576,
-                { grav: 0, life: 600, pierce: 1, hostile: true }), 'projectiles');
+              new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, dmg576, 0, 576,
+                { grav: 0, life: 600, pierce: 1, hostile: true, bannerNpcId: this.bannerNpcId }),
+                'projectiles');
             // 弹 576 出生音:Projectile.cs:56327-56331 ai[1]==0 首拍 SoundID.Item12（R8 勘误:
             //  56443-56447 为 numUpdates==1 的 α 面尘 229,非播音行）——
             // 本仓 576 走 Arrow 直飞桶无 ai[1] 态,于发射点等价结算(同 462/259 先例)
@@ -2552,7 +2584,7 @@ export class LunarOrb extends Entity {
         // SW-BL1 2026-09-06：attacker 位显式 null（运行时等价 undefined,falsy 同面）
         // 改缺省——GameHooks.damagePlayer 类型闸收窄（SW-BI1 两起 attacker 槽事故后）
         // 后 null 不再入域,语义零变化
-        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.kind });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+        game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.kind });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op);★BJ710-C:banner→缩放→×2 门序单源
       }
     }
   }

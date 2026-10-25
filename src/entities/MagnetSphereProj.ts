@@ -177,9 +177,12 @@ export class BeamBoltProj extends Entity {
     //    循环检查;AI→湿段→位移→命中→寿命全在循环内,AI :16880/HandleMovement :17120/Damage :17184/timeLeft :17307）——
     const subSteps = (projectileData(this.projId)?.extraUpdates ?? 100) + 1;
     for (let s = 0; s < subSteps && !this.dead; s++) {
-      // ①AI_048 派发 :28608-28639：InWorld 越界（5 格余量）Kill（:28610-28614）
+      // ①AI_048 派发 :28608-28639：InWorld 越界 Kill = WorldGen.InWorld(center,5)
+      //   （:28610-28614;WorldGen.cs:9642-9649 = tile∈[5,max−5)）。★BJ708-G28 勘正:
+      //   旧 ±(−5/+5) 四界双侧外扩 10 格（BJ345 自带偏差,世界缘 5 格内行为差,
+      //   低危）——对齐原版四界（Arrow 433 支 :8257-8260 BJ708-A 同式）。
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-      if (tx < -5 || ty < -5 || tx >= st.w + 5 || ty >= st.h + 5) {
+      if (tx < 5 || ty < 5 || tx >= st.w - 5 || ty >= st.h - 5) {
         this.killBeam(game);
         break;
       }

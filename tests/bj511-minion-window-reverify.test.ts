@@ -24,7 +24,7 @@
 //   （私表记账直读）;
 //   §H BJ436 既有面不回归：-2 缺省族（373）命中照开 10t 窗（勿反向修掉）;
 //   §I 结构钉：CONTACT_CD_TABLE 登记 759: 15（金标串,防漂移）。
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,6 +103,7 @@ const boomerangShaped = (z: Enemy, hooks: GameHooks, dmg = 15): number => {
 
 describe('BJ511 §F 用户组合复现（雀杖 759 攻击窗内鞭/回旋镖伤害可达=原版钉）', () => {
   it('F1 雀杖命中=清窗档 iframes=0（旧码 -2 误档写 10 必红）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const { hooks } = makeGame();
     const z = zombie(hooks, 5101);
     const finch = new MinionProj(z.cx - 5, z.cy - 5, 759, 7, 4, false, 0, false, () => null);
@@ -154,6 +155,7 @@ describe('BJ511 §G 档位判别（local 族 per-proj 私表 + cd=15 钉值）',
   });
 
   it('G3 刃杖 864（Smolstar,普查第二发同病）：命中清窗 iframes=0 + cd=10 钉值 + 鞭形照伤', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     // 原版锚：1457 :8286-8299（=1458 同位）usesLocalNPCImmunity + localNPCHitCooldown=10
     //   + minion;写梯显式 864 支 :14131-14140 immune[owner]=0 清窗。repo 路由=通用召唤
     //   spawnMinion → 通用飞行尾 contact 无 cdIn——表缺曾落 -2 误档（同 759 病形）。

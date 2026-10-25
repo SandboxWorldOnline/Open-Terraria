@@ -167,6 +167,10 @@ export const VANILLA_MISC = [
   //      定谳=资产窗假体（详见 preloadMiscAndNpcs 回扫注）,本批部件侧收口。
   'vanilla/Arm_Bone.png', 'vanilla/Arm_Bone_3.png',
   'vanilla/PumpkingCloak.png', 'vanilla/PumpkingArm.png',
+  //    · 327/325 表情贴图 PumpkingFace/TreeFace（★BJ707-G29,G26 债②清偿:BJ705-G26
+  //      件2 后绘 extras 表情叠画的懒载面——npcWhiteLiftQueue 消费侧 ensureVImage
+  //      10s TTL 自愈通道承载,首见迟数拍;boss 表情装饰面入暖存免首帧闪缺）
+  'vanilla/PumpkingFace.png', 'vanilla/TreeFace.png',
   // ④ 敌怪/NPC 绘制路径部件散件全集(★BJ705-C 2026-10-22 家族普查,表头注判别锁)
   ...VANILLA_ENEMY_PARTS,
 ];

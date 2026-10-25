@@ -5,13 +5,16 @@
 import { Entity } from './Entity';
 import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 // L5 长尾批：弧线引矢家族/银箭/微光箭编排收编（fx/orchestraFx 池）
+// ★BJ708-A：ufoLaserTrailFx = 433 UFO 激光 Kill 铺束本地直生（Spawn_UFOLaser 1:1）
 import { harpyCharmFamilyFx, silverBulletSparkleFx, shimmerArrowFx,
-  deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx } from '../fx/orchestraFx';
+  deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx,
+  ufoLaserTrailFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, rollGolemSentryCrit } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2）：主环 DamageVar 首掷（:12970）
 import { spawnNpcHitDust } from './NpcHitDust';   // ★BJ704-G10（R2-F5）：614 stuck 每 30t HitEffect(0,1.0) 血尘脉冲（type-only Enemy 依赖,无运行时环）
 import type { Enemy } from './Enemy';
 import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';   // ★BJ467⑦ flag3 usesIDStatic 排除面（SetDefaults 三旗提取表）
@@ -622,6 +625,12 @@ export interface ArrowOpts {
   /** 法力斗篷星(723,Projectile.cs:13914 ai2=1):落地掉 4143 法力斗篷之星 */
   manaStar?: boolean;
   hostile?: boolean;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影）——NPC 类型/变体
+   *  id 域（bannerNpcKeyOf 产物），敌弹面由发射侧传入（bossAI 直生/柱族子弹），
+   *  构造期冻结（FindBannerToAssociateTo Projectile.cs:11106-11119）；消费 =
+   *  hitPlayer 旗门。玩家弹/世界机关弹不传 = 无旗面（原版 bannerIdToRespondTo=0
+   *  同相）。 */
+  bannerNpcId?: number | null;
   /** aiStyle 14 弹跳弹（希腊火/装饰球等月事件弹幕，Projectile.cs 碰撞反弹
    *  cs:18314-18327 档）：撞实心块法向反弹 ×0.5 衰减而非消亡。 */
   bounce?: boolean;
@@ -1352,6 +1361,12 @@ export const PROJ_ALPHA0: Record<number, number> = {
   // 535 美杜莎之首（SetDefaults :6096-6108 无 alpha 行但本体常驻玩家头部,
   // GetAlpha 缺省路径不消费——本仓转换成专用类前的一帧兜底）
   294: 255, 295: 255, 296: 255, 535: 255,
+  // ★BJ708-A（2026-10-23 用户实报「外星法杖召唤物无攻击特效」）：433 UFO 激光
+  //  （SetDefaults :5039-5048 无 alpha 行——aiStyle48 AI 支 :28626-28629
+  //  `alpha = 255` 每子步直写,同 294 档）——本体恒隐,可视面=Kill 铺束
+  //  d160 行进尘（ufoLaserTrailFx,killNow 433 块）。缺键 = α≡0 兜底全亮
+  //  8×8 弹体穿帮（原版 404px/t 单拍光束本体本就不可见）
+  433: 255,
   // ★BJ164 登记债②（2026-09-18）：101 魔眼/斯帕兹喷火（SetDefaults :1887-1895
   //  alpha=255 :1893,1458 同值;GetAlpha :80595-81530 无 101 支 → 缺省路径
   //  num14=(255−α)/255=0 → 弹体贴图【恒隐】,视觉=d75 火流拖尾——aiStyle23 AI
@@ -1887,6 +1902,10 @@ export class Arrow extends Entity {
   pierceInit: number;
   /** 敌对弹（原版 Projectile.hostile）：命中玩家结算（Damage_EVP 语义） */
   hostile: boolean;
+  /** ★BJ710-C：发射者旗追踪键（原版 bannerIdToRespondTo 投影，ArrowOpts.bannerNpcId
+   *  透传）——NPC 类型/变体 id 域，构造期冻结；消费 = hitPlayer 旗门。null = 无
+   *  发射者面（玩家弹/世界机关/未接线族）。 */
+  bannerNpcId: number | null = null;
   /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
   whipTagShot = false;
   /** ★Z-F1（2026-08-31 蓝队三批）运行时类别旗覆写槽（原版 spawn 位
@@ -2681,8 +2700,10 @@ export class Arrow extends Entity {
   /** 316 蝙蝠杖出生基准速（ctor 快照——兄弟弹散布叠加基准,原版 num4/num5） */
   private batBaseVx = 0;
   private batBaseVy = 0;
-  /** 294 暗影束：localAI[0] 子步龄 / localAI[1]/[2] 束段锚点（:28609-28613 +
-  *  HandleMovement :18976-19013 编排束消费） */
+  /** aiStyle48 发束族共用镜像：localAI[0] 子步龄（sbL0）/ localAI[1]/[2] 束段锚点
+  *  （sbAx/sbAy）——294 暗影束（delay 9,:28609-28613 + HandleMovement :18976-19013
+  *  编排束消费）与 433 UFO 激光（delay 0,:28616-28618,killNow 铺束消费 BJ708-A）
+  *  同字段族（vanilla 同一 localAI 槽,单弹单型无复用） */
   private sbL0 = 0;
   private sbAx = 0;
   private sbAy = 0;
@@ -3169,6 +3190,7 @@ export class Arrow extends Entity {
     }
     this.pierceInit = this.pierce;
     this.hostile = opts?.hostile ?? false;
+    this.bannerNpcId = opts?.bannerNpcId ?? null;                 // ★BJ710-C 发射者旗透传
     this.bounce = opts?.bounce ?? false;
     this.thornBounce = opts?.thornBounce ?? false;
     this.skullBoneT = opts?.skullBone ? 1 : 0;
@@ -5360,6 +5382,23 @@ export class Arrow extends Entity {
       this.shadowbeamSegment(game);
       game.broadcastParticleOrchestra?.(Arrow.SHADOWBEAM_ORCHESTRA_IDX, this.cx, this.cy,
         this.sbAx, this.sbAy, Math.round(Math.hypot(this.vx, this.vy) * 1000));
+    }
+    // ---- ★BJ708-A 433 UFO 激光消亡铺束（Kill :71825-71870 aiStyle48 组 433 档）----
+    //  门 = localAI[0] >= delay（delay=0 :54934-54948 缺省档恒过）∧ 锚点双正
+    //  （:71862 num4>0 && num5>0）→ UFOLaser 编排（:71849-71851 case 433）：
+    //  PositionInWorld=死亡心、MovementVector=锚、UniqueInfoPiece=|v|×1000
+    //  ——Spawn_UFOLaser（ParticleOrchestrator.cs:1956-1963）= d160 双层行进尘
+    //  （LimeGreen(50,205,50)/CornflowerBlue(100,149,237) 逐尘掷,步距 max(4,|v|),
+    //  回拖 0/0.25×|v|）。发射方 = Xeno 法杖 2749→UFO 随从 423 AI_062 射击支
+    //  （MinionProj ai62Step MINION_SHOOT[423]）。本地直生 ufoLaserTrailFx
+    //  + broadcast 上行（294/BeamBoltProj 双通道形;Game :38083 分发面 BJ345 已备）。
+    //  433 吃鞭 tag（ProjectileID.cs:291 MinionShot 集含 433）——维持 Arrow 载体
+    //  不迁 BeamBoltProj（该类无 whipTagShot 面,迁=鞭加成回归）。
+    if (this.projId === 433 && this.sbAx > 0 && this.sbAy > 0) {
+      const info708 = Math.round(Math.hypot(this.vx, this.vy) * 1000);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.UFOLaser, this.cx, this.cy,
+        this.sbAx, this.sbAy, info708);
+      ufoLaserTrailFx(game, this.sbAx, this.sbAy, this.cx, this.cy, info708);
     }
     // ★91/92 圣箭星雨（:72250-72287）/ 41 狱炎箭 64×64 爆炸（:73256-73293）/
     // 89 水晶碎裂（:72289+）已由尾部 onProjectileDeath 分发到 Game 侧实现
@@ -8216,6 +8255,24 @@ export class Arrow extends Entity {
       //  面全在 d173 束尘——AI_047 式淡入淡出段不属于本型)。290 敌版同 EU=100、
       //  timeLeft SetDefaults 100 发射点 Modifier 直写 300(290 案定谳),本 294 无
       //  覆写位,json 即终值。
+    } else if (this.projId === 433) {
+      // ---- ★BJ708-A UFO 激光（aiStyle48 AI 支 :28609-28644 433 档）----
+      // InWorld 越界 5 格 Kill（:28611-28615——WorldGen.InWorld(center,5) =
+      // tile∈[5, max-5);Kill 即铺束）;delay=0（:54934-54948 表 433 走缺省 0）
+      // → 首子步锚定 localAI[1]/[2]=心（:28616-28618——出生心=UFO 心,发射位
+      // MinionProj ai62Step 已按 NewProjectile(Center) 落盒）;alpha=255 本体
+      // 恒隐由 PROJ_ALPHA0[433] 承载（AI 侧不重写——294 同款省略）;铺束面在
+      // killNow 433 块（Kill :71825-71870）。EU=100/timeLeft=100（SetDefaults
+      // :5039-5048,json 同值）→ 单拍 101 子步 ×4px ≈404px 伪光束,寿命尽/撞块/
+      // 命中/越界四死路全经 killNow 铺束。
+      {
+        const tx433 = Math.floor(this.cx / TILE), ty433 = Math.floor(this.cy / TILE);
+        if (tx433 < 5 || ty433 < 5 || tx433 >= world.store.w - 5 || ty433 >= world.store.h - 5) {
+          this.killNow(game); return;                     // :28611-28615 InWorld(±5) Kill
+        }
+      }
+      this.sbL0++;
+      if (this.sbL0 - 1 === 0) { this.sbAx = this.cx; this.sbAy = this.cy; }   // localAI==0==delay 首子步锚定
     } else if (this.projId === 295) {
       // ---- ★R28 §2 地狱火叉弹体（aiStyle50 295 支 :28760-28769）----
       // 本体隐形(alpha255);视觉 = 每 update 8×d174 尘焰包裹(noGravity,alpha100,
@@ -11235,6 +11292,14 @@ export class Arrow extends Entity {
           //   恢复;门闭时零 RNG 与原版整段跳过同相）
           const golemCritTag = rollGolemSentryCrit(game, this.projId, false);
           crit = res.crit || rollCritTag || timerCritTag || golemCritTag;
+          // ★BJ716-A（R18-F2，2026-10-25）：DamageVar 首掷（Projectile.cs:12970
+          //  `Main.DamageVar(num15, Main.player[owner].luck)`——31 档离散 ±15%+ToEven
+          //  +luck 重掷取极值,单源 stats/DamageVar）。原版序=tag ModifyHit(:12947)→
+          //  golem 掷(:12962-65)→DV(:12970)→banner(:13388)→StrikeNPC 内 crit 翻倍;
+          //  DV 置 crit 判定后/翻倍前=RNG 流同序（roll→timer→tag→golem→DV）。
+          //  tag 支 DV 掷 res.dmg（tag 乘后基数）;res.crit 的 ×2 已嵌 res.dmg →
+          //  tag crit 拍 DV 掷已翻倍基数（原版掷未翻倍）=边界舍入微差,登记债①
+          dmg = damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
           // ★BJ496③ 翻倍归位：tag crit ×2 已嵌 res.dmg——roll/TimerCrit/golem 源强制
           //  时补一次 ×2（原版 crit 单布尔单翻倍,MinionProj contact :4983 同式;旧形
           //  golem 单独掷中=染 crit 色【零翻倍】缺口随刀闭合）
@@ -11284,6 +11349,12 @@ export class Arrow extends Entity {
           //   全漏。★BJ496③:独立无条件求值（掷流恢复）
           const golemCritMain = rollGolemSentryCrit(game, this.projId, false);
           crit = rollCritMain || timerCritMain || golemCritMain;
+          // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970）——原版序=crit 掷(:12915-27)→
+          //  TimerCrit(:12928)→golem(:12962-65)→DV(:12970),此处位次同序;主环 985/
+          //  710/981 型号段均在 DV 前调完=原版 pre-DV 位。均值不变（对称分布）、方差
+          //  整缺曾=非暴击恒同数;与 dealContacts/WeaponProj/explodeAt 对称,281 双载体
+          //  （Arrow 雕像死亡爆弹掷 DV/Dart 载体不掷）一致性归位
+          dmg = damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
           if (crit) dmg *= 2;
         }
         if (this.onFireHit) {
@@ -11418,7 +11489,11 @@ export class Arrow extends Entity {
         const vanillaGated = (this.pierceInit !== 1
           && ((e as { iframes?: number }).iframes ?? 0) > 0)
           || jellyDontTake;   // 充能水母豁免残留的 dontTakeDamage 门拒（:12600/:12686 同面）
-        e.hurt(applyBannerDamageDealt(game, e, dmg)
+        // ★BJ716-A（R18-F1）：expert EoW 虫段 /5（:13392-13398）——banner(:13388-90)
+        //  后原位;本环可达表员=28 邪箭/37 弄臣箭（穿透箭克 EoW 机制）/181·566 蜂族/
+        //  183 蜂榴弹等;锥界 crit 前位差=±1 截断噪（登记债②,主修 5× 超伤）
+        e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e, dmg), this.projId,
+          (e as { vanillaId?: number | null }).vanillaId, game.world)
           + (snapBonusArrow ? Math.trunc(snapBonusArrow * (crit ? 2 : 1)) : 0),
           Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         // ★B6D 刀②写侧（2026-09-01）：IDStatic 族结算成功即清本跳 iframes（=原版

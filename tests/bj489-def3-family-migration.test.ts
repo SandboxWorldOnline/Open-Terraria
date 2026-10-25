@@ -130,7 +130,7 @@ describe('BJ489-§1：def-3 家族全清单结构锁（写位零残留+读者掷
   it('1d 各载体读者掷率口径=rollVanillaHitCrit（逐文件计数锚）', () => {
     const counts: Array<[string, number]> = [
       ['entities/WeaponProj.ts', 5],        // hitEnemies 注入支+手雷接触环×2+破晓 636+悠悠球伴生 1125/1130/1134/1135（★BJ494）
-      ['entities/Arrow.ts', 10],       // ★BJ496①③：通用环+661 爆面+617/659 爆面+whipTagShot 支（旧 2）;★BJ497①：五遗留面收编（:1848 1023/:5372 631/:7337+:9309 514 双面/:10424 190,5→10）
+      ['entities/Arrow.ts', 11],       // ★BJ496①③：通用环+661 爆面+617/659 爆面+whipTagShot 支（旧 2）;★BJ497①：五遗留面收编（:1848 1023/:5372 631/:7337+:9309 514 双面/:10424 190,5→10）;★BJ704-G24：烟花 167-170 爆面 AoE 掷率（killNow :5202 critFw,10→11——该批漏改本计数锚,BJ708-G28 顺手清记账）
       ['entities/MagnetSphereProj.ts', 1],  // 255/260 BeamBoltProj
       ['entities/LunarNebula.ts', 3],       // 634/635 飞行盒+Kill 爆+645
       ['entities/RainbowProj.ts', 1],       // 251 段

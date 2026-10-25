@@ -167,6 +167,7 @@ describe('BJ445-§A：contact() 敌怪环 916 双落+位次（Y2 探针同构,da
     // Y2 探针同构：darkharvest tag（4680,tagDamage 15,mul 1）+ 基伤 11 →
     // 主命中 = 11+15 = 26（Y2 报告「主伤 26」同钉）;旧同步直调形=hurtFx 直调源敌
     // 先置 iframes → 主 hurt 被窗拒整丢、只落直伤（Y2 实测「只落直伤」）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（R18-F2 主环首掷 ×1.0）
     const src = mkEnemy(0, 600, 600, 'SRC');
     const e1 = mkEnemy(1, 700, 600, 'E1');
     const { hooks, player } = makeHooks([src, e1]);
@@ -205,7 +206,7 @@ describe('BJ445-§B：crit 色补齐（敌怪环色面/城镇臂防后 ×2）', 
     const { hooks, player } = makeHooks([src]);
     player.tagEffectStack.tryApplyTagToNPC(4914, src.id, 0, 0);   // tagDamage 20/critChance 10
     contactDirect(ravenAt(player, 600, 600), hooks);
-    expect(src.calls[0].d).toBe(100);                  // (30+20)×2——预倍数值面不变（Enemy 环习语）
+    expect(src.calls[0].d).toBe(85);                   // (30+20)×2=100 → DV(100,−15 档)=85（BJ716-A R18-F2）
     expect(src.calls[0].crit).toBe(true);              // ★主判别:色位（旧恒 false 必红）
     expect(seq).toEqual(['SRC']);                      // 万花筒无链电（OnTaggedHit=粒子面）
   });
@@ -218,7 +219,7 @@ describe('BJ445-§B：crit 色补齐（敌怪环色面/城镇臂防后 ×2）', 
     // 6176 谓词 = sentry‖SentryShot[type]（:12962-12965）——哨兵位载体直驱
     const sentryRaven = new MinionProj(586, 586, 317, 30, 1.5, true, 0, false, () => player);
     contactDirect(sentryRaven, hooks);
-    expect(src.calls[0].d).toBe(60);                   // 30×2 预倍（数值面不变）
+    expect(src.calls[0].d).toBe(52);                   // 30×2=60 → DV(30,−15 档)=26×2=52（BJ716-A R18-F2）
     expect(src.calls[0].crit).toBe(true);              // ★主判别:色位（旧恒 false 必红）
   });
 

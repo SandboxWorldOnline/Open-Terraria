@@ -27,8 +27,9 @@
 //   C. 实战形态——473 bigMimicAI 唤醒链 40t 零尘（AI_087 :37845 零 Dust.NewDust）+
 //      死亡链恰 20×31 无杂尘;473-476 尘面逐型全等。
 //   D. 变异自证——M1 提取器 tmp 变异体摘 BATCH6_TYPES 五型→干跑对拍漂移 exit 1+漂移
-//      指名 341（名单线承重物证;真工具/现库零接触 sha256 对拍）;M2 现库 json 变异
-//      341 尘 196→31→判别子测试红（npcdust-mutation-mutex 共锁）→逐字节还原+sha256。
+//      指名 341（名单线承重物证;真工具/现库零接触 sha256 对拍）;M2 沙箱库 json 变异
+//      341 尘 196→31→判别子测试红（★BJ708-G33:SW_BJ484_MUT_JSON 重定向,活库零写窗
+//      ——根治 era-guard×bj484 同池伪红;G28 判谳:活库写窗消失=race 类整体消失）。
 import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });   // ★残留普查波:变异自证三层守卫跨套件互斥下锁等待/内层 spawn 可超默认 5s——按仓内习语放宽（fx-codegen-parity 同款）
@@ -38,7 +39,6 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
-import { withMutation } from './mutation-guard';   // ★残留普查波:变异自证统一守卫（三层:文件互斥/panic 还原/残留自检）
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -48,6 +48,21 @@ import type { GameHooks } from '../src/entities/types';
 import type { Enemy as EnemyT } from '../src/entities/Enemy';
 import type { Player } from '../src/entities/Player';
 import { spawnNpcHitDust, spawnNpcDeathDust } from '../src/entities/NpcHitDust';
+
+// ★BJ708-G33:M2 变异面迁 tmp 沙箱库——活库零写窗。G28 判谳:「活库逐字节对拍」型
+//   （extract-npcdust-era-guard）与「活库变异自证」型（本文件 M2 旧形态 withMutation
+//   直写 vanilla-npcdust.json）同池并行必伪红（battery 稳定 3 红/单跑 8/8 绿/剔除
+//   bj484 即全绿;失败 diff 现场捕获「341 dust:31」变异值=读窗落变异窗的直接物证）。
+//   新形态:变异副本落 mkdtemp 沙箱,子进程经 SW_BJ484_MUT_JSON 把本表 import 重定向
+//   到沙箱副本（本 mock）;缺省（父进程/全量 battery）importOriginal 直通=零行为变化。
+//   证据链不变:A 金标 toEqual 精确判别 341=196 面,吃到 31 即红。
+vi.mock('../src/data/vanilla-npcdust.json', async (importOriginal) => {
+  const p = process.env.SW_BJ484_MUT_JSON;
+  if (!p) return await importOriginal();
+  const { readFileSync } = await import('node:fs');
+  const parsed = JSON.parse(readFileSync(p, 'utf8')) as Record<string, unknown>;
+  return { ...parsed, default: parsed };
+});
 
 const TABLE = npcDustJson as unknown as Record<string, {
   hit?: Array<Record<string, unknown>>; death?: Array<Record<string, unknown>>;
@@ -263,9 +278,11 @@ describe.skipIf(process.env.SW_BJ484_MUT)('BJ484 D. 变异自证', () => {   // 
   const EXTRACTOR = join(process.cwd(), 'tools', 'extract-npcdust.mjs');
   const LIVE_JSON = join(process.cwd(), 'src', 'data', 'vanilla-npcdust.json');
   const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
-  const spawnVitest = (filter: string) => spawnSync('npx', ['vitest', 'run', 'tests/bj484-mimic-family-dust.test.ts', '--no-file-parallelism', '-t', filter], {
+  const spawnVitest = (filter: string, extraEnv: Record<string, string> = {}) => spawnSync('npx', ['vitest', 'run', 'tests/bj484-mimic-family-dust.test.ts', '--no-file-parallelism', '-t', filter], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 600_000,
-    env: { ...process.env, SW_BJ484_MUT: '1' },   // ★子进程豁免残留检测闸（对变异文件跑 A/B 面）
+    // ★子进程豁免残留检测闸（对变异面跑 A/B 面）;BJ708-G33 起另可带 SW_BJ484_MUT_JSON
+    //   沙箱表重定向（文件头 vi.mock）——M2 活库零写窗形态。
+    env: { ...process.env, SW_BJ484_MUT: '1', ...extraEnv },
   });
 
   beforeAll(() => { gateConsumerMutation('SW_BJ484_MUT', CONSUMER); });
@@ -296,40 +313,44 @@ describe.skipIf(process.env.SW_BJ484_MUT)('BJ484 D. 变异自证', () => {   // 
     }
   });
 
-  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫;
-  //  JSON round-trip 变异走自定义算子（mutate/verifyPristine/isMutated 钩）,
-  //  域锁保留（闸面信号源）,文件锁在守卫内层,序恒定。
-  it('M2 现库 json 变异 341 常量尘→四系值 → 判别子测试红（共锁窗内）→逐字节还原+sha256 对拍', () => {
+  // ★残留普查波 2026-10-12:BJ606 习语统一改造→tests/mutation-guard.ts 三层守卫。
+  //  ★BJ708-G33(2026-10-24):M2 变异面迁 tmp 沙箱库——旧形态 withMutation 直写活库
+  //  vanilla-npcdust.json 存在写窗,vitest 并行 worker 把 era-guard 的活库逐字节读调
+  //  进窗=伪红（G28 判谳,本批复跑实锤 3 红）。新形态:变异副本写 mkdtemp 沙箱,子进程
+  //  经 SW_BJ484_MUT_JSON 重定向（文件头 vi.mock）;活库全程零写=写窗消失,race 类整体
+  //  根除（非「两文件入 sequential 池」的对症缓解——那是 vitest 2 全池 maxWorkers=1
+  //  的全量串行化,battery 显著变慢且只封观测到的文件对,不封类）。
+  //  域锁保留:与 bj296/bj304 D 面共用 npcdust-mutation-mutex,维持三 D 面串行语义。
+  it('M2 沙箱库变异 341 常量尘→四系值 → 判别子测试红（活库零写窗,全程 sha256 对拍）', () => {
     lockConsumerMutation();
     try {
-      withMutation(LIVE_JSON, '', '', () => {
+      const beforeJson = sha256(LIVE_JSON);
+      // ★纯净闸（只读,触发闸收编）:活库 round-trip 等价 + 341 命中 196——残留/毒盘
+      //   →loud 红（不写不还原,人工核对盘上现态）;活库非纯净时禁入变异臂（防子进程
+      //   对已污染表跑 A/B 面=假证据）。
+      const pristine = readFileSync(LIVE_JSON, 'utf8');
+      const parsed = JSON.parse(pristine) as typeof TABLE;
+      if (JSON.stringify(parsed, null, 1) + '\n' !== pristine) {
+        throw new Error('活库 round-trip 不等价（并行覆写?先读盘核对再跑）');
+      }
+      if (parsed['341'].hit?.[0]?.dust !== 196) {
+        throw new Error('活库 341 命中非 196（残留态）——人工核对盘上现态（禁 git checkout）');
+      }
+      // ★变异算子:常量尘 196→31（四系大宝箱值）;副本落沙箱,round-trip 序列化保持格式
+      parsed['341'].hit![0]!.dust = 31;
+      const dir = mkdtempSync(join(realpathSync(tmpdir()), 'bj484-m2-'));
+      try {
+        const mutatedJson = join(dir, 'vanilla-npcdust.json');
+        writeFileSync(mutatedJson, JSON.stringify(parsed, null, 1) + '\n');
         // ★过滤器=「礼物怪尘档钉值」——只命中 A 面 341 金标,不命中 D 面（测试名不含该串,
         //   防 M 系测试自匹配递归;M1/M2 名含裸「341」,禁用裸数字作过滤器）
-        const r = spawnVitest('礼物怪尘档钉值');
-        expect(r.status).not.toBe(0);              // ★变异证红:A 金标 341 判别捕获
+        const r = spawnVitest('礼物怪尘档钉值', { SW_BJ484_MUT_JSON: mutatedJson });
+        expect(r.status).not.toBe(0);              // ★变异证红:A 金标 341 判别捕获（经沙箱重定向）
         expect(r.stdout).toContain('礼物怪尘档钉值');
-      }, {
-        label: 'BJ484 M2',
-        // ★纯净闸=round-trip 逐字节等价 + 341 命中 196（残留/上轮窗未还原→loud 红,
-        //   M2 变异幂等,无此闸=子进程自递归 600s 爆匣——BJ479 同款触发闸收编）
-        verifyPristine: (p) => {
-          const parsed = JSON.parse(p) as typeof TABLE;
-          if (JSON.stringify(parsed, null, 1) + '\n' !== p) throw new Error('round-trip 不等价');
-          if (parsed['341'].hit?.[0]?.dust !== 196) throw new Error('341 命中非 196（残留态）');
-        },
-        // ★盘面变异态判别:341 命中=31（精确到目标键,非子串误报面）
-        isMutated: (cur) => {
-          try { return (JSON.parse(cur) as typeof TABLE)['341'].hit?.[0]?.dust === 31; }
-          catch { return false; }
-        },
-        // ★变异算子:常量尘 196→31（四系大宝箱值）,round-trip 序列化保持逐字节格式
-        mutate: (p) => {
-          const parsed = JSON.parse(p) as typeof TABLE;
-          const hit341 = parsed['341'].hit![0]!;
-          hit341.dust = 31;
-          return JSON.stringify(parsed, null, 1) + '\n';
-        },
-      });
+        expect(sha256(LIVE_JSON)).toBe(beforeJson);   // 活库零触碰哨兵（全程无写窗,恒等必绿）
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     } finally {
       unlockConsumerMutation();
     }

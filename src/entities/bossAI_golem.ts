@@ -24,6 +24,7 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { vanillaNpc } from '../data/vanillaNpcs';
+import { scaleStats, type ScalingStats } from '../stats/ScaleStats';   // BJ712-A:自由头兜底 249 档缩放终值
 import { spawnPart, spawnVanillaEnemy, shoot, accelTo, losClear } from './bossAI';
 
 // ---- Main.rand 掷面工具（本文件石巨人尘块专用）----
@@ -245,12 +246,34 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
     e.dead = true;          // 原位实体让位(246 死亡零演出,直接 active 移除语义)
     return;
   }
-  // ---- 兜底在位转换(仅 mock 无 ctor 环境;语义面同上,fresh 原生缩放面缺失备案) ----
+  // ---- 兜底在位转换(仅 mock 无 ctor 环境;语义面同上) ----
   x.free = true;
   e.ai3 = 1;          // 自由态标记(探针/部件锚定可观测)
   e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
-  e.hp = e.maxHp;     // 原版 249 满血登场(lifeMax 与 fresh 16000 档差 = 本兜底唯一漂移)
+  // ★BJ712-A(转报件5):249 档属性一次性落位 = NewNPC 249 的 ScaleStats 终值
+  //  (难度乘区+245-249 族 tweak 0.8)——旧 golemHeadAI 每拍写未缩放基值 80/32
+  //  已退场,兜底自带缩放面;血量同档重置,旧「lifeMax 与 fresh 16000 档差 =
+  //  本兜底唯一漂移」备案同步闭合
+  const fb = freeHead249Stats();
+  e.def.damage = fb.damage;
+  e.def.defense = fb.defense;
+  e.maxHp = fb.lifeMax; e.hp = fb.lifeMax;   // 原版 249 满血登场
   e.spin = 0;         // 新 249 rotation=0——远锚态变身残留 vx*0.1 旋转=永久歪头(终审修)
+}
+
+/** 249 自由头 ScaleStats 终值(NewNPC 249 → SetDefaults+ScaleStats :17791 等价;
+ *  BJ712-A 兜底在位转换用,fresh 主路径出生自带同值)。boss 位传 false 同果
+ * (ForExpertHardmode 豁免门 lifeMax≥1000 先命中)。 */
+function freeHead249Stats(): { damage: number; defense: number; lifeMax: number } {
+  const v = vanillaNpc(249);
+  if (!v) return { damage: 80, defense: 32, lifeMax: 16000 };
+  const s: ScalingStats = {
+    type: 249, lifeMax: v.lifeMax, damage: v.damage, value: 0,
+    defense: v.defense, knockBackResist: v.knockBackResist,
+    boss: false, friendly: false, townNPC: false, scale: v.scale, difficulty: 0,
+  };
+  scaleStats(s);
+  return { damage: s.damage, defense: s.defense, lifeMax: s.lifeMax };
 }
 
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -475,12 +498,12 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.hp = e.maxHp;   // 防御性复原（dontTakeDamage 已挡伤害路径）
   }
 
-  // ---- 属性:自由头按 249 SetDefaults(NPC.cs:12139-12151:damage 80/defense 32/
-  //      恒无敌) ----
+  // ---- 属性:自由头 = 249 出生即 ScaleStats 终值(原版 AI_048【零】damage/defense
+  //      写位——NewNPC 249 走完整缩放:难度乘区×245-249 族 tweak 0.8,经典 80/
+  //      专家 128/大师 192;★BJ712-A 转报件5:曾每拍重写未缩放基值 80/32 =
+  //      抹平难度缩放 80/80/80,覆写退场;在位转换兜底的 249 档属性切换由
+  //      golemHeadGoFree 落位时一次性写入) ----
   if (x.free) {
-    const free = vanillaNpc(249);
-    e.def.damage = free?.damage ?? 80;
-    e.def.defense = free?.defense ?? 32;
     e.dontTakeDamage = true;   // :12151 自由头无敌
   } else {
     e.dontTakeDamage = false;

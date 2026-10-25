@@ -190,6 +190,7 @@ describe('§A1 g21-fw-box-cut：0 伤烟花盒爆面照割（调用位门拆除�
 
 describe('§A2 g21-fw-idstatic-1t：烟花 167-170 全场共享 1t 窗（逐型分桶）', () => {
   it('行为：同型同拍第二发爆盒拒;异型（168）照结;+2t 窗到期重开', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（烟花接触/爆面首掷 ×1.0）
     const hurts: Array<{ id: number; dmg: number }> = [];
     const foe = mkFoe(5, 40 * TILE - 12, 40 * TILE + 40, false, hurts);   // 爆心 (647,647) 下方 40..64px:盒内/弹外
     const a = fwWorld([foe]);
@@ -236,6 +237,7 @@ describe('§A3 g21-fw-anchor：混代锚整族勘正（R8-N3 族）', () => {
 
 describe('§A4 烟花域扫面：飞行火箭接触面（直击+接触杀爆花,旧=穿敌不伤不爆）', () => {
   it('行为：接触敌吃 150 直击（iframes 语义）+爆花死+远敌爆盒结算+同敌不二结', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const hurts: Array<{ id: number; dmg: number }> = [];
     const near = mkFoe(7, 40 * TILE - 4, 40 * TILE - 20, true, hurts);    // 覆盖上移后弹盒（接触面）
     const far = mkFoe(8, 40 * TILE - 12, 40 * TILE + 40, false, hurts);   // 爆盒内/弹外

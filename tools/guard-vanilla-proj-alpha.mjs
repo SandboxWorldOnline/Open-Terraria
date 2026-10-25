@@ -26,7 +26,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GUARD_FILE = 'src/data/vanillaProjAlpha.ts';
-export const PIN_LINES = 515;
+export const PIN_LINES = 529;
 export const PIN_ENTRIES = 300;
 export const PIN_LAST_ID = 1110;
 /** 末项值前缀钉死（kind/rgba/off 三要素;行尾注释不参与比对） */

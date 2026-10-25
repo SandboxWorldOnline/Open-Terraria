@@ -7,7 +7,8 @@
 //   ⑧ solidBody 全盒 any（半砖骑线不再漏检）
 //   ⑤ 686 oldPos 全轨迹扫掠命中（P.cs:16156-16172,TrailCacheLength[686]=20）
 //   ⑨ 小妖精引信 startTrackedLoop 跟踪轨句柄面（点火/冲锋双轨 + 俯冲单轨）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+afterEach(() => { vi.restoreAllMocks(); });   // ★BJ712-C
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
@@ -308,6 +309,9 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
   });
 
   it('686 尾迹扫掠:当前盒已越过而尾迹盒命中 → 单盒单测必漏、扫掠必中且免疫帧去重', () => {
+  // ★BJ712-C：DamageVar 首掷入参包装（P.cs:14904）后链带 ±15% 掷——mock 0.5
+  // = tier 0 档（×1.0）,表值即掷中值;掷形面由 tests/bj712c-martian-dmg 三掷形承载
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const w = emptyWorld();
     const rec: Rec = { sounds: [], loops: [], dmgCalls: [], particles: 0, stops: 0 };
     const hooks = makeGame(w, [], [], rec);

@@ -154,7 +154,7 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     const { hooks, player } = makeHooks([e]);
     vi.spyOn(player, 'critChance').mockReturnValue(0);
     vi.spyOn(player.inv, 'heldItem').mockReturnValue({ id: id671, prefix: 61 } as never);
-    vi.spyOn(Math, 'random').mockReturnValue(0.22);      // 0.04/0.20 档假/0.25 档真
+    let d1b = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d1b++ === 0 ? 0.22 : 0.5));   // 首掷=crit 阈值(0.04/0.20 档假/0.25 档真);后续=★BJ716-A DV 中性档(×1.0)
     step([shotAt(189, 0.04)], 20, hooks);
     expect(e.calls[0]!.crit).toBe(true);                 // 命中拍折入 item.crit+crt
     expect(e.calls[0]!.d).toBe(20);
@@ -298,7 +298,7 @@ describe('BJ496-§2：melee 混合兜底收编（307 eater 动态掷+shotArrow d
     const eB = mkEnemy(11, 600, 600);
     (hooks.enemies() as unknown as SpyEnemy[]).length = 0;
     (hooks.enemies() as unknown as SpyEnemy[]).push(eB);
-    vi.spyOn(Math, 'random').mockReturnValue(0.22);      // 0.25 档真
+    let d2a = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d2a++ === 0 ? 0.22 : 0.5));   // 首掷=crit 阈值(0.25 档真);后续=★BJ716-A DV 中性档(×1.0)
     const b307 = shotAt(307, 0.04);
     b307.friendly307 = true;
     step([b307], 20, hooks);
@@ -363,7 +363,7 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
   });
 
   it('3c-1 whipTagShot 支 TimerCrit 消费（旧整缺必红）+roll/TimerCrit 源翻倍归位', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);      // 无 tag→res.crit=false;crit 全赖 TimerCrit
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);       // 无 tag→res.crit=false;crit 全赖 TimerCrit;★BJ716-A:DV 中性档(×1.0)
     const { hooks, player } = makeHooks([]);
     timerOn(player);
     player.accTimerCritCharge = 1000;
@@ -379,7 +379,7 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
   });
 
   it('3c-2 whipTagShot golem 单独掷中→翻倍归位（旧形只染 crit 色零翻倍必红）+Next(10) 照抽', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.05);      // 0.05→Next(10)=0=golem 掷中
+    vi.spyOn(Math, 'random').mockReturnValue(0.05);      // 0.05→Next(10)=0=golem 掷中;DV 亦掷 −14 档(10×0.86=8.6→ToEven 9)
     const { hooks, player } = makeHooks([]);
     golemOn(player);                                     // 664=SentryShot+背包→golem 掷可达
     const e = mkEnemy(16, 600, 600);
@@ -389,13 +389,13 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
     step([a], 20, hooks);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.crit).toBe(true);                 // golem 强制（旧同相=回归锚）
-    expect(e.calls[0]!.d).toBe(20);                      // ★主判别:翻倍（旧 10 必红）
+    expect(e.calls[0]!.d).toBe(18);                      // ★主判别:翻倍（旧 10 必红）;DV(10,−14 档)=9×2（BJ716-A R18-F2）
   });
 
   it('3d MinionProj contact 锚（BJ453 分立形回归位）：tag crit 命中拍 TimerCrit 照消费', () => {
     // contact 面 timerCrit/monk/golem 皆 eager 预求值=BJ475③ 处方已落——本位=回归锚
     // （变异判别:并链改 `res.crit || timerCrit` 懒惰序 → tag crit 短路消费必红）。
-    vi.spyOn(Math, 'random').mockReturnValue(0.05);      // tag 4679 crit 10%:5<10 命中
+    let d3d = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d3d++ === 0 ? 0.05 : 0.5));   // 首掷=tag 4679 crit 10%:5<10 命中;后续=★BJ716-A DV 中性档(×1.0)
     const src = mkEnemy(17, 600, 600);
     const { hooks, player } = makeHooks([src]);
     timerOn(player);

@@ -15,6 +15,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 export interface SaveEntry { id: number; name: string; json: string | null }
 
 export interface MultiplayerSelectCallbacks {
+  /** 连接原版(1.4.5.x)专用服（vanilla interop P0,2026-10-25）。
+   *  target = host:port（原版服本体地址,浏览器经本地桥 vanillaBridge 转发接入） */
+  onJoinVanilla: (target: string) => void;
   /** 加入房间（完整 ws URL：ws://host:wsPort/<房间码>[?token=...]）。
    *  worldId=建房链进房时传入的本机世界槽位 id（★BJ704-G7 件1:playedWorlds 绑定;
    *  码入房/房间列表进房不传=undefined） */
@@ -49,6 +52,7 @@ export class MultiplayerSelect {
   root: HTMLElement;
   private roomList = el('div');
   private codeInput: HTMLInputElement;
+  private vanInput: HTMLInputElement;
   private createName: HTMLInputElement;
   private createPublic: HTMLInputElement;
   private createTiles: HTMLInputElement;
@@ -102,6 +106,35 @@ export class MultiplayerSelect {
     codeRow.appendChild(this.codeInput);
     codeRow.appendChild(codeBtn);
     this.root.appendChild(codeRow);
+
+    // ---- 连接原版服务器（vanilla interop,2026-10-25;P0 观察者阶段=进世界/走动/看服务器流,
+    //      战斗/交互面 P1-P3 在途）----
+    const vanHr = el('hr');
+    vanHr.style.cssText = 'border:none; border-top:1px solid rgba(90,120,220,0.3); margin:14px 0;';
+    this.root.appendChild(vanHr);
+    const sVanilla = el('div', undefined, T('VanillaSection'));
+    sVanilla.style.cssText = 'margin:0 0 6px; color:#c9d4ff;';
+    this.root.appendChild(sVanilla);
+    const vanRow = el('div');
+    vanRow.style.cssText = 'display:flex; gap:8px;';
+    this.vanInput = el('input') as HTMLInputElement;
+    this.vanInput.value = '127.0.0.1:7781';
+    this.vanInput.placeholder = T('VanillaAddrHint');
+    this.vanInput.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    const vanBtn = el('button', 'sw-btn', T('JoinVanilla')) as HTMLButtonElement;
+    vanBtn.style.cssText = 'width:auto; margin:0; padding:8px 14px; flex:none;';
+    vanBtn.onclick = () => {
+      const target = this.vanInput.value.trim();
+      if (!/^[\w.-]+:\d+$/.test(target)) { this.status(this.roomList, T('BadAddr'), '#ff6b6b'); return; }
+      this.cb.onNeedCharacter(() => this.cb.onJoinVanilla(target));
+    };
+    this.vanInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') vanBtn.click(); });
+    vanRow.appendChild(this.vanInput);
+    vanRow.appendChild(vanBtn);
+    this.root.appendChild(vanRow);
+    const vanNote = el('div', undefined, T('VanillaBridgeNote'));
+    vanNote.style.cssText = 'font-size:12px; color:#8b98bd; margin:4px 0 0;';
+    this.root.appendChild(vanNote);
 
     // ---- 分隔 ----
     const hr = el('hr');

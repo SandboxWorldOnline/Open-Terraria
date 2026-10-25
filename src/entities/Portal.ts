@@ -159,6 +159,11 @@ export class Portal extends Entity {
     if (by === -1 && p.vy > -0.1) p.vy = -0.1;  // 顶部门最小上抛（:177-180）
     p.x = tx;
     p.y = ty;
+    // ★BJ714-A（R16-P1 面2）:骑矿车穿越随迁——vanilla TryGoingThroughPortals
+    //  Player 支 player.Teleport(vector,4,num4)（PortalHelper.cs:187;msg96 网面
+    //  MessageBuffer.cs:3557 同 style4）,Teleport :37698-37780 零 Dismount——
+    //  不随迁=轨道旁门穿越下一拍被车「玩家坐骑位回写段」锁回。
+    game.migrateMinecartOnTeleport?.();
     this.cooldown = 10;
     other.cooldown = 10;
   }

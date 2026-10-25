@@ -31,6 +31,13 @@ export class InfernoHostileBlast extends Entity {
   vx = 0; vy = 0;                          // NewProjectile 速度 (0,0)（:75806）
   damage: number;
   hostile = true;                          // SetDefaults :3822（伤玩家）
+  /** ★BJ720-A（issue #19 B01，2026-10-25）：继承自父弹 291 的发射者旗（原版 291 Kill
+   *  → NewProjectile(GetProjectileSource_FromThis()=EntitySource_Parent(291 弹), P.cs
+   *  :75802-75807) → FindBannerToAssociateTo :11108-11113 `Entity is Projectile →
+   *  bannerIdToRespondTo = projectile.bannerIdToRespondTo`——派生弹继承父弹旗，链回
+   *  285/286 Diabolist（banner 105））。Dart.inferno291Kill/destroy 两生成口透传；
+   *  hitPlayer 消费（applyBannerDamageReceivedOnProj 单源）。 */
+  bannerNpcId: number | null = null;
   dead = false;
   /** ai[0] 年龄（:28787 每拍 +1；>540 → num361≤0 → Kill） */
   age = 0;

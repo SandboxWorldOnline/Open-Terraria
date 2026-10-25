@@ -132,6 +132,7 @@ describe('BJ493-§1：MinionProj contact 环 :12600 DTD 前置门——整跳零
   });
 
   it('1b 对照组：非 DTD 靶主伤+链电照常（门只拦 DTD,夹具自证）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const src = mkEnemy(3, 600, 600, 'SRC');
     const e1 = mkEnemy(4, 700, 600, 'E1');
     const { hooks, player } = makeHooks([src, e1]);
@@ -177,7 +178,7 @@ describe('BJ493-§2：Arrow 主环掷率=rollVanillaHitCrit 命中拍动态（�
     const { hooks, player } = makeHooks([e]);
     vi.spyOn(player, 'critChance').mockReturnValue(0);
     vi.spyOn(player.inv, 'heldItem').mockReturnValue({ id: id671, prefix: 61 } as never);
-    vi.spyOn(Math, 'random').mockReturnValue(0.22);      // 0.04/0.20 档假/0.25 档真
+    let d2b = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d2b++ === 0 ? 0.22 : 0.5));   // 首掷=crit 阈值(0.04/0.20 档假/0.25 档真);后续=★BJ716-A DV 中性档(×1.0)
     step([shotAt(0.04)], 20, hooks);
     expect(e.calls[0]!.crit).toBe(true);                 // 命中拍折入 item.crit+crt
     expect(e.calls[0]!.d).toBe(20);                      // 10×2（crit 乘区）
@@ -238,8 +239,10 @@ describe('BJ493-§3：ranged critBonus 族 13 位迁移（冻结写位零残留+
   it('3b 661 黑爆二段爆面=rollVanillaHitCrit 收编（旧 || 面会把 0.04 门误当平率）', () => {
     const s = SRC('entities/Arrow.ts').replace(/^\s*\/\/[^\n]*/gm, '');
     // ★BJ496①③ 计数随迁：通用环+661 爆面+617/659 爆面+whipTagShot 支 = 5 处（旧 2）;
-    // ★BJ497① 五遗留面收编（1023 barrel/631/514 双面/190）→ 10 处
-    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(10);
+    // ★BJ497① 五遗留面收编（1023 barrel/631/514 双面/190）→ 10 处;
+    // ★BJ704-G24 烟花 167-170 爆面 AoE 掷率（critFw）10→11——该计数锚曾漏改,
+    //   BJ716-A 顺手清记账（源注「BJ708-G28 顺手清」未落,现补）
+    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(11);
     expect(s).toContain('const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);');   // 爆面
   });
 
@@ -249,13 +252,13 @@ describe('BJ493-§3：ranged critBonus 族 13 位迁移（冻结写位零残留+
     // 注：烟尾尘掷属 AI 面,RNG 计数非零,判别位=crit 布尔）。
     const e = mkEnemy(9, 600, 600, 'SMK');
     const { hooks } = makeHooks([e]);
-    vi.spyOn(Math, 'random').mockReturnValue(0.02);      // 旧平率面 0.02<0.04 必暴
+    vi.spyOn(Math, 'random').mockReturnValue(0.02);      // 旧平率面 0.02<0.04 必暴;196 无类旗零掷→首掷即 DV
     const smk = new Arrow(520, 585, 8, 0, 10, 1, 196, { grav: 0, life: 60, pierce: 1 });
     smk.critChance = 0.04;                               // 迁移后 spawn 形
     step([smk], 20, hooks);
     expect(e.calls.length).toBe(1);                      // 夹具自证（伤害面照常）
     expect(e.calls[0]!.crit).toBe(false);                // ★主判别:零掷（旧平率面必红）
-    expect(e.calls[0]!.d).toBe(10);                      // 原值（×2 不达）
+    expect(e.calls[0]!.d).toBe(8);                       // DV(10,−15 档)=8.5→ToEven 8（BJ716-A;×2 不达保持）
   });
 });
 

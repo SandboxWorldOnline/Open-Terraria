@@ -16,8 +16,8 @@ import type { TileStore } from '../world/TileStore';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy, evpDirectDmg } from './projTargets';   // BJ710-C：直调站门序单源
+import { damageVar } from '../stats/ScaleStats';   // ★BJ712-C：DamageVar 首掷（P.cs:14904）
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 
@@ -276,7 +276,9 @@ export class FallingBlock extends Entity {
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;
       // Damage_EVP：GetSandfallProjData 档伤害（缺省 10=P31 hostile 弹），命中再过乘区×2
-      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ710-C：evpDirectDmg 门序单源——沙坠/巨石=世界机关面（非 NPC 发射,原版
+      //  bannerIdToRespondTo=0）,bannerNpcId 恒 null=旧行为逐位不变
+      game.damagePlayer(evpDirectDmg(game, damageVar(this.dmg, -p.luck), null), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: this.projId });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
     }
     // 敌人 + 小动物 + 城镇 NPC(friendly 方向;原版巨石碾压 NPC,hurt iframes 兜连击)
     hitTownNpcs(this, game, this.dmg, Math.sign(this.vx) * 2);

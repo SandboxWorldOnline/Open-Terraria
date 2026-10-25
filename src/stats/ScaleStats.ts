@@ -681,6 +681,43 @@ export function netIdSpawnScale(
   return { scale: s.scale, width: w, height: h, canDisplayBuffs: s.canDisplayBuffs !== false };
 }
 
+/** ★BJ720-A（issue #19 D12）：SetDefaultsFromNetId 尾段 flag=true 族重排终值
+ *  （knockbackResist 小写 b——对齐 Enemy.def 字段名,防消费侧拼写漂移） */
+export interface NetIdFlagTrueFinals {
+  lifeMax: number; damage: number; defense: number; value: number; knockbackResist: number;
+}
+
+/** ★BJ720-A（issue #19 D12，2026-10-25）：SetDefaultsFromNetId 尾段 flag=true 通道
+ *  （NPC.cs:8363-8372）——`netID=id; lifeMax=life; def*=* 快照` 后
+ *  `if (flag) { ScaleStats(...); life = lifeMax; }`。flag=true 族=case -1..-10
+ *  （史莱姆变体，三值全硬置）：case 体（:7688-7783）先 `knockBackResist *= 乘子`
+ *  （乘在基底 SetDefaults 尾 :17888 ScaleStats 已缩放的现值上）、硬置 value，再由
+ *  尾段对【硬置终值】重过完整难度链——专家/大师乘区（ByDifficulty）+ 肉后兜底
+ *  （ForExpertHardmode：num=damage+defense+lifeMax/4 < 80 拉抬，世花后 100）+
+ *  人数缩放 + lifeMax<6 下限。旧仓硬置后不再缩放=三档停经典硬编码（issue D12
+ *  实测 -1..-10 三档同值；分裂幼体/风气球 594 携带变体同病）。
+ *  入参 kbResist = 基底现值（Enemy.def.knockbackResist——fromVanilla 已含难度缩放）；
+ *  kbMul = case 体乘子（-1/-2/-3 ×1.2、-4 ×1.4、-5 ×0.95、-7 ×0.9、其余 1）。
+ *  ScaleStats 入口门（lifeMax>5 && damage≠0 && !friendly && !townNPC）不达时
+ *  终值=入参原值（原版同——kbr 乘子仍先施加）。 */
+export function netIdFlagTrueRescale(
+  base: { type: number; boss: boolean; friendly: boolean; townNPC: boolean; scale: number },
+  hard: { life: number; damage: number; defense: number; value: number; kbMul?: number },
+  kbResist: number,
+  ctx: ScaleStatsWorld,
+): NetIdFlagTrueFinals {
+  const s: ScalingStats = {
+    type: base.type, lifeMax: hard.life, damage: hard.damage, defense: hard.defense,
+    value: hard.value,
+    knockBackResist: f32(kbResist * f32(hard.kbMul ?? 1)),   // case 体 ×乘子（f32 乘）
+    boss: base.boss, friendly: base.friendly, townNPC: base.townNPC,
+    scale: base.scale, difficulty: 0,
+  };
+  scaleStats(s, ctx);                                        // :8370 尾段重排
+  return { lifeMax: s.lifeMax, damage: s.damage, defense: s.defense,
+    value: s.value, knockbackResist: s.knockBackResist };
+}
+
 // ---------------------------------------------------------------------------
 // NPC.ScaleStats（NPC.cs:18081-18105）
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 //      `if (dontTakeDamage) return` 拦伤害且【写梯 :14031-14183 不达=免疫账不落】。
 //      Arrow else 支/WhipProj tryHit/dealContacts 已接（「最终清零补」,R1-C 登记过时）,
 //      本刀补 Arrow 502 支/局部免疫支（接触族成员 611/697/707 曾漏电+白写 cd）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -127,6 +127,7 @@ describe('S2-债1-§A：ghostHealProc 摘 magic 预门（白耗=原版本相）'
 
 describe('S2-债1-§B：Arrow 通用环非 magic 白耗臂（旧档 magic 门挡死）', () => {
   it('木箭（pid 1,数据面非 magic）命中 → ghost proc isMagic=false/numHits=0/dmg=防后实扣', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（主环首掷 ×1.0）
     const log: StealCall[] = [];
     const e = enemySpy(1, 480, 256);
     const game = makeGame(log, [e], []);

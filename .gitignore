@@ -23,3 +23,4 @@ console.log
 
 # 音效 wav 母带软链(仓库外本地目录,encode-sounds 转码源;克隆侧无需存在,见 ASSETS.md)
 /assets-src
+Open-Terraria-v*-beta-web.zip

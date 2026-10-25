@@ -31,12 +31,12 @@ import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
-import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
+import { hostileProjectileDamage, mainDifficulty, mainExpertMode, damageVar } from '../stats/ScaleStats';
 import { spawnPart, shoot, shootBolt462, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
-import { damageEvPNoCheese } from './projTargets';   // ★台账⑥ BossNoCheese 分桶命中通道
+import { damageEvPNoCheese, evpDirectDmg, bannerNpcKeyOf } from './projTargets';   // ★台账⑥ BossNoCheese 分桶命中通道;BJ710-C 直调站门序单源+发射者旗键
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { wetCollision } from './npcLiquid';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -932,6 +932,9 @@ export class DukeSharknadoTornado extends Entity {
   private alpha = 255;   // 原版 alpha(实体内嵌 SolidCollision 逐渐显形)
   life: number;          // timeLeft 小 540 / 大 840
   private src: Enemy;
+  /** ★BJ710-C：发射者旗追踪键（Duke Fishron 无旗 → 恒 null 零行为；构造期自 src
+   *  冻结，接线保直调站门序单源）。null=未冻结。 */
+  bannerNpcId: number | null = null;
   dead = false;
   /** ★BJ294 敌射侧拒割位：384/386 SetDefaults hostile（P.cs:4666-75/:4688-97）→ 原版
    *  CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
@@ -966,6 +969,7 @@ export class DukeSharknadoTornado extends Entity {
     this.topY = y;
     this.life = big ? 840 : 540;         // SetDefaults timeLeft
     this.src = src;
+    this.bannerNpcId = bannerNpcKeyOf(src);   // ★BJ710-C：发射者旗冻结
     this.x = x; this.y = y;
     this.resize();
   }
@@ -1053,7 +1057,7 @@ export class DukeSharknadoTornado extends Entity {
           ? (mainExpertMode(game.world) ? 50 : 80)
           : (mainExpertMode(game.world) ? 25 : 40);
         game.damagePlayer(
-          hostileProjectileDamage(base, mainDifficulty(game.world)) * 2,
+          evpDirectDmg(game, damageVar(base, -p.luck), this.bannerNpcId),   // ★BJ710-C：banner→缩放→×2 门序单源
           this.cx, this.cy, this.src,
           // ★红队 R1-F2 修正(2026-10-13):本伤=Damage_EVP 弹幕语义(上方定谳注),
           //  attacker 仅死亡归因——projDomain 旗防错域进 modifyHurtByNpc 接触链
@@ -1609,6 +1613,10 @@ export class MLDeathray extends Entity {
   /** 束长 Lerp 值(原版 localAI[1]) */
   private len = 0;
   private dmg: number;
+  /** ★BJ710-G35 D4（2026-10-25）：发射者旗追踪键（原版 bannerIdToRespondTo 投影，
+   *  ML 头/核心无旗 → 恒 null 零行为；结构对齐 BJ710-C 14 直调站族）。
+   *  net 傀儡重建（src=null）→ 无旗面（vanilla msg27 bitsByte28[3] 同步旗,MP 债登记）。 */
+  bannerNpcId: number | null = null;
   dead = false;
   /** ★BJ294 敌射侧拒割位：455 PhantasmalDeathray SetDefaults hostile（P.cs:5281）→
    *  原版 CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
@@ -1636,6 +1644,7 @@ export class MLDeathray extends Entity {
   constructor(src: Enemy | null, kind: 'head' | 'core', angle: number, sweep: number, dmg: number, x?: number, y?: number) {
     super();
     this.srcId = src?.id ?? 0;
+    this.bannerNpcId = bannerNpcKeyOf(src);   // ★BJ710-G35 D4：发射者旗冻结（ML 无旗=null）
     this.kind = kind;
     this.angle = angle;
     this.sweep = sweep;
@@ -1759,10 +1768,16 @@ export class MLDeathray extends Entity {
     // 发射瞬间贴脸即吃束曾变相加强死光
     if (this.age < 20) return;
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
+      // ★BJ710-G35 D4（2026-10-25）：内联缩放退场 → evpDirectDmg 门序单源（banner→
+      //  缩放→×2,与 BJ710-C 14 站同源;ML 无旗=数值逐位不变）+ 弹域双旗点亮
+      //  （projDomain+projVid 455 → Game.damagePlayer :44690 mod 修正链,旧缺=静默
+      //  no-op——BJ704-R3 P1 同款病;BossNoCheese 桶语义不变,opts 经
+      //  damageEvPNoCheese 第 6 参透传）。
       damageEvPNoCheese(
         game,
-        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
-        this.cx, this.cy, src);
+        evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId),
+        this.cx, this.cy, src,
+        { projDomain: true, projVid: 455 });
     }
   }
 

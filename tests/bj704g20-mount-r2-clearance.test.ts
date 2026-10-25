@@ -174,7 +174,7 @@ describe('BJ704-G20 B 湿支坐骑特殊跳（R10-P1②）', () => {
     return { p, game };
   }
 
-  it('B1 池底首跳=普通湿跳;空中再按=坐骑特殊跳（jumpHold=20-1/vy 钉坐骑档 8.01）', async () => {
+  it('B1 池底首跳=普通湿跳;空中再按=坐骑特殊跳（jumpHold=20/vy=坐骑档 8.01−grav,★BJ717-A F1/F6 迁移）', async () => {
     const { p, game } = await wetUnicorn('bj704g20-b1');
     // 首跳（池底 vy==0 → 首门普通跳,坐骑档跳参:jumpSpeed 8.01/jumpHeight 10）
     p.inputJump = true; p.jumpEdgePrev = false;
@@ -187,8 +187,8 @@ describe('BJ704-G20 B 湿支坐骑特殊跳（R10-P1②）', () => {
     // 空中再按（jumpEdge）→ 坐骑特殊跳（旧=零响应,R10 探针 N3 hold=0）
     p.inputJump = true; p.jumpEdgePrev = false;
     p.fixedUpdate(1 / 60, game);
-    expect(p.jumpHold).toBe(19);                                // mountJumpTicks=10×2=20,sustain 同拍 -1（R10 N3c 判例 19≡20-1）
-    expect(p.vy).toBeCloseTo(-8.01, 5);                         // sustain 钉 -effJumpSpd（骑乘者=坐骑档 8.01,非液体档 6.01）
+    expect(p.jumpHold).toBe(20);                                // ★BJ717-A F6 迁移:mountJumpTicks=10×2=20,fire 拍 sustain 不再同拍跑（旧 19≡20-1=R10 N3c 判例,oracle S3:fire 拍原值）
+    expect(p.vy).toBeCloseTo(-8.01 + 0.2, 5);                   // ★BJ717-A F1 迁移:fire 拍 vy=arm(-effJumpSpd 坐骑档 8.01)+湿重力 0.2（钉→重力→积分序;旧=钉后置恒 -8.01）
     expect(p.mount.mountJumpReady).toBe(false);                 // 已消费
     expect(p.mount.mountJumpPerforming).toBe(true);
     expect(p.performingJump).toBe('Unicorn');                   // 尾迹旗接线（:22119）
@@ -210,7 +210,7 @@ describe('BJ704-G20 B 湿支坐骑特殊跳（R10-P1②）', () => {
     for (let t = 0; t < 16; t++) p.fixedUpdate(1 / 60, game);
     p.inputJump = true; p.jumpEdgePrev = false;
     p.fixedUpdate(1 / 60, game);
-    expect(p.jumpHold).toBe(19);
+    expect(p.jumpHold).toBe(20);                                // ★BJ717-A F6 迁移（旧 19=同拍 sustain -1）
     expect(p.performingJump).toBe('Unicorn');                   // 干支接线（旧=恒 null,'Unicorn' 尾迹死码）
     p.inputJump = false;
   }, 30000);

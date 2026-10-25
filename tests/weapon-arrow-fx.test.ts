@@ -228,6 +228,7 @@ describe('④ 225 叶绿箭撞块弹反', () => {
 // ============ ⑤ 710 空中祸害（Damage :12236-12239 + BetsySharpnel :51075-51091） ============
 describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
   it('空旷（下方 12 格无实心）命中伤 ×1.5；近地不加成', () => {
+    const mr710 = Math.random; Math.random = () => 0.5;         // ★BJ716-A:DV 中性档（主环首掷 ×1.0）
     // 空旷档：行 40 高空，下方 12 格全空
     {
       const enemy = mkEnemy(1, 100 * TILE, 40 * TILE);
@@ -248,6 +249,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
       expect(enemy.hits.length).toBe(1);
       expect(enemy.hits[0][0]).toBe(20);
     }
+    Math.random = mr710;
   });
 
   it('命中撒 5 枚 710 裂片（速 6、(0,6).RotatedBy(π/4−i·π/6) 扇），裂片不再链', () => {
@@ -379,7 +381,7 @@ describe('⑧ 477 水晶镖旋转', () => {
 describe('⑨ 639 月总箭 on-hit 衰减', () => {
   it('首跳全额、次跳 ×0.96（(int) 截断）', () => {
     const mr = Math.random;
-    Math.random = () => 0.99;                                  // 钉非暴击(命中链 4% 掷)
+    Math.random = () => 0.5;                                   // 钉非暴击(命中链 4% 掷);★BJ716-A:DV 中性档(×1.0)
     const e1 = mkEnemy(1, 100 * TILE, 50 * TILE);
     const e2 = mkEnemy(2, 100 * TILE + 8, 50 * TILE);
     const game = makeGame(emptyWorld(), [e1, e2]);

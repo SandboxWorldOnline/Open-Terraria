@@ -187,7 +187,10 @@ describe('§2 1001 追踪（X 恒调 0.4 钳 ±4 / Y ±30 死区钳 ±5）', () 
   it('发射位盘掷修正：Enemy.ts 315 出膛半径 = NextVector2Circular 盘掷（非 Edge 满径）+ life 360', () => {
     const src = readFileSync(join(GAME, 'src/entities/Enemy.ts'), 'utf8');
     expect(src).toContain('const rad = Math.random() * 40;');
-    expect(src).toContain('1001, 360);');
+    // ★BJ710-G35 D1（2026-10-25）：发射位合法增重（315 旗透传 opts）——life 360 语义
+    //  不变,窗按 BJ710-C「arrow-fx-audit 576」判例随文本放宽（勿再缩回裸 `1001, 360);`）
+    expect(src).toContain('1001, 360,   // life=360（:9519 timeLeft,shoot 缺省 300 系旧直飞档）');
+    expect(src).toContain('{ bannerNpcId: bannerNpcKeyOf(this) });   // ★BJ710-G35 D1：315 无头骑士（banner 120）发射者旗冻结');
   });
 });
 

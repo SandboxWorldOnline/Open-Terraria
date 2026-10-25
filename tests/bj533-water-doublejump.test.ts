@@ -123,7 +123,7 @@ describe('BJ533① 云朵瓶水中二段跳', () => {
     expect(p.performingJump).toBe('Cloud');       // isPerformingJump_Cloud :21168
     expect(p.vy).toBeLessThan(0);                 // 水中上浮（旧仓恒继续下沉）
     tick(p, w);                                   // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
-    expect(p.jumpHold).toBe(Math.round(30 * 0.75) - 2);   // 21（湿档 lJT=30;×0.75 窗口算术锁）
+    expect(p.jumpHold).toBe(Math.round(30 * 0.75) - 1);   // 21+1（湿档 lJT=30;×0.75 窗口算术锁;★BJ717-A F6 −2→−1 迁移=起跳拍 sustain 不再同拍跑）
     p.inputJump = false;
     tick(p, w);
     expect(p.jumpHold).toBe(0);                   // ★BJ705-G23:松键即清（:21201-08;旧耗尽制=21 续跑）
@@ -205,8 +205,8 @@ describe('BJ533③ 水中消费优先序与湿档跳参', () => {
     tick(p, w);
     expect(p.extraJumps).toEqual(['Blizzard', 'Cloud']);   // Sandstorm 消费（优先序 :20875-20922）
     expect(p.performingJump).toBe('Sandstorm');
-    tick(p, w);                                             // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
-    expect(p.jumpHold).toBe(Math.round(30 * 3) - 2);       // 88（×3 窗口算术锁）
+    tick(p, w);                                             // ★BJ705-G23:持跳 1 拍（★BJ717-A F6:fire 拍 sustain 不跑,−1 只在本拍）
+    expect(p.jumpHold).toBe(Math.round(30 * 3) - 1);       // 88+1（×3 窗口算术锁;★BJ717-A F6 −2→−1 迁移）
     p.inputJump = false;
     tick(p, w);
     expect(p.jumpHold).toBe(0);                             // ★BJ705-G23:松键即清（:21201-08）
@@ -235,8 +235,8 @@ describe('BJ533④ 干地二段跳回归', () => {
     tick(p, w);
     expect(p.extraJumps).toEqual([]);
     expect(p.performingJump).toBe('Cloud');
-    tick(p, w);                                            // ★BJ705-G23:持跳 1 拍（fire 拍 sustain 已 −1）
-    expect(p.jumpHold).toBe(Math.round(15 * 0.75) - 2);   // 9（干档 ×0.75 窗口算术锁）
+    tick(p, w);                                            // ★BJ705-G23:持跳 1 拍（★BJ717-A F6:fire 拍 sustain 不跑,−1 只在本拍）
+    expect(p.jumpHold).toBe(Math.round(15 * 0.75) - 1);   // 9+1（干档 ×0.75 窗口算术锁;★BJ717-A F6 −2→−1 迁移）
     p.inputJump = false;
     tick(p, w);
     expect(p.jumpHold).toBe(0);                            // ★BJ705-G23:松键即清（:21201-08）

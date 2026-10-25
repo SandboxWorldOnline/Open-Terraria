@@ -150,7 +150,10 @@ describe('SW-BJ47 ④ Game.ts 接线锁（击杀写摘除 + 显示面旗种域/�
 
   it('命中写位在 Enemy.hurt fromPlayer 尾段（三写位并集单漏斗）', () => {
     const s = readFileSync(fileURLToPath(new URL('../src/entities/Enemy.ts', import.meta.url)), 'utf8');
-    expect(s).toContain("pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0))");
+    // ★BJ710-G35 D3b（2026-10-25）：键式收编 bannerNpcKeyOf 单源（BannerID()
+    //  netID≥-10 上界——-12 getGood 僵尸回落 type 吃僵尸旗,语义升级非行为回退）
+    expect(s).toContain('pl.lastCreatureHit = bannerOfNpc(bannerNpcKeyOf(this) ?? 0);');
+    expect((s.match(/bannerOfNpc\(bannerNpcKeyOf\(this\) \?\? 0\);/g) ?? []).length).toBe(2);   // 假人/实战两写位
     expect(s).toContain("import { bannerOfNpc } from '../world/Banners'");
   });
 });

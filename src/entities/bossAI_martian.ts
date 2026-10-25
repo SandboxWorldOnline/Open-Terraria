@@ -25,7 +25,8 @@ import type { Player } from './Player';
 import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
-import { getAttackDamageForProjectiles, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { getAttackDamageForProjectiles, getAttackDamageScaledByDifficulty, damageVar } from '../stats/ScaleStats';
+import { evpDirectDmg, bannerNpcKeyOf } from './projTargets';   // ★BJ710-C：直调站门序单源+发射者旗键
 import { Arrow } from './Arrow';
 import { canStartInvasion, startInvasion, INVASION_MARTIAN } from '../world/Invasion';
 import { dutchmanCannonAI } from './bossAI_dd2';
@@ -485,7 +486,10 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
           const d = Math.hypot(sx, sy);
           if (d > 0.001) { sx = (sx / d) * 7; sy = (sy / d) * 7; }
           else { sx = 0; sy = -7; }
-          shootM(game, oxp, oyp, sx, sy, 30, 438);
+          // ★BJ712-C：发射者旗冻结（原版 FindBannerToAssociateTo 对一切 EntitySource_Parent
+          // 发射无条件注入,P.cs:11106-11119/NPC.cs:91865;390 鳞甲怪枪手有旗 143）——旗减
+          // 伤域收口,同 tesla 435/nimbus 264（G35 D1）式
+          shootM(game, oxp, oyp, sx, sy, 30, 438, 300, 1, { bannerNpcId: bannerNpcKeyOf(e) });
           // NPC 侧 AI 无 PlaySound(NPC.cs:35921-35996)——但弹 438 是 aiStyle 1,
           // AI_001 出膛音链 ai[1]==0 首拍播 Item12(Projectile.cs:56221-56225)。
           // 发射位等价结算（弹先出生后补播,同 bossAI.ts 83=Item_33 先例;
@@ -805,7 +809,9 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
     e.x = cx - 96; e.y = cy - 96;
     e.w = 192; e.h = 192;
     e.vx = 0; e.vy = 0;
-    e.def.damage = 80;                 // GetAttackDamage_ScaledByDifficulty(80)
+    // ★BJ712-A D1（转报核验「无人机自爆缺难度倍率」）:原版 :35795
+    //  GetAttackDamage_ScaledByDifficulty(80f)=80/160/240——旧钉死 80 无门。
+    e.def.damage = getAttackDamageScaledByDifficulty(80, e.difficulty);
     e.spawnAlpha = 255;
     e.lightRGB = [0.2, 0.7, 1.1];
     game.spawnParticles(cx, cy, '#6FD7FF', 6, 2.4, { life: 30 });
@@ -895,7 +901,9 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
     else { dx = 0; dy = -14; }
     // :35442-35448 伤 = GetAttackDamage_ForProjectiles(35, 35×0.8)——type 387 ∈
     // [381,392] → num1090=0.8 → expert 档 28
-    shootM(game, ox, oy, dx, dy, getAttackDamageForProjectiles(35, 28, e.difficulty), 435);
+    // ★BJ710-G35 D1：387 Tesla Turret（banner 144）发射者旗冻结
+    shootM(game, ox, oy, dx, dy, getAttackDamageForProjectiles(35, 28, e.difficulty), 435,
+      300, 1, { bannerNpcId: bannerNpcKeyOf(e) });
   }
   e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
@@ -946,7 +954,8 @@ export function angryNimbusAI(e: Enemy, game: GameHooks, player: Player | null) 
     if (e.ai0 > 8) {
       e.ai0 = 0;
       const ox = e.x + 10 + Math.random() * (e.w - 20);
-      shootM(game, ox, e.y + e.h + 4, 0, 5, 20, 264);
+      // ★BJ710-G35 D1：250 Angry Nimbus（banner 2）发射者旗冻结（264 雨弹）
+      shootM(game, ox, e.y + e.h + 4, 0, 5, 20, 264, 300, 1, { bannerNpcId: bannerNpcKeyOf(e) });
     }
   }
   moveAndCollide(e, game.world, e.vx, e.vy);
@@ -1040,6 +1049,29 @@ export function martianFighterExtras(e: Enemy, game: GameHooks, player: Player |
     }
     if (e.ai2 === 60) e.ai2 = -120;                 // :59427-59429
   }
+
+  if (id === 389) {
+    // ---- 千兆电击塔电矛（1457 NPC.cs:59636-59655）：confused → ai[2]=-60;否则
+    //      ai[2]<20 递增、受击 -30;ai[2]==20 → 电矛 437（Center+8y,direction*6 平飞,
+    //      基伤 25 平值无 GetAttackDamage 重映射）+冷却 -10-rand(3)*10。终伤走
+    //      Arrow.hitPlayer 链（DamageVar→banner(139)→缩放→×2 = 50/100/150）;
+    //      Electrified 144 240-480t（Projectile.cs:12231-12234）由 projTargets 状态
+    //      表承载;penetrate 命中递减（:14971-14974）=Arrow pierce 1 同相 ----
+    if (e.confusedT > 0) {
+      e.ai2 = -60;
+    } else {
+      if (e.ai2 < 20) e.ai2 += 1;
+      if (e.justHit) e.ai2 = -30;
+      if (e.ai2 === 20) {
+        e.ai2 = -10 + rnd(3) * -10;                 // -10/-20/-30（:59653）
+        // ★BJ712-C：发射者旗冻结（389 有旗 139）;弹 437 aiStyle1/extraUpdates2 走
+        // vanilla-projectiles.json 表,贴图 Projectile_437.png 已在 sprites/vanilla
+        shootM(game, e.cx, e.cy + 8, e.facing * 6, 0, 25, 437, 300, 1,
+          { bannerNpcId: bannerNpcKeyOf(e) });
+      }
+    }
+    return;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,6 +1087,9 @@ export class MartianDeathray extends Entity {
   w = 30; h = 30;
   x = 0; y = 0; vx = 0; vy = 0;
   dead = false;
+  /** ★BJ710-C：发射者旗追踪键（锚 392/395 火星飞碟无旗 → 恒 null 零行为；构造期
+   *  自 src 冻结，接线保直调站门序单源）。null=未冻结。 */
+  bannerNpcId: number | null = null;
   private srcId: number;
   private dmg: number;
   private age = 0;
@@ -1084,6 +1119,7 @@ export class MartianDeathray extends Entity {
     super();
     this.srcId = src.id;
     this.dmg = dmg;
+    this.bannerNpcId = bannerNpcKeyOf(src);   // ★BJ710-C：发射者旗冻结
     this.x = src.cx - 15; this.y = src.cy + 46;
   }
 
@@ -1144,7 +1180,7 @@ export class MartianDeathray extends Entity {
       //  生成侧 50/80 是基础值（:36148 GetAttackDamage_ForProjectiles(50,50)/
       //  :36666 num1195=80），曾裸传=经典半伤/专家四分之一伤
       game.damagePlayer(
-        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
+        evpDirectDmg(game, damageVar(this.dmg, -p.luck), this.bannerNpcId),   // ★BJ712-C：DamageVar 首掷（P.cs:14904,链首先掷后进 banner/缩放/×2;luck=本地玩家,同 BJ712-B 681/683 式）   // ★BJ710-C：banner→缩放→×2 门序单源
         this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 447 });   // ★R-B-F10(第4=knockback 位,opts 第5)
     }
   }

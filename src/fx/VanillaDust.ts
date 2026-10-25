@@ -687,6 +687,99 @@ export class VanillaDust {
           chainLink = true;
           break;
         }
+        // ★BJ708-A（2026-10-23）：160/162 激光行进尘（链 A 独占链接 :1269-1302——
+        //  光+自管衰减/漂移,无重力臂）。原仓无 case = 落 default 吃通用重力 +0.1/t
+        //  与老化 −0.01/t（束尘悬垂 ~90t vs 原版 ~9t 速灭）且缺光。发射方 =
+        //  aiStyle48 发束族 Kill 铺束（ufoLaserTrailFx d160 双色/magnetSphereBoltTrailFx
+        //  d160/heatRayTrailFx d162,fx/orchestraFx:2006-2028）。光【无 noLight 门】
+        //  （原文直呼 Lighting.AddLight,与烟雾族 918 门不同）;162 橙光/160 青光
+        //  ×min(1,1.3×scale);净衰减 = 本支 −0.1 + 公共老化 −0.01（ fadeIn=0 束尘
+        //  恒走 else −0.01）≈ −0.11/t;子尘掷 scale>0.3 ∧ 1/50（:1296-1301）。
+        case 160: case 162: {
+          const num70 = Math.min(d.scale * 1.3, 1);                  // :1271-1274
+          if (d.type === 162) {                                      // :1278-1280 橙光
+            this.lights.push({ x: d.x, y: d.y, r: num70, g: num70 * 0.7, b: num70 * 0.1 });
+          } else {                                                   // :1282-1284 青光
+            this.lights.push({ x: d.x, y: d.y, r: num70 * 0.1, g: num70, b: num70 });
+          }
+          if (d.noGravity) {                                         // :1285-1291
+            d.vx *= 0.8; d.vy *= 0.8;
+            d.vx += ((Math.random() * 41 | 0) - 20) * 0.04;          // Next(-20,21)×0.04
+            d.vy += ((Math.random() * 41 | 0) - 20) * 0.04;
+            d.scale -= 0.1;
+          } else {                                                   // :1292-1302
+            d.scale -= 0.1;
+            d.vx += ((Math.random() * 21 | 0) - 10) * 0.02;          // Next(-10,11)×0.02
+            d.vy += ((Math.random() * 21 | 0) - 10) * 0.02;
+            if (d.scale > 0.3 && Math.floor(Math.random() * 50) === 0) {   // :1296-1301 子尘
+              const c708 = this.spawn(d.x - 4, d.y - 4, 1, 1, d.type);
+              if (c708) { c708.noGravity = true; c708.scale = d.scale * 1.5; }
+            }
+          }
+          chainLink = true;
+          break;
+        }
+        // ★BJ708-G28（2026-10-24）：164/173 束尘 update 分支补缺（链 A 独占链接,
+        //  Dust.cs:1161-1197[164]/:1199-1226[173],1456 同文——与 160/162 同族;
+        //  原仓无 case = 落 default 吃通用重力 +0.1/t 与老化 −0.01/t 且缺光）。
+        //  164 = 蓝白光 (1,0.1,0.8)×min(1,scale)（非 160 的 ×1.3 档）;noGravity 臂
+        //  三臂互斥 [scale<0.7 → ×1.075 加速 / 1/2 掷 → ×−0.95 速度反转 / else ×1.05]
+        //  + scale−0.03;else 臂 −0.005+×0.9+漂移 Next(−10,11)×0.02+1/5 子尘
+        //  （NewDust(position,4,4) 同盒,子 scale×2.5）。164 当前仓内 0 发射方
+        //  （潜伏,家族补全同批纪律——F2 130-134/219-223 先例）。
+        //  173 = 暗影束尘（紫光 (0.4,0.1,1)×min(1,scale)）——活发射方 = 294 暗影束
+        //  Kill/越界铺束（shadowbeamLineFx,Spawn_Shadowbeam :1987-2005）。
+        //  noGravity 臂 ×0.8+漂移 Next(−20,21)×0.01+scale−0.01;else 臂 −0.015+×0.8+
+        //  漂移 Next(−10,11)×0.005+1/10 子尘（:1220 Next(10)==10 = 原版死支——
+        //  Next(10)∈[0,10) 恒≠10,保形不触发,Math.random 掷仍消费=原版同相）。
+        //  光【无 noLight 门】（原文直呼 Lighting.AddLight,同 160/162 与烟雾族
+        //  :918 门不同）。
+        case 164: {
+          const num64 = Math.min(d.scale, 1);                        // :1162-1166
+          this.lights.push({ x: d.x, y: d.y, r: num64, g: num64 * 0.1, b: num64 * 0.8 });
+          if (d.noGravity) {                                         // :1168-1180
+            if (d.scale < 0.7) {
+              d.vx *= 1.075; d.vy *= 1.075;
+            } else if (Math.floor(Math.random() * 2) === 0) {        // Next(2)==0
+              d.vx *= -0.95; d.vy *= -0.95;                          // :1174 速度反转
+            } else {
+              d.vx *= 1.05; d.vy *= 1.05;
+            }
+            d.scale -= 0.03;
+          } else {                                                   // :1181-1196
+            d.scale -= 0.005;
+            d.vx *= 0.9; d.vy *= 0.9;
+            d.vx += ((Math.random() * 21 | 0) - 10) * 0.02;          // Next(-10,11)×0.02
+            d.vy += ((Math.random() * 21 | 0) - 10) * 0.02;
+            if (Math.floor(Math.random() * 5) === 0) {               // :1190-1195 子尘
+              const c708g = this.spawn(d.x, d.y, 4, 4, d.type);      // NewDust(position,4,4)
+              if (c708g) { c708g.noGravity = true; c708g.scale = d.scale * 2.5; }
+            }
+          }
+          chainLink = true;
+          break;
+        }
+        case 173: {
+          const num66 = Math.min(d.scale, 1);                        // :1200-1204
+          this.lights.push({ x: d.x, y: d.y, r: num66 * 0.4, g: num66 * 0.1, b: num66 });
+          if (d.noGravity) {                                         // :1206-1211
+            d.vx *= 0.8; d.vy *= 0.8;
+            d.vx += ((Math.random() * 41 | 0) - 20) * 0.01;          // Next(-20,21)×0.01
+            d.vy += ((Math.random() * 41 | 0) - 20) * 0.01;
+            d.scale -= 0.01;
+          } else {                                                   // :1212-1226
+            d.scale -= 0.015;
+            d.vx *= 0.8; d.vy *= 0.8;
+            d.vx += ((Math.random() * 21 | 0) - 10) * 0.005;         // Next(-10,11)×0.005
+            d.vy += ((Math.random() * 21 | 0) - 10) * 0.005;
+            if (Math.floor(Math.random() * 10) === 10) {             // :1220 原版死支（保形）
+              const c708h = this.spawn(d.x, d.y, 4, 4, d.type);
+              if (c708h) { c708h.noGravity = true; c708h.scale = d.scale; }
+            }
+          }
+          chainLink = true;
+          break;
+        }
         case 55: {  // :1759-1799（链 A 55/56/73/74 组链接）
           d.vx *= 0.98; d.vy *= 0.98;                     // :1761
           if (!d.noLightEmittance) {                      // :1762
@@ -857,9 +950,14 @@ export class VanillaDust {
         default:
           break;
       }
-      // :1884-1894 重力（链 A 命中者由其链接自管速度，跳过；链头特型不在消费集）
+      // :1889-1899 重力（1456 :1884-1894；链 A 命中者由其链接自管速度，跳过；
+      //  链头特型不在消费集）。:1891-1894 Terra 尘(107) 例外：velocity×0.9 两轴
+      //  （替 +0.1）——★BJ718-A(R17-D1) 补，旧缺例外 → 重力档 107 尘吃 +0.1 下坠。
+      //  发射方普查：Minecart sparksTerraFart(DelegateMethods:368 noGravity=Next(3)==0
+      //  → 2/3 重力档=实害)；orchestraFx swordConeArmDust 恒 noGravity=无实害。
       if (!chainLink && !d.noGravity && d.type !== 41 && d.type !== 44 && d.type !== 309) {
-        d.vy += 0.1;
+        if (d.type === 107) { d.vx *= 0.9; d.vy *= 0.9; }  // :1891-1894
+        else d.vy += 0.1;                                  // :1897
       }
       // :1895-1897 血尘 5/273 悬浮档（noGravity 时额外收缩——本引擎产 5 号恒重力档
       // （NewDust noGravity 恒 false），门随源码保留防未来悬浮产尘漏缩）

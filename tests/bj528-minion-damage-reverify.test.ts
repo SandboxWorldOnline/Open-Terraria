@@ -28,7 +28,7 @@
 //   §V 投影环直传钉：contact(dmg0) 全额达敌（en.hurt 收 dmg0 非 0/负）;
 //   §W BJ511 窗锁面不回归（iframes=0/鞭形照伤/回旋镖照伤/cd=15 私表钉值）;
 //   §X BJ436 面不回归（-2 缺省族 373 照开 10t 窗+窗内鞭形被拒）。
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -101,6 +101,7 @@ const boomerangShaped = (z: Enemy, hooks: GameHooks, dmg = 15): number => {
 
 describe('BJ528 §F 用户组合复现·数值面（真实链 fixedUpdate 驱动,dmg 断供=钳 1 必红）', () => {
   it('F1 雀杖 759 真实链每击伤害=原版投影防后终值 4（dmg0=7,僵尸 def6）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const { hooks, player } = makeGame();
     const z = foe(hooks, 3, 5281);
     // 基伤 7 = itemCombat(4281).damage（雀杖,Game 'summon' 同值投影）;真实 owner
@@ -116,6 +117,7 @@ describe('BJ528 §F 用户组合复现·数值面（真实链 fixedUpdate 驱动
   });
 
   it('F2 雀杖 dmg0 投影公式面：def2 绿史莱姆每击 6（7+0−2×0.5,跨防对账锁原版公式）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const { hooks, player } = makeGame();
     const s = foe(hooks, 1, 5282);
     const finch = new MinionProj(s.cx - 5, s.cy - 5, 759, 7, 4, false, 0, false, () => player);
@@ -127,6 +129,7 @@ describe('BJ528 §F 用户组合复现·数值面（真实链 fixedUpdate 驱动
   });
 
   it('F3 刃杖 864 真实链每击伤害=6（dmg0=6,armorPen 25 池钳 def/2=3: 6+3−3）+窗面', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档
     const { hooks, player } = makeGame();
     // ★BJ637（2026-10-11）几何迁改定谳：BJ634 忠实移植 AI_169_Smolstars（P.cs:46559-46700）
     //  后,旧敌位 (400,600) 不可再实现——①敌距玩家 1032.6px>800 双距超程（md 巡航脱离后
@@ -155,6 +158,7 @@ describe('BJ528 §F 用户组合复现·数值面（真实链 fixedUpdate 驱动
 
 describe('BJ528 §V 投影环直传钉（contact(dmg0) 全额达敌,en.hurt 收 dmg0 非 0/负）', () => {
   it('V1 雀杖 dmg0=7 直传：def6 每击 4 / def2 每击 6（-2 误档前后同值=dmg 面档位无关）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const { hooks, player } = makeGame();
     const z = foe(hooks, 3, 5291);
     const finch = new MinionProj(z.cx - 5, z.cy - 5, 759, 7, 4, false, 0, false, () => player);
@@ -167,6 +171,7 @@ describe('BJ528 §V 投影环直传钉（contact(dmg0) 全额达敌,en.hurt 收 
   });
 
   it('V2 -2 缺省族（373 黄蜂 dmg0=20）dmg 面同链同值 17（=20+0−3,三档共用结算面实证）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（contact 面首掷 ×1.0）
     const { hooks, player } = makeGame();
     const z = foe(hooks, 3, 5293);
     const wasp = new MinionProj(z.cx - 12, z.cy - 13, 373, 20, 1, false, 0, false, () => player);

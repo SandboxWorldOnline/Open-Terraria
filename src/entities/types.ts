@@ -138,6 +138,14 @@ export interface GameHooks {
    *  单源）。消费面 = Player.shimmerUnstuck（style12）/doQueenSlimeHookTeleport
    *  （style10）；缺省（测试 mock/SimHost 无此钩）= 静默跳过 */
   startCameraTransitionForPlayerTeleport?(oldX: number, oldY: number, lerpSpeedupDelay?: number): void;
+  /** ★BJ714-A 登记债清偿（2026-10-25,R16-P1）:骑矿车传送随迁实体侧单口——Game.
+   *  migrateMinecartOnTeleport（BJ713-A 断路域单源:车坐标/速度镜像玩家传送终值+
+   *  fallStart 重置;vanilla Teleport 全 style 零 Dismount,Player.cs:37698-37780）
+   *  经可选钩供实体侧传送面消费:style10 皇后钩瞬移（DoQueenSlimeHookTeleport
+   *  Player.cs:22937→:37747 汇聚）/style4 传送门穿越（PortalHelper.cs:187 本地面
+   *  =MessageBuffer.cs:3557 msg96 网面同门）/style12 微光脱困（Player.cs:29095）。
+   *  缺省（测试 mock/SimHost 无此钩）= 静默跳过（BJ108 同先例） */
+  migrateMinecartOnTeleport?(): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器

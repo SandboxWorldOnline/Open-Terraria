@@ -216,6 +216,7 @@ describe('BJ455-N2：818 城镇臂 settle crit 色缺（同构）', () => {
 // ================ §N3 扑击 818 敌臂 banner 包入（先定谳后落刀） ================
 describe('BJ455-N3：818 敌臂 hurt 未包 applyBannerDamageDealt', () => {
   it('N3 旗下（蓝史莱姆旗 1683）：d=45（30×1.5）（旧裸 30 必红）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（818 扑击首掷 ×1.0）
     const e = mkEnemy(0, 700, 600);
     e.vanillaId = 1;                               // 蓝史莱姆族旗 npcToBanner[1]=69 → item 1683
     const { hooks } = makeHooks([e as never], [1]);

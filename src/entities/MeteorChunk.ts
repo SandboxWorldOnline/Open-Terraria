@@ -17,8 +17,8 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
-import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy, evpDirectDmg } from './projTargets';   // BJ710-C：直调站门序单源
+import { damageVar, mainMasterMode, mainExpertMode } from '../stats/ScaleStats';   // ★BJ712-C：DamageVar 首掷（P.cs:14904）;★BJ716-A：GDL 难度门单源
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -125,14 +125,24 @@ export class MeteorChunk extends Entity {
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!st.inBounds(tx, ty)) { this.dead = true; return; }
-    // 伤害(:71801-71806):50 / 专家 40 / 大师 35,击退 5
-    const diff = (game.world as unknown as { difficulty?: number }).difficulty ?? 0;
-    const dmg = diff >= 2 ? 35 : diff === 1 ? 40 : 50;
+    // 伤害（WorldGen.cs:72334-72341 `damage=50; if(Main.masterMode) 35; else if
+    // (Main.expertMode) 40`,击退 5）。★BJ716-A（R14-P2-1，2026-10-25）：GDL 域勘正
+    // ——masterMode/expertMode 读浮点难度轴（Main.cs:2760/2762 Difficulty≥Master(3)/
+    // ≥Expert(2),含旅程滑杆连续值+FTW+1,Main.cs:2802 `if(getGoodWorld) num++`）;
+    // 旧裸读 world.difficulty 枚举域（0C/1E/2M/3J）：旅程缺省(GDL=1)撞进 ≥2 误判
+    // 35/滑杆全忽略/FTW 经典(+1=2)漏感知 40——三正常档巧合对,旅程/FTW 炸（R14
+    // 判例3「GDL 域 vs 枚举域」,MeteorChunk 1078 曾为唯一存活员）
+    const dmg = mainMasterMode(game.world) ? 35 : mainExpertMode(game.world) ? 40 : 50;
     const p = game.player;
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;                              // penetrate -1:穿过不消亡
       // Damage_EVP：1078 生成值 50/40/35 是基础（WorldGen.cs:71798-71806），命中再过乘区×2
-      game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 1078 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
+      // ★BJ710-C：evpDirectDmg 门序单源——1078=世界生成面（非 NPC 发射,原版
+      //  bannerIdToRespondTo=0）,bannerNpcId 恒 null=旧行为逐位不变
+      // ★BJ710-G35 D7b（2026-10-25）：1078 ∈ Projectile.trap 型录（TRAP_PROJ_VIDS
+      //  同源,P.cs:10077）→ evpDirectDmg trap 档（:14919-14922 deadMansSweater
+      //  ×0.5+300 帽,死囚毛衣佩戴者吃陨石减半）。
+      game.damagePlayer(evpDirectDmg(game, damageVar(dmg, -p.luck), null, true), this.cx, this.cy, undefined, undefined, undefined, undefined, { projDomain: true, projVid: 1078 });   // ★R-B-F10(第4=knockback 位,opts 第5)(2026-10-14):弹域双旗点亮(Game.ts damagePlayer :44480 门=projDomain&&projVid;★BJ704-R3 P1:旧单旗=静默 no-op)
       p.buffs.apply(BuffType.OnFire, (300 + Math.floor(Math.random() * 301)) / 60);  // :11456
     }
     hitTownNpcs(this, game, dmg, Math.sign(this.vx) * 5);

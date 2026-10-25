@@ -12,7 +12,10 @@
 //                        源矩形用 Bubble 尺寸（两张图同为 22×22，视觉无差，照写）
 //   flag   L42829-42836 lavaTime<lavaMax 且 (lavaWet 或 breath==breathMax)
 //                        → 显示火焰条而非气泡（lavaTime 宽限耗损指示）
-// 字段映射：breathMax→breathMax，breath→breath，lavaMax→equipStats.lavaMax，
+// 字段映射：breathMax→breathMax，breath→breath，lavaMax→lavaMaxTotal
+//                        （★BJ714-A:配饰 equipStats.lavaMax+坐骑 cartLavaMaxBonus
+//                        聚合=原版单帧累计字段现值,含 Hell 车 +420 Mount.cs:5138;
+//                        旧 equipStats 单读=骑 Hell 车 grace 窗条不显示），
 // lavaTime→lavaImmuneTicks，lavaWet→inLava，ghost→dead。
 // 偏差记录：gfxOffY 恒 0（gfxOffY 非零仅来自坐骑绘制偏移——坐骑系统未实装，
 // 恒 0 与无坐骑的原版语义一致）；ingameOptionsWindow/InGameUI 分支未移植
@@ -66,7 +69,7 @@ export class VanillaBreathMeter {
     atlas: SpriteAtlas | null, invOpen: boolean,
   ) {
     if (p.dead) return; // ghost（L42827 dead 早退）
-    const lavaMax = p.equipStats.lavaMax;
+    const lavaMax = p.lavaMaxTotal;   // ★BJ714-A:聚合读口（原版读 player.lavaMax 含坐骑面）
     const lavaTime = p.lavaImmuneTicks;
     const flag = breathFlag(lavaTime, lavaMax, p.inLava, p.breath, p.breathMax);
     // 锚点 1:1（L42836-42847）：

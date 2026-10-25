@@ -139,7 +139,7 @@ describe('§1 755 编队头顶弧列（AI_156_GetIdlePosition :52830-52837）', 
 // ============================================================
 describe('§2 AI_156 族体触鞭 tag（Damage_PVE_Inner :12947-12961）', () => {
   it('755 蝙蝠命中带 tag 敌:伤害含 tagDamage（5688=+3;旧直 hurt =6 恰红）', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（ai156Strike/contact 面首掷 ×1.0）;
     const en = mkEnemy(1, 60 * 16, 90 * 16 - 30);
     const { hooks, player } = makeHooks([en]);
     const b = bat(player, hooks, en.cx, en.cy);       // 盒叠敌
@@ -154,7 +154,7 @@ describe('§2 AI_156 族体触鞭 tag（Damage_PVE_Inner :12947-12961）', () =>
   });
 
   it('755 无 tag 基线 =6（差分对照,tag 面不虚增）', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（ai156Strike/contact 面首掷 ×1.0）;
     const en = mkEnemy(1, 60 * 16, 90 * 16 - 30);
     const { hooks, player } = makeHooks([en]);
     const b = bat(player, hooks, en.cx, en.cy);
@@ -164,7 +164,7 @@ describe('§2 AI_156 族体触鞭 tag（Damage_PVE_Inner :12947-12961）', () =>
   });
 
   it('946 棱镜同锁:tHitTick 亦吃 tag（旧直 hurt =6 恰红）', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档;
     // ★BJ698 夹具勘误：946 待机拍（ai[0]==0）同被 projPet 门拒（:12495 `(type != 946
     //  || ai[0] == 0f)`）——改直入攻击段（tA0=80 跃空首拍,起点=出生位=玩家心,
     //  lerp2=0 位不移）。用大盒敌罩住出生位（盒大小不影响 dmg0）。
@@ -287,7 +287,7 @@ describe('§4 755 攻击状态机常数（:52494-52506/:52577-52647）', () => {
 // ============================================================
 describe('§5 388 冲刺态接触伤害（AI_066 :30154-30178 + Damage 每子步）', () => {
   it('冲刺拍命中重叠敌:伤害 >0（旧冲刺支 return 早退零 contact =0 恰红）', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（ai156Strike/contact 面首掷 ×1.0）;
     const en = mkEnemy(1, 60 * 16 + 60, 90 * 16);
     const { hooks, player } = makeHooks([en]);
     const m = bat(player, hooks, en.cx, en.cy, 388);  // 40×20 盒叠敌

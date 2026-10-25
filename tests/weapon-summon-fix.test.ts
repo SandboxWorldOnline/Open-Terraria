@@ -10,7 +10,7 @@
 //  ⑧ 致命球 533 自旋相位门 ai[0]<3 || ≥9（:28874-28877）
 //  ⑨ 星鞭 5479 星雨 1457 语义：CanProcOnNPC 门 + RemoveAllProcs、伤 ×2×0.22（:14001-14007/:15013-15036）
 //  ⑩ 月主鞭 5480 proc：单发 1045 弧线弹（:14977-15011 num=1）+ 命中链式补发 ≤3（:14015-14018）
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
 import { WhipProj } from '../src/entities/WhipProj';
 import { resolveWhipTagHit, MoonLordWhipProc } from '../src/entities/WhipTag';
@@ -90,8 +90,11 @@ function drawAndRecord(m: MinionProj): { scale: number[][] } {
   return { scale };
 }
 
+afterEach(() => vi.restoreAllMocks());   // ★BJ716-A:DV mock 泄漏防护
+
 describe('① 阿比盖尔 963 困难档伤害系数（1456 :12116-12125）', () => {
   it('肉前 num9=0.55 → ×(1+0.55×(n-1));hardMode → 1.3', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ716-A:DV 中性档（963 contact 首掷 ×1.0）
     const e1 = mkEnemy(1, 60 * 16 + 30, 90 * 16);
     const a = makeHooks([e1], false);
     // 两个 970 计数器 → n=2 → num7=1

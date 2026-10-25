@@ -1,6 +1,7 @@
 // 下落沙族回归(原版 SandBallFalling 系,AI_010):
 // 失去支撑 → FallingBlock 坠落(重力 0.3/tick)→ 落地变回 tile;命中实体 10 伤害。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+afterEach(() => { vi.restoreAllMocks(); });   // ★BJ712-C
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
@@ -171,6 +172,9 @@ describe('FallingBlock', () => {
   });
 
   it('命中玩家:EVP 链经典 20（基础 10×乘区1×2）且每块只结算一次', () => {
+  // ★BJ712-C：DamageVar 首掷入参包装（P.cs:14904）后链带 ±15% 掷——mock 0.5
+  // = tier 0 档（×1.0）,表值即掷中值;掷形面由 tests/bj712c-martian-dmg 三掷形承载
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const { game, dmg } = makeGame();
     const player = { x: 32 * 16, y: 10 * 16, w: 20, h: 42, dead: false } as never;
     (game as unknown as { player: unknown }).player = player;

@@ -32,6 +32,7 @@ import {
   type KillTileCtx, type MountData,
 } from './Mounts';
 import { MOUNT_DATA } from '../data/mountData';   // ★叶子直读（红蓝对抗 R4-F5b TDZ 断环,顶层 CART_MOUNT_TEXTURES 块消费）
+import { nextVector2Circular } from './SparkleGuitarProj';   // ★G32③ NextVector2Circular 单源（Utils.cs:1301-1304 角度×半径两掷）
 import { canHitLine } from '../physics/LineOfSight';
 import { applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';
@@ -103,11 +104,64 @@ export function cartDustKindOf(id: number): CartDustKind {
   return CART_DUST_KIND[id] ?? 'sparks';
 }
 
+// ★BJ709-G32③（2026-10-24,G31 登记债④任务书落地——census 定谳注转实现锚）:
+//  cMinecart 尘染料通道（miscDyes[2],Player.cs:9688 cMinecart=miscDyes[2].dye,
+//  Player.minecartDyeVid() 同 mountDyeVid 径单源）+七尘面 1:1（下方
+//  updateEffectsDust 派发,原 census 全量锚）:
+//  · doGemMinecartEffect（Mount.cs:4742-4756,调用=UpdateEffects case 25-30
+//    尘 86-91/case 31 Amber 尘 262——1/10 掷,NextVector2Square(-1,1)×(22,10)+
+//    Directions(0,10) 旋 RotatedRelativePoint,noGravity/fadeIn 0.6/scale 0.4/
+//    速×0.25）;
+//  · doSteamMinecartEffect（:4759-4776,调用=case 36 Steampunk 尘 303——|vx|≥1
+//    掷（<6 另需 _frame==0→animFrame）,位 Center+(-10,-4)·Directions+随机±3,
+//    scale 1.8,速×0.25 后 vy−2）;
+//  · doExhaustMinecartEffect（:4778-4812,调用=case 32 Beetle 尘 31——|v|<1 时
+//    1/4 掷续,发 1+(int)|v|/6 粒,位 Center+(-18,20)·Directions+随机±3+速堆叠,
+//    速×0.2,低速 vx−0.5·dir）;
+//  · doConfettiMinecartEffect（:4814-4852,调用=case 34 Party——尘 139+Next(4)
+//    纸屑,num3 首掷×2 复用（scale 0.5+num3/2）,低速 vx−0.5·dir）;
+//  · mechTrailDust（case 11 MinecartMech 轨迹尘 182 :5072-5135 尘面,新老位距
+//    >3px 按距离 Lerp 铺 1 粒/3px,customData=player 旧位一次性跟随,else 单粒
+//    钉位;case 11 五点光 :5084-5094（G32-D1）已随 ★BJ709-G34 清偿=mechCartLights
+//    纯函数+Renderer 车身块前置渲染帧注入,坐骑灯惯例）;
+//  · hellMinecartDust（case 22 Hell 尘 65 :5136-5178 尘面,|v|/5 钳 0-1 概率铺
+//    11 点轨迹【!(rand<num6) 门=越慢越密】,1/10 fadeIn 1.3+随机圆速;
+//    case 22 lavaMax+=420 装备面（G32-D2）已随 ★BJ709-G34 清偿=fixedUpdate
+//    装备面块逐拍写 p.cartLavaMaxBonus,Player 岩浆段聚合消费+:27930 无条件
+//    钳;G32-D3 shadowPos 采样 gfxOffY 域差同刀窄修（Player.updateSocialShadow
+//    采样并入 cart.gfxOffY 轨面项,见其 ★BJ709-G34 注）。
+//  全七面 d.dyeVid=minecartDyeVid()（GetSecondaryShader(cMinecart) 镜像）;
+//  SparksMeow 固定 shader（DelegateMethods.cs:401 GetShaderFromItemId(2870),
+//  非 cMinecart）另案勿混（wheelSparkDust 注在案）。
+
 /** SuperCart 防御加成（Mount.cs:4797-4798）：
  *  num = 1 + |vx|/RunSpeed × 2.5 → statDefense += (int)(2 × num)。
  *  RunSpeed 取 _shouldSuperCart 生效档（恒 20，Mount.cs:480-486） */
 export function superCartDefenseBonus(absVx: number, runSpeed: number): number {
   return Math.trunc(2 * (1 + (absVx / runSpeed) * 2.5));
+}
+
+/** ★BJ709-G34（G32-D1 清偿）:case 11 机械矿车五点光（Mount.cs:5072-5094
+ *  UpdateEffects case 11 头段）。num8=1+|vx|/RunSpeed×2.5（RunSpeed=Mount 实例
+ *  getter :453-486:SuperCart 档 20 / 常档 MountData.runSpeed=13）;vector5=
+ *  (0.4,0.12,0.15)×num8（:5074/:5085）;五点=mountedPlayer 的 Center/Top/Bottom/
+ *  Left/Right（骑乘盒=车盒 20×(42+heightBoost),SetMount PlayerSize 委派改盒
+ *  :6309-6320）各过 Lighting.AddLight(Vector2)=世界坐标 tile 下取整
+ *  （Lighting.cs:144-148）。netMode==2 服务器早退门（:5081-5084）=单机域不适用。
+ *  渲染帧采样=坐骑灯惯例（Mounts.ts mountLights 族注:状态派生量 tick/渲染域
+ *  同值,刷新拍位差 ≤1 帧）;消费面=Renderer 矿车车身绘制块前置注入。 */
+export function mechCartLights(x: number, y: number, w: number, h: number,
+  absVx: number, runSpeed: number): Array<{ tx: number; ty: number; r: number; g: number; b: number }> {
+  const num8 = 1 + (absVx / runSpeed) * 2.5;                    // :5075
+  const r = 0.4 * num8, g = 0.12 * num8, b = 0.15 * num8;       // :5074 ×:5085
+  const cx = x + w / 2, cy = y + h / 2;
+  return [
+    { tx: Math.floor(cx / 16), ty: Math.floor(cy / 16), r, g, b },        // :5086 Center
+    { tx: Math.floor(cx / 16), ty: Math.floor(y / 16), r, g, b },         // :5087 Top
+    { tx: Math.floor(cx / 16), ty: Math.floor((y + h) / 16), r, g, b },   // :5088 Bottom
+    { tx: Math.floor(x / 16), ty: Math.floor(cy / 16), r, g, b },         // :5089 Left
+    { tx: Math.floor((x + w) / 16), ty: Math.floor(cy / 16), r, g, b },   // :5090 Right
+  ];
 }
 
 /** 轮火花速度档（Player.cs:19585-19596 / 19643-19654）：
@@ -267,6 +321,11 @@ export class Minecart extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (!this.mounted) { this.dead = true; return; }   // 坐骑语义：无骑乘即消亡
     const p = game.player;
+    // ★G32③：oldPosition 快照（Player.cs:28281 语义=上一拍末位,本拍位移段前）——
+    //  Mech 轨迹尘 182 新老位距 Lerp 锚（Mount.cs:5109-5111）消费。复用 Entity
+    //  .oldX/oldY 同名字段（弹幕 switchTilesScan 路由只扫 entities.projectiles,
+    //  矿车在 props 桶=零耦合,见 Game.ts:32326）。
+    this.oldX = this.x; this.oldY = this.y;
     const st = game.world.store;
     const maxRun = this.runSpeed;
 
@@ -302,6 +361,7 @@ export class Minecart extends Entity {
         p.ridingCart = false;
         p.cart = null;
         p.cartDefenseBonus = 0;   // 坐骑防御加成随下车解除（UpdateEffects 停跑）
+        p.cartLavaMaxBonus = 0;   // ★BJ709-G34：Hell 车 lavaMax 提帽同拍解除
         return;
       }
     }
@@ -576,6 +636,13 @@ export class Minecart extends Entity {
     // num = 1 + |vx|/RunSpeed×2.5（RunSpeed 走 SuperCart 档 20）→ statDefense += (int)(2×num)
     p.cartDefenseBonus = this.superCart
       ? superCartDefenseBonus(Math.abs(this.vx), this.runSpeed) : 0;
+    // ★BJ709-G34（G32-D2 清偿）:case 22 Hell 矿车 UpdateEffects 装备面首行
+    //  `mountedPlayer.lavaMax += 420`（Mount.cs:5138）——提帽非回填（vanilla
+    //  lavaTime 只在离浆/免疫态 +1/tick 恢复,Player.cs:27926-27932 消费）。
+    //  仓内动态坐骑面=逐拍写 p.cartLavaMaxBonus（cartDefenseBonus 同模式;
+    //  下车清零随行:脱轨下车/坠界/dismountMinecart 三位+本拍覆写自愈）,
+    //  Player 岩浆段以 eqM.lavaMax+bonus 聚合消费。
+    p.cartLavaMaxBonus = this.mountId === 22 ? 420 : 0;
     if (this.superCart) this.castSuperCartLaser(p, game);
     // 激光余辉推进（Projectile.cs:31987-32029：20t 寿 + 尾随车位 + 反向即灭）
     for (let i = this.laserBeams.length - 1; i >= 0; i--) {
@@ -590,12 +657,19 @@ export class Minecart extends Entity {
     // ---- 鼠马车挖掘（Player.cs:19905 TryUsingDiggerCart：撞怪结算后同段）----
     this.tryUsingDiggerCart(p, game);
 
+    // ---- ★BJ709-G32③：Mount.UpdateEffects 尘支（Mount.cs:4848 switch 的七尘面;
+    //      vanilla 调用位=Player.Update :25854-25857,本仓锚在车位回写后=车末态
+    //      （速度/倾角本拍现值）。case 62-65 伤害加成/12 Fishron 光/22 lavaMax/
+    //      case 11 五点光等装备·光域未接=登记（见文件头 census 注 G32-D1/D2）----
+    this.updateEffectsDust(p, game);
+
     // 完全脱轨坠出世界底（误用兜底）：消亡防穿地（正常脱轨由 dryCollide 落地）
     if (!this.onTrackNow && !this.wasGrounded
       && this.y > st.h * 16 - 64) {
       this.dead = true;
       this.mounted = false;
       p.cartDefenseBonus = 0;
+      p.cartLavaMaxBonus = 0;   // ★BJ709-G34：Hell 车 lavaMax 提帽同拍解除
     }
   }
 
@@ -698,6 +772,241 @@ export class Minecart extends Entity {
     d.y -= 4;                                    // :236
     if (rand(0, 3) !== 0) d.noGravity = false;   // :237-241
     else d.scale *= 0.6;
+  }
+
+  // ---------------------------------------------------------------------------
+  // ★BJ709-G32③：Mount.UpdateEffects 尘发射面（Mount.cs:4742-4852 四委派 +
+  // case 11/22 直发,updateEffectsDust 派发见文件头 census 注）
+  // ---------------------------------------------------------------------------
+
+  /** 坐标基注（七面共通）：mountedPlayer ≡ 本车（玩家锁车,Player.cs 玩家盒即车
+   *  20×(42+heightBoost)）——Center=盒心、Bottom=(cx,y+h)、velocity=本车 (vx,vy)
+   *  （p.vy=0 系本仓锁位建模差,取车速;vanilla 骑车玩家速度即车速）、direction=
+   *  p.facing、Directions=(direction,gravDir)=(facing,1)（gravDir 翻转坐骑本仓
+   *  未实装恒 1,Minecart.ts:839 既有备案）、RotatedRelativePoint=私有
+   *  rotatedRelativePoint（PlayerOffset 8 同式）、fullRotation=this.rotation
+   *  （轨面倾角）。尘通道=game.spawnDust（perfect=NewDustPerfect）+后置覆写族序
+   *  （wheelSparkDust 同模式）;RNG=Math.random 直映（AI 侧既有约定,不进播种流）。 */
+  private updateEffectsDust(p: Player, game: GameHooks): void {
+    switch (this.mountId) {
+      case 25: this.doGemMinecartEffect(p, game, 86); break;   // :4914-4915
+      case 26: this.doGemMinecartEffect(p, game, 87); break;
+      case 27: this.doGemMinecartEffect(p, game, 88); break;
+      case 28: this.doGemMinecartEffect(p, game, 89); break;
+      case 29: this.doGemMinecartEffect(p, game, 90); break;
+      case 30: this.doGemMinecartEffect(p, game, 91); break;
+      case 31: this.doGemMinecartEffect(p, game, 262); break;  // :4932-4933 Amber
+      case 36: this.doSteamMinecartEffect(p, game, 303); break;   // :5180-5181
+      case 32: this.doExhaustMinecartEffect(p, game, 31); break;  // :5183-5184 Beetle
+      case 34: this.doConfettiMinecartEffect(p, game); break;     // :5186-5187 Party
+      case 11: this.mechTrailDust(p, game); break;                 // :5072 尘面
+      case 22: this.hellMinecartDust(p, game); break;              // :5136 尘面
+    }
+  }
+
+  /** DoGemMinecartEffect（Mount.cs:4742-4756）——1/10 掷;NextVector2Square(-1,1)
+   *  ×(22,10) 偏移 + (0,10)·Directions 锚 Center → RotatedRelativePoint;尘
+   *  perfect（velocity 缺省 0,×0.25 无效掷=保持 0）;shader=cMinecart。 */
+  private doGemMinecartEffect(p: Player, game: GameHooks, dustType: number): void {
+    if (!(Math.random() < 0.1)) return;                    // :4744 Next(10)==0
+    const sqx = -1 + 2 * Math.random(), sqy = -1 + 2 * Math.random();   // NextVector2Square(-1,1) 逐轴 2 掷
+    const rp = this.rotatedRelativePoint(
+      this.cx + 0 * p.facing + sqx * 22,                   // Center+(0,10)*Directions+square*(22,10)
+      this.cy + 10 + sqy * 10);
+    const d = game.spawnDust?.(rp.x, rp.y, 0, 0, dustType, 0, 0, 0, null, 1, false, true);
+    if (!d) return;
+    d.noGravity = true;                                    // :4750
+    d.fadeIn = 0.6;                                        // :4751
+    d.scale = 0.4;                                         // :4752
+    d.vx *= 0.25; d.vy *= 0.25;                            // :4753（perfect 初速 0 → 0）
+    d.dyeVid = p.minecartDyeVid();                         // :4754 shader=cMinecart
+  }
+
+  /** DoSteamMinecartEffect（:4759-4776）——|vx|≥1 掷（<6 另需 _frame==0→animFrame
+   *  同源,runningFrameDelay 12 三帧循环）;位 Center+(−10,−4)·Directions+square(3,3);
+   *  perfect: noGravity/fadeIn 0.6/scale 1.8/velocity ×0.25 后 vy−2;shader。 */
+  private doSteamMinecartEffect(p: Player, game: GameHooks, dustType: number): void {
+    const num = Math.abs(this.vx);                         // :4761
+    if (!(num >= 1 && (num >= 6 || this.animFrame === 0))) return;   // :4762-4763
+    const sqx = -1 + 2 * Math.random(), sqy = -1 + 2 * Math.random();
+    const rp = this.rotatedRelativePoint(
+      this.cx - 10 * p.facing + sqx * 3,                   // Center+(-10,-4)*Directions+square*(3,3)
+      this.cy - 4 + sqy * 3);
+    const d = game.spawnDust?.(rp.x, rp.y, 0, 0, dustType, 0, 0, 0, null, 1, false, true);
+    if (!d) return;
+    d.noGravity = true;                                    // :4767
+    d.fadeIn = 0.6;                                        // :4768
+    d.scale = 1.8;                                         // :4769
+    d.vx *= 0.25; d.vy *= 0.25;                            // :4770
+    d.vy -= 2;                                             // :4771
+    d.dyeVid = p.minecartDyeVid();                         // :4772
+  }
+
+  /** DoExhaustMinecartEffect（:4778-4812）——|v|<1 时 1/4 掷续（≥1 无掷直入）;
+   *  粒数 = 1+(int)|v|/6（num2 先减再入体=体见值 N−1..0）;(−18,20)·Directions 偏移
+   *  （|v|>6 → X+4·dir;num2>0 → +velocity×(num2/3 int 除）)+square(3,3);perfect:
+   *  noGravity/fadeIn 0.6/scale 1.2/velocity ×0.2（低速 vx−0.5·dir）;shader。 */
+  private doExhaustMinecartEffect(p: Player, game: GameHooks, dustType: number): void {
+    const num = Math.hypot(this.vx, this.vy);              // :4780 velocity.Length()
+    if (num < 1 && Math.floor(Math.random() * 4) !== 0) return;   // :4781-4784 Next(4)
+    let num2 = 1 + Math.floor(num / 6);                    // :4785 1+(int)num/6
+    while (num2 > 0) {
+      num2--;                                              // :4787 先减
+      const sqx = -1 + 2 * Math.random(), sqy = -1 + 2 * Math.random();
+      let ox = -18 * p.facing, oy = 20;                    // (−18,20)*Directions
+      if (num > 6) ox += 4 * p.facing;                     // :4789-4791
+      if (num2 > 0) {                                      // :4792-4794
+        const k = Math.trunc(num2 / 3);                    // int 除
+        ox += this.vx * k; oy += this.vy * k;
+      }
+      const rp = this.rotatedRelativePoint(this.cx + ox + sqx * 3, this.cy + oy + sqy * 3);
+      const d = game.spawnDust?.(rp.x, rp.y, 0, 0, dustType, 0, 0, 0, null, 1, false, true);
+      if (!d) continue;
+      d.noGravity = true;                                  // :4797
+      d.fadeIn = 0.6;                                      // :4798
+      d.scale = 1.2;                                       // :4799
+      d.vx *= 0.2; d.vy *= 0.2;                            // :4800
+      if (num < 1) d.vx -= 0.5 * p.facing;                 // :4801-4804
+      d.dyeVid = p.minecartDyeVid();                       // :4805
+    }
+  }
+
+  /** DoConfettiMinecartEffect（:4814-4852）——双掷门（短路序:(num<1 ∧ Next(6)≠0)
+   *  ∨ (num<3 ∧ Next(3)≠0) → 弃,速度档决定掷不掷）;粒数=1+(int)num/6;num3=
+   *  NextFloat×2 首掷复用（scale 0.5+num3/2 与 X 堆叠 (dir·num2)·num3）;
+   *  (−18,4)·Directions+square(3,8) 偏移;尘 139+Next(4) 纸屑 perfect: noGravity/
+   *  fadeIn 0.6/velocity ×0.2（低速 vx−0.5·dir）;shader。 */
+  private doConfettiMinecartEffect(p: Player, game: GameHooks): void {
+    const num = Math.hypot(this.vx, this.vy);              // :4815
+    if ((num < 1 && Math.floor(Math.random() * 6) !== 0)   // :4818-4820
+      || (num < 3 && Math.floor(Math.random() * 3) !== 0)) return;
+    let num2 = 1 + Math.floor(num / 6);                    // :4821
+    while (num2 > 0) {
+      num2--;                                              // :4823 先减
+      const num3 = Math.random() * 2;                      // :4824 NextFloat()*2f
+      const sqx = -1 + 2 * Math.random(), sqy = -1 + 2 * Math.random();
+      let ox = -18 * p.facing, oy = 4;                     // (−18,4)*Directions
+      ox += num * p.facing * 0.5 + p.facing * num2 * num3; // :4827
+      if (num2 > 0) {                                      // :4828-4830
+        const k = Math.trunc(num2 / 3);
+        ox += this.vx * k; oy += this.vy * k;
+      }
+      const rp = this.rotatedRelativePoint(this.cx + ox + sqx * 3, this.cy + oy + sqy * 8);
+      const d = game.spawnDust?.(rp.x, rp.y, 0, 0,
+        139 + Math.floor(Math.random() * 4),               // :4832 139+Next(4)
+        0, 0, 0, null, 1, false, true);
+      if (!d) continue;
+      d.noGravity = true;                                  // :4834
+      d.fadeIn = 0.6;                                      // :4835
+      d.scale = 0.5 + num3 / 2;                            // :4836
+      d.vx *= 0.2; d.vy *= 0.2;                            // :4837
+      if (num < 1) d.vx -= 0.5 * p.facing;                 // :4838-4841
+      d.dyeVid = p.minecartDyeVid();                       // :4842
+    }
+  }
+
+  /** case 11 MinecartMech 轨迹尘 182（:5072-5135 尘面;netMode==2 门单机不达,
+   *  五点光 :5084-5094 未接=登记债 G32-D1）。num9=sign(vx)∥direction;num10=−24
+   *  （direction≠num9 → −22;num9==−1 → ++）;vector6=(num10·num9,−19)·RotatedBy(
+   *  fullRotation);vector7=(Lerp(0,−8,fr/(π/4)),Lerp(0,2,|fr/(π/4)|))·RotatedBy(fr)
+   *  （num9==sign(fr) 时 ×Lerp(1,0.6,|fr/(π/4)|)）;vector8=Bottom+…、vector9=
+   *  oldPosition+Size·(0.5,1)+…;距>3px → (int)距/3（余数进位）粒 Lerp 铺 1 粒/3px,
+   *  else 单粒钉位。尘 NewDust 后 position/velocity 双覆写=noGravity/零速/
+   *  followPlayer 一次性（182 :705-706 customData=Player 先随一拍再清）;
+   *  shader。 */
+  private mechTrailDust(p: Player, game: GameHooks): void {
+    let num9 = Math.sign(this.vx);                         // :5077-5080
+    if (num9 === 0) num9 = p.facing;
+    let num10 = -24;                                       // :5095
+    if (p.facing !== num9) num10 = -22;                    // :5096-5099
+    if (num9 === -1) num10++;                              // :5100-5102
+    const fr = this.rotation;                              // player.fullRotation（轨面）
+    const cos = Math.cos(fr), sin = Math.sin(fr);
+    const v6x = num10 * num9 * cos - -19 * sin;
+    const v6y = num10 * num9 * sin + -19 * cos;            // :5103 (num10*num9,-19) 旋
+    const q = fr / (Math.PI / 4);
+    const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+    const w2x = lerp(0, -8, q), w2y = lerp(0, 2, Math.abs(q));   // :5104-5105
+    let v7x = w2x * cos - w2y * sin, v7y = w2x * sin + w2y * cos; // :5105 RotatedBy
+    if (num9 === Math.sign(fr)) {                          // :5106-5108
+      const m = lerp(1, 0.6, Math.abs(q));
+      v7x *= m; v7y *= m;
+    }
+    const v8x = this.cx + v6x + v7x;                       // :5109 Bottom+vector6+vector7
+    const v8y = this.y + this.h + v6y + v7y;
+    const v9x = (this.oldX ?? this.x) + this.w / 2 + v6x + v7x;   // :5110 oldPosition+Size*(0.5,1)+…
+    const v9y = (this.oldY ?? this.y) + this.h + v6y + v7y;
+    const dist = Math.hypot(v8x - v9x, v8y - v9y);
+    const dye = p.minecartDyeVid();
+    const emit = (px: number, py: number): void => {
+      const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 182, 0, 0);   // :5112/:5124 NewDust(Center,0,0,182)
+      if (!d) return;
+      d.x = px; d.y = py;                                  // position 覆写（Lerp/钉位）
+      d.noGravity = true;                                  // :5114/:5126
+      d.vx = 0; d.vy = 0;                                  // :5115/:5127 velocity 覆写
+      d.followPlayer = true; d.followOnce = true;          // :5116/:5128 customData=Player
+      d.dyeVid = dye;                                      // :5117/:5129 shader
+    };
+    if (dist > 3) {                                        // :5111-5122
+      let num11 = Math.trunc(Math.trunc(dist) / 3);        // (int)dist/3（整除）
+      if (dist % 3 !== 0) num11++;                         // 余数进位
+      for (let num12 = 1; num12 <= num11; num12++) {
+        emit(v9x + (v8x - v9x) * (num12 / num11), v9y + (v8y - v9y) * (num12 / num11));   // :5118
+      }
+    } else {
+      emit(v8x, v8y);                                      // :5123-5130 单粒钉位
+    }
+  }
+
+  /** case 22 HellMinecart 尘 65（:5136-5178 尘面;lavaMax+=420 :5138 装备面已随
+   *  ★BJ709-G34（G32-D2）清偿——fixedUpdate 装备面块逐拍写 p.cartLavaMaxBonus）。
+   *  锚 vector2=Center+(20,10)·Directions、pos=锚+velocity、pos2=
+   *  锚+(−1,−0.5)·Directions（三者各过 RRP）;value=shadowPos[2]−position+锚（社交
+   *  残影 3 拍轮转单源 Player.socialShadowPos2——SW-FX36 稳态滞后 4~6 拍的轨迹
+   *  起点;采样 gfxOffY 轨面项已并入=★BJ709-G34（G32-D3）窄修）;+vector3(=pos−锚)
+   *  前探一步;vector4=pos−pos2
+   *  反漂;num6=clamp(|v|/5,0,1);11 点 Lerp(value,锚,t)【!(rand<num6) 门=越慢越密
+   *  （:5149 原文取反,静止恒发/极速恒不发）】;尘 65 perfect 初速=
+   *  NextVector2Circular(0.5,0.5)×num6:scale 0.6/fadeIn 0/velocity ×−1−vector4/
+   *  noGravity;1/10 → fadeIn 1.3+速度重掷 NextVector2Circular(3,3)×num6;
+   *  customData=Player 对 65 型 vanilla 惰性（Dust.cs 无 65 消费位）=不接
+   *  followPlayer;shader。 */
+  private hellMinecartDust(p: Player, game: GameHooks): void {
+    const ax = this.cx + 20 * p.facing, ay = this.cy + 10; // :5139 vector2=Center+(20,10)*Directions
+    const posx0 = ax + this.vx, posy0 = ay + this.vy;      // :5140 pos=vector2+velocity
+    const p2x = ax - p.facing, p2y = ay - 0.5;             // :5141 pos2=vector2+(-1,-0.5)*Directions
+    const r2 = this.rotatedRelativePoint(ax, ay);          // :5142-5144 三 RRP
+    const rp = this.rotatedRelativePoint(posx0, posy0);
+    const rp2 = this.rotatedRelativePoint(p2x, p2y);
+    const sh = p.socialShadowPos2();                       // :5145 shadowPos[2]
+    const v3x = rp.x - r2.x, v3y = rp.y - r2.y;            // :5146 vector3=pos-vector2
+    const anchorx = r2.x + v3x, anchory = r2.y + v3y;      // :5147-5148 vector2+=vector3
+    const valuex = sh.x - this.x + r2.x + v3x;             // :5145+5148 value=shadowPos[2]-position+vector2(+vector3)
+    const valuey = sh.y - this.y + r2.y + v3y;             //（position=玩家位=锁车位 this.x/y）
+    const v4x = rp.x - rp2.x, v4y = rp.y - rp2.y;          // :5149 vector4=pos-pos2
+    const num6 = Math.max(0, Math.min(1, Math.hypot(this.vx, this.vy) / 5));   // :5150
+    const dye = p.minecartDyeVid();
+    for (let t = 0; t <= 1; t += 0.1) {                    // :5151 11 点（浮点累积同 C# 11 迭代）
+      if (!(Math.random() < num6)) {                       // :5153 !(NextFloat()<num6)
+        const bx = valuex + (anchorx - valuex) * t;        // Vector2.Lerp(value,vector2,t)
+        const by = valuey + (anchory - valuey) * t;
+        const cv = nextVector2Circular(Math.random, 0.5, 0.5);   // :5154
+        const d = game.spawnDust?.(bx, by, 0, 0, 65, cv.x * num6, cv.y * num6,
+          0, null, 1, false, true);
+        if (!d) continue;
+        d.scale = 0.6;                                     // :5155
+        d.fadeIn = 0;                                      // :5156
+        d.vx *= -1; d.vy *= -1;                            // :5158 velocity*=-1
+        d.noGravity = true;                                // :5159
+        d.vx -= v4x; d.vy -= v4y;                          // :5160
+        d.dyeVid = dye;                                    // :5161
+        if (Math.floor(Math.random() * 10) === 0) {        // :5162 Next(10)==0
+          d.fadeIn = 1.3;                                  // :5163
+          const c3 = nextVector2Circular(Math.random, 3, 3);   // :5164
+          d.vx = c3.x * num6; d.vy = c3.y * num6;
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
