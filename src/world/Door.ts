@@ -42,9 +42,26 @@ export function clearDoorAt(st: TileStore, x: number, y: number): [number, numbe
   return [ax, ay];
 }
 
+/** ★BJ722-A D2/D3（2026-10-26）：开关门环境注入（形沿 shiftTallGate opts 范式） */
+export interface DoorToggleOpts {
+  /** 清位列砍切击杀钩（原版 OpenDoor :38090-38097 KillTile——直杀格的掉落/尘/声
+   *  面,Game 侧注入 breakTile）。缺省 = 旧 setTile(0) 近似（纯函数测试面;tileCut
+   *  直杀格原版有掉落档——草籽 283/蘑菇 60·5·183/藤 2996/药草 83·84 全档,
+   *  GetItemDrops case 3/24/52/62/73/110/201/382/519/528/83/84——缺省=零掉落,
+   *  BJ721 登记债 D3,Game 侧注入即清偿;件型掉落不受影响=残格经 Check* 级联） */
+  killCell?: (x: number, y: number) => void;
+}
+
+/** ★BJ722-A D3：GameHooks 侧 killCell 注入便捷构造（无 breakTile 面回落缺省近似） */
+export function doorKillCellOpts(
+  breakTile?: (x: number, y: number) => void,
+): DoorToggleOpts | undefined {
+  return breakTile ? { killCell: breakTile } : undefined;
+}
+
 /** 开门（原版 OpenDoor 语义）。direction: 玩家面朝方向 ±1。
  *  返回 false = 目标侧被挡（调用方应换 -direction 重试）。 */
-export function openDoor(st: TileStore, x: number, y: number, direction: number): boolean {
+export function openDoor(st: TileStore, x: number, y: number, direction: number, opts?: DoorToggleOpts): boolean {
   if (st.get(x, y) !== T.DOOR_CLOSED) return false;
   // ★SW-AS1(2026-09-05):IsLockedDoor 早退（OpenDoor :38027-38030）——神庙锁门
   //  （style 11 段 fy∈[594,646]）拒开。此前仅手动路径有锁拦截（Player.cs:32332
@@ -75,17 +92,34 @@ export function openDoor(st: TileStore, x: number, y: number, direction: number)
     if (t !== 0 && !doorSmashable(t)) return false;
   }
   for (let dy = 0; dy < 3; dy++) {
-    if (st.get(clearX, ay + dy) !== 0) st.setTile(clearX, ay + dy, 0); // KillTile 近似（砍切类 drop 均 null）
+    if (st.get(clearX, ay + dy) !== 0) {
+      // ★BJ722-A D3：KillTile 注入位（:38095）——缺省回落 setTile(0) 近似
+      if (opts?.killCell) opts.killCell(clearX, ay + dy);
+      else st.setTile(clearX, ay + dy, 0);
+    }
   }
   // 开门占 2 列：direction==-1 锚点左移一格、frameX+36（原版 num1/x 逻辑）
   const ax = direction === -1 ? x - 1 : x;
   const baseFx = 72 * col + (direction === -1 ? 36 : 0);
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      if (!st.inBounds(ax + dx, ay + dy)) continue;
-      st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, baseFx + dx * 18, 54 * row + dy * 18);
+  // ★BJ722-A D2：裸写窗（原版 OpenDoor :38109-38158 六格 active/type/frame 直写,
+  //  中途零 TileFrame 派发——仓旧逐格 setTile 中途派发 onTileChanged=BJ721「开门拆门」
+  //  的放大器（类型守卫已堵致害面,本窗收口写原子性=对齐债 D2 清偿）。窗后
+  //  notifyChanged 补派发（BJ361：渲染 mark 主通道+DECOR/火把/藤全监听族——并入域
+  //  2×3 各 3×3 并集 ⊇ 原版尾扫 :38159-38165 4×4 TileFrame 面,幂等复检）
+  const touched: Array<[number, number]> = [];
+  st.suppressListeners = true;
+  try {
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        if (!st.inBounds(ax + dx, ay + dy)) continue;
+        st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, baseFx + dx * 18, 54 * row + dy * 18);
+        touched.push([ax + dx, ay + dy]);
+      }
     }
+  } finally {
+    st.suppressListeners = false;
   }
+  for (const [tx, ty] of touched) st.notifyChanged(tx, ty);
   return true;
 }
 
@@ -121,17 +155,32 @@ export function closeDoor(st: TileStore, x: number, y: number, rng: () => number
   // ★曾 3 列无差别 setTile(0):门朝空侧开再关时 sweepR=x+1 越过门自身两列,
   // 把旁贴工作台/墓碑的半边格直接抹掉(用户报"开关门切半贴图",2026-08-14)
   const sweepL = Math.min(closedX, x - 1), sweepR = Math.max(closedX + 1, x + 1);
-  for (let sx = sweepL; sx <= sweepR; sx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      if (!st.inBounds(sx, ay + dy)) continue;
-      if (st.get(sx, ay + dy) === T.DOOR_OPEN) st.setTile(sx, ay + dy, 0);
+  // ★BJ722-A D2：裸写窗（原版 CloseDoor :32155-32173 写循环 type=10/active(false)
+  //  直写零派发+尾扫 :32185-32189 3×4 TileFrame 一次——仓旧逐格 setTile 中途派发
+  //  =BJ322 家族写原子性债;窗后 notifyChanged 补派发（BJ361 渲染 mark+监听全族,
+  //  并入域 ⊇ 原版 3×4 尾扫面,幂等）。无 smash 清位（vanilla 关门不砍切）
+  const touched: Array<[number, number]> = [];
+  st.suppressListeners = true;
+  try {
+    for (let sx = sweepL; sx <= sweepR; sx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        if (!st.inBounds(sx, ay + dy)) continue;
+        if (st.get(sx, ay + dy) === T.DOOR_OPEN) {
+          st.setTile(sx, ay + dy, 0);
+          touched.push([sx, ay + dy]);
+        }
+      }
     }
+    const [cfx] = doorClosedFrame(col * 36, Math.floor(rng() * 3));
+    for (let dy = 0; dy < 3; dy++) {
+      if (!st.inBounds(closedX, ay + dy)) continue;
+      st.setTile(closedX, ay + dy, T.DOOR_CLOSED, cfx, 54 * row + dy * 18);
+      touched.push([closedX, ay + dy]);
+    }
+  } finally {
+    st.suppressListeners = false;
   }
-  const [cfx] = doorClosedFrame(col * 36, Math.floor(rng() * 3));
-  for (let dy = 0; dy < 3; dy++) {
-    if (!st.inBounds(closedX, ay + dy)) continue;
-    st.setTile(closedX, ay + dy, T.DOOR_CLOSED, cfx, 54 * row + dy * 18);
-  }
+  for (const [tx, ty] of touched) st.notifyChanged(tx, ty);
   return true;
 }
 

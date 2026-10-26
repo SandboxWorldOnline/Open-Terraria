@@ -69,6 +69,8 @@ export interface VanillaHooks {
   onPlayerHurt?: (damage: number, hitDir: number) => void;
   /** 远端/服务器弹幕快照（msg27 → Game.netApplyProjSnaps,SW kind0 直飞傀儡+vid 贴图） */
   onProjectileSync?: (snaps: ProjSnap[]) => void;
+  /** 弹幕击杀（msg29 → Game.netRemoveProjPuppets——傀儡即时回收,消 180t GC 兜底） */
+  onProjDespawn?: (keys: number[]) => void;
   /** 掉落物操作（msg21 spawn/更新 + msg151 despawn → Game.netApplyItemOp 傀儡管线） */
   onItemOp?: (op: ItemOpMsg) => void;
   /** 箱子内容到达（msg32 缓冲+msg33 触发 → Game.netApplyChest 登记+开面板） */
@@ -173,6 +175,8 @@ export class VanillaClient {
   private lastSectionReqKey = '';
   /** framed 放置段请求冷却账（桶键→上次请求时刻;3s 冷却防他人建房风暴） */
   private frameSecReqAt = new Map<string, number>();
+  /** msg86 TE 注册表（id→锚点+类别;remove 路径精准清 furnitureItems 用） */
+  private teById = new Map<number, { x: number; y: number; kind: string }>();
   /** 诊断账（互操作调试期常驻:停摆/丢帧定位三对照——桥下行账 vs CDP vs 本计数） */
   wsMsgCount = 0;       // WS 消息（TCP chunk）数
   processedCount = 0;   // 已解析并投递 handle 的 vanilla 帧数
@@ -278,7 +282,30 @@ export class VanillaClient {
         const prefix = r.u8();
         const vid = r.i16();
         r.u8(); // bits（favorited[0]——渲染无消费）
-        if (plr === this.mySlot) return;
+        // ★SSC 反向覆盖债清偿（2026-10-26）:TShock SSC 服会为玩家推 msg5（服务器
+        // 权威物品账）——己槽不再跳过,按槽位写回本地 inventory/armor/dye/misc。
+        // 非 SSC 服不发己槽 msg5（CanRelay 中继面只给他人）,此路径天然不触发。
+        if (plr === this.mySlot) {
+          if (!this.worldDelivered) return;
+          const pl = this.game.player as null | {
+            inv: {
+              slots: Array<{ id: number; stack: number; prefix?: number } | null>;
+              armor: Array<{ id: number; stack: number; prefix?: number } | null>;
+              dye: Array<{ id: number; stack: number; prefix?: number } | null>;
+              miscEquips: Array<{ id: number; stack: number; prefix?: number } | null>;
+              miscDyes: Array<{ id: number; stack: number; prefix?: number } | null>;
+            };
+          };
+          if (!pl) return;
+          const id5 = vid ? this.itemByVid(vid) : 0;
+          const own5 = id5 ? { id: id5, stack: Math.max(1, stack), prefix: prefix || undefined } : null;
+          if (slotId >= 0 && slotId <= 57) pl.inv.slots[slotId] = own5;
+          else if (slotId >= SLOT.armor && slotId < SLOT.armor + 20) pl.inv.armor[slotId - SLOT.armor] = own5;
+          else if (slotId >= SLOT.dye && slotId < SLOT.dye + 10) pl.inv.dye[slotId - SLOT.dye] = own5;
+          else if (slotId >= SLOT.misc && slotId < SLOT.misc + 5) pl.inv.miscEquips[slotId - SLOT.misc] = own5;
+          else if (slotId >= SLOT.miscDye && slotId < SLOT.miscDye + 5) pl.inv.miscDyes[slotId - SLOT.miscDye] = own5;
+          return;
+        }
         const id = vid ? this.itemByVid(vid) : 0;
         const entry = id ? { id, stack: Math.max(1, stack), prefix: prefix || undefined } : null;
         let bag = this.remoteItems.get(plr);
@@ -328,6 +355,15 @@ export class VanillaClient {
         if (sec.teTruncated) this.traceOnce(`段 TE 止损（未知型/变长体,只损 TE 不伤 tiles;teCount=${sec.teCount}`);
         this.sectionsReceived++;
         for (const c of sec.chests) this.stashedChests.set(`${c.x},${c.y}`, c);
+        // 木牌文本（段尾段 sign 列表 → world.signs;曾只 stash 箱子=牌全显"..."判例）
+        if (sec.signs.length) {
+          const wsigns = world.signs;
+          for (const sg of sec.signs) {
+            const ex = wsigns.find((t) => t.x === sg.x && t.y === sg.y);
+            if (ex) ex.text = sg.text;
+            else wsigns.push({ x: sg.x, y: sg.y, text: sg.text });
+          }
+        }
         if (this.worldDelivered) {
           this.hooks.onSectionArrived?.(sec.rect);
         } else {
@@ -450,6 +486,13 @@ export class VanillaClient {
       }
       case MsgId.StatusText:
         return; // NetworkText 载荷暂不解析（帧定界自证;进度文案 P4）
+      case MsgId.KillProjectile: { // 29（服务器中继的弹幕击杀→傀儡即时回收）
+        // 线格式 [i32 ProjectileKey][f32 x][f32 y]（位置仅服务端用,客户端忽略）
+        const killKey = r.i32();
+        r.f32(); r.f32();
+        this.hooks.onProjDespawn?.([killKey]);
+        return;
+      }
       case MsgId.SyncProjectile: { // 27（远端/服务器弹幕 → kind0 直飞傀儡,vid 贴图）
         const key = r.i32();      // ProjectileKey（i32;傀儡桶键直用——高 8 位与 SW ownerSlot
                                   // 位域语义不同,PvP 归因面 P2 校正）
@@ -540,7 +583,16 @@ export class VanillaClient {
         // /5帽架/6食物盘/7晶塔/8展示罐/9风筝桩/10捕获桩。
         const teId = r.i32();
         const exists = r.u8() !== 0;
-        if (!exists) { this.hooks.onFurnitureTE?.(0, 0, '', null); void teId; return; }
+        if (!exists) {
+          // ★红蓝对抗债清偿（2026-10-26）：remove 按 ID 注册表精准清记录——旧版空 kind
+          // 早退=他人清空物品框后我方幽灵残物。注册表在 add 路径持续维护。
+          const rec = this.teById.get(teId);
+          if (rec) {
+            this.teById.delete(teId);
+            this.hooks.onFurnitureTE?.(rec.x, rec.y, rec.kind, null);
+          }
+          return;
+        }
         const type86 = r.u8();
         const x86 = r.i16(), y86 = r.i16();
         const kindOf = (t: number): string | null =>
@@ -549,6 +601,7 @@ export class VanillaClient {
         const kind86 = kindOf(type86);
         if (kind86) { // 单槽族：[i16 vid][u8 prefix][i16 stack]
           const vid = r.i16(), prefix = r.u8(), stack = r.i16();
+          this.teById.set(teId, { x: x86, y: y86, kind: kind86 });
           this.hooks.onFurnitureTE?.(x86, y86, kind86, vid > 0 ? { vid, stack, prefix } : null);
         } else if (type86 === 5) { // HatRack（TEHatRack.cs ReadExtraData）：
           // [u8 bits（0-1=帽,2-3=染料）]×条件物品[i16 vid][u8 prefix][i16 stack]
@@ -556,6 +609,7 @@ export class VanillaClient {
           const slots: Array<{ vid: number; stack: number; prefix: number } | null> = [null, null, null, null];
           for (let i = 0; i < 2; i++) if (bits & (1 << i)) { const vid = r.i16(), prefix = r.u8(), stack = r.i16(); slots[i] = { vid, stack, prefix }; }
           for (let j = 0; j < 2; j++) if (bits & (1 << (j + 2))) { const vid = r.i16(), prefix = r.u8(), stack = r.i16(); slots[j + 2] = { vid, stack, prefix }; }
+          this.teById.set(teId, { x: x86, y: y86, kind: 'hat_rack' });
           this.hooks.onFurnitureMultiTE?.(x86, y86, 'hat_rack', slots);
         } else if (type86 === 3) { // DisplayDoll（TEDisplayDoll.cs ReadExtraData,326 版）：
           // [u8 equipBits][u8 dyeBits][u8 pose][u8 miscBits]×条件物品;equip9+dye9+misc1
@@ -569,6 +623,7 @@ export class VanillaClient {
           for (let i = 0; i < 9; i++) if (equipMask & (1 << i)) { const vid = r.i16(), prefix = r.u8(), stack = r.i16(); slots[i] = { vid, stack, prefix }; }
           for (let j = 0; j < 9; j++) if (dyeMask & (1 << j)) { const vid = r.i16(), prefix = r.u8(), stack = r.i16(); slots[10 + j] = { vid, stack, prefix }; }
           if (mb & 1) { const vid = r.i16(), prefix = r.u8(), stack = r.i16(); slots[9] = { vid, stack, prefix }; }
+          this.teById.set(teId, { x: x86, y: y86, kind: 'display_doll' });
           this.hooks.onFurnitureMultiTE?.(x86, y86, 'display_doll', slots);
         }
         // 0/2/7/9/10（木桩/逻辑传感/晶塔[module8 已接]/风筝桩/捕获桩）本地无消费面字节跳过
@@ -651,6 +706,23 @@ export class VanillaClient {
         rp.fresh = true;
         rp.lastFresh = performance.now();
         this.players.set(slot, rp);
+        return;
+      }
+      case 65: { // TeleportPlayer：[u8 bits][i16 slot][f32 x][f32 y][u8 style]
+        // [bits0:任一=1 extra/2=2][bits2:用现位][bits3:i32 extra]
+        const bits65 = r.u8();
+        const slot65 = r.i16();
+        const tx = r.f32(), ty = r.f32();
+        r.u8(); // style
+        if (bits65 & 4) { /* 用现位——服务器让各端自取,本地已正确 */ }
+        if (bits65 & 8) r.i32(); // extra（PotionOfReturn 等附加）
+        if (slot65 === this.mySlot) {
+          const p65 = this.game.player as { x: number; y: number; vx?: number; vy?: number; netOffX?: number; netOffY?: number } | null | undefined;
+          if (p65) { p65.x = tx; p65.y = ty; p65.vx = 0; p65.vy = 0; }
+        } else {
+          const rp65 = this.players.get(slot65);
+          if (rp65) { rp65.x = tx; rp65.y = ty; }
+        }
         return;
       }
       case MsgId.PlayerActive: { // 14（上线/离线广播）
@@ -1210,6 +1282,19 @@ export class VanillaClient {
     }
   }
 
+  /** 服务器 TileSections 标记保活：段内有本地 tile 修改时 10s 冷却重请求一次 */
+  private markedSectionAt = new Map<string, number>();
+  private ensureSectionMarked(tx: number, ty: number) {
+    const sx = Math.floor(tx / 200), sy = Math.floor(ty / 150);
+    const k = sx + ',' + sy;
+    const now = performance.now();
+    const last = this.markedSectionAt.get(k) ?? 0;
+    if (now - last > 10000) {
+      this.markedSectionAt.set(k, now);
+      this.send(new VWriter().i16(sx).i16(sy).finish(MsgId.RequestSection));
+    }
+  }
+
   /** 引擎面（Game.postUpdate 调用,坐标=世界像素）→ 段坐标请求 */
   requestSection(cx: number, cy: number) {
     const sx = Math.floor(cx / 16 / SECTION_W), sy = Math.floor(cy / 16 / SECTION_H);
@@ -1224,9 +1309,13 @@ export class VanillaClient {
   /** 本地 tile 编辑上报（引擎 netReporter → msg17 TileManipulation;净流入重放走
    *  数组直写不经本面=无回声）。§TileOpAction 内部值→原版动作映射:
    *  SetTile→Kill/Place(vid=TILE_DEFS 反查 vanilla.sheet;墙域=同 id 段流直拷判例;
-   *  ★债:Place style 恒 0——带样式变体的放置落到服务器侧默认样式,P3 样式派生)。 */
+   *  Place style=fy/帧高 通用近似派生——2026-10-26 债清偿,见 Place 分支内注)。 */
   reportTileOp(op: import('../protocol').TileOp) {
     if (!this.active || !this.worldDelivered) return;
+    // ★段标记保活（2026-10-26 幽灵破坏定谳）：服务器 msg17 门=TileSections[段]未标记
+    // → KillTile(fail) 静默拒（不破坏+不修正+照样中继=全员本地幽灵破坏,重登复原）。
+    // 修改前对所在段 10s 冷却刷新一次 msg159（服务器发送即标记）——门恒通。
+    this.ensureSectionMarked(op.x, op.y);
     const send17 = (action: number, x: number, y: number, d1: number, d2 = 0) =>
       this.send(new VWriter().u8(action).i16(x).i16(y).i16(d1).u8(d2).finish(MsgId.TileManipulation));
     switch (op.a) {
@@ -1236,7 +1325,12 @@ export class VanillaClient {
         } else {
           const vid = TILE_DEFS[op.v]?.vanilla?.sheet;
           if (vid == null) return; // 原创内部 tile:原版服无对应面,不上报（服务器侧保持原状）
-          send17(1, op.x, op.y, vid, 0);
+          // ★Place style 派生（2026-10-26 债清偿）:msg17 data2=样式变体索引（火把颜色/
+          // 旗帜/门方向等——恒 0 则服务器侧落默认样式）。原版 TileObject 放置时 style 对应
+          // frameY/帧高;此处通用近似 style=⌊fy/18⌋（多数 1x1 家具帧高 18,精确需逐 tile
+          // 帧高表 18/22/36 等——P3 债清偿采用通用近似,超界由 u8 截断兜底）。
+          const style = Math.floor(op.fy / 18);
+          send17(1, op.x, op.y, vid, style);
         }
         return;
       case TileOpAction.SetWall:
@@ -1249,8 +1343,25 @@ export class VanillaClient {
         send17(14, op.x, op.y, slope); // SlopeTile（1=半砖,2-4 斜面）
         return;
       }
+      case TileOpAction.SetWire: {
+        // ★差分债清偿（2026-10-26）：TileStore.setWire 报 {v:新 bits}——动作号由
+        // 颜色位→动作表推导（vanilla msg17:5红/10蓝/12绿/16黄 布线;位缺=拆线 6/11/13/17）。
+        // ★单色局限:一次 setWire 变多色位时逐位展开为多条 msg17（vanilla 客户端同款
+        // 语义——电线工具逐色操作）。
+        const RED = 1, BLUE = 2, GREEN = 4, YELLOW = 8; // TileStore.WIRE_* 位值
+        const pairs: Array<[number, number, number]> = [
+          [RED, 5, 6], [BLUE, 10, 11], [GREEN, 12, 13], [YELLOW, 16, 17],
+        ];
+        for (const [bit, place, kill] of pairs) {
+          // 拆线:本地 setWire 后读不到旧值——但 sendWiringAction 的调用方（Wiring 域）
+          // place/kill 单色路径已显式带位;此处兜底:bits 含位→布线动作（拆线路走
+          // wiring 域显式通道,不进 setWire 的净差异——单色工具恒定单 bit 变更,含=布）
+          if (op.v & bit) send17(place, op.x, op.y, 0);
+        }
+        return;
+      }
       default:
-        return; // SetWire/SetActuated:P3（TileOp 无旧值差分,布/拆歧义）
+        return; // SetActuated:19 翻转无值面（显式通道覆盖）
     }
   }
   /** 傀儡受击上报（Enemy.hurt 傀儡分支 → entityNet.reportStrike → msg28 DamageNPC:
@@ -1286,7 +1397,24 @@ export class VanillaClient {
   sendBestiaryEvent() { this.todo('sendBestiaryEvent'); }
   getProxyPvpImmuneRemaining(): number { return 0; }
   sendSummonIntent() { this.todo('sendSummonIntent'); }
-  sendPylonMessage() { this.todo('sendPylonMessage'); }
+  /** 电线操作直发（msg17 电线动作 5-13/16-17/19:布线四色/拆线/致动/翻转）。
+   *  Wiring 域的引擎面上报经此通道（TileOpAction.SetWire 的差分债由此消解:
+   *  wiring 域直发动作号,无旧值歧义）。 */
+  sendWiringAction(action: number, x: number, y: number) {
+    if (!this.active || !this.worldDelivered) return;
+    if (action < 5 || (action > 13 && action !== 16 && action !== 17 && action !== 19)) return;
+    this.ensureSectionMarked(x, y);
+    this.send(new VWriter().u8(action).i16(x).i16(y).i16(0).u8(0).finish(MsgId.TileManipulation));
+  }
+
+  /** 晶塔消息（module8 vanilla 子型：sub2 传送请求 [i16 x][i16 y][u8 type]——
+   *  原版 NetTeleportPylonModule.Deserialize case PlayerRequestsTeleport 同构;
+   *  服务器 HandleTeleportRequest 门禁五连后 Teleport+SendData(65) 广播） */
+  sendPylonMessage(msg: { sub: number; x: number; y: number; type: number }) {
+    if (!this.active || !this.worldDelivered) return;
+    if (msg.sub !== 2) return; // sub0/1=房主权威差集广播——vanilla 客户端不发
+    this.send(new VWriter().u16(8).u8(2).i16(msg.x).i16(msg.y).u8(msg.type).finish(MsgId.NetModules));
+  }
   sendLeashedRemove() { this.todo('sendLeashedRemove'); }
   sendLeashedPlaceRequest() { this.todo('sendLeashedPlaceRequest'); }
   sendLeashedFull() { this.todo('sendLeashedFull'); }

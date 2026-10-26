@@ -196,6 +196,8 @@ const nodeResult = await nodeJoiner('验证者乙', (sock, frame, W, placed) => 
   sock.write(frame(159, new W().i16(10).i16(1)));
   setTimeout(() => {
     for (const t of targets) sock.write(frame(17, new W().u8(0).i16(t[0]).i16(t[1]).i16(0).u8(0)));
+    // TE E2E:放置物品框(tile 395)→服务器广播 msg86→VC furnitureItems 记录落地
+    sock.write(frame(17, new W().u8(1).i16(2115).i16(229).i16(395).u8(0)));
     setTimeout(() => { sock.destroy(); placed(); }, 4000);
   }, 1500);
 });
@@ -217,22 +219,36 @@ log('直方图: ' + JSON.stringify(verdict.hist));
 log('hp 轨迹: ' + JSON.stringify(verdict.hpTrack) + ' dead=' + verdict.dead);
 log(`代理=${verdict.proxies} NPC傀儡=${verdict.npcPuppets} 弹幕傀儡=${verdict.projPuppets}`);
 // 主动伤害上报断言（victim-report 链:本地结算→117 上行,红蓝对抗 2026-10-25 定谳）
+// ★iframes 轮试（2026-10-26 债清偿）:全矩阵连跑时前序面的战斗在玩家身上留 iframes
+// （本地 hurt 与服务器同拒）——单次断言必时序伪红;改为多候选轮试:最多 3 次,每次换
+// 打击向量（不同候选目标）,hp 未降则等 500ms 过 iframes 再试,hp 真降即 break。
 const hp0 = await page.evaluate(() => globalThis.__swGame.player.hp);
-await page.evaluate(() => {
-  const g = globalThis.__swGame;
-  g.damagePlayer(30, g.player.x - 30, g.player.y);
-});
-await sleep(1500);
-const hp1 = await page.evaluate(() => globalThis.__swGame.player.hp);
+let hp1 = hp0;
+const hitVecs = [-30, 30, -60]; // 轮试候选:左右换向+加大距
+for (let i = 0; i < hitVecs.length; i++) {
+  await page.evaluate((dx) => {
+    const g = globalThis.__swGame;
+    g.damagePlayer(30, g.player.x + dx, g.player.y);
+  }, hitVecs[i]);
+  await sleep(1500);
+  hp1 = await page.evaluate(() => globalThis.__swGame.player.hp);
+  if (hp0 - hp1 > 0) break; // hp 真降=伤害链通,跳出轮试
+  await sleep(500); // iframes 窗冷却后再试
+}
 const hurtOK = hp0 - hp1 > 0;
-log(`伤害上报链: hp ${hp0} → ${hp1} ${hurtOK ? '✓' : '✗'}`);
+log(`伤害上报链: hp ${hp0} → ${hp1} ${hurtOK ? '✓' : '✗'}（iframes 轮试后判定）`);
 // 挖掘判定（durable itemOps 证据——傀儡 GC 时窗免疫,判例在档）
+// TE E2E 勘误：空物品框放置不触发 msg86（TE 只在物品放入时同步）——改为检查
+// tile 到达（msg17 中继落 store）即放置链路验证
+const teTile = await page.evaluate(() => globalThis.__swGame.world.store.get(2115, 229));
+log(`TE tile(2115,229): ${teTile}`);
 const iopsFinal = await page.evaluate(() => (globalThis.__iops ?? []));
 const drops = iopsFinal.filter((o) => o.op === 0 && o.key).length;
 log(`掉落 itemOps=${drops} 傀儡=${verdict.dropPuppets}`);
 const digOK = drops > 0 || verdict.dropPuppets > 0;
-log(digOK && hurtOK ? '★VERIFY-PASS（挖掘掉落+伤害上报双证据）' : '✗VERIFY-FAIL');
-process.exit(digOK && hurtOK ? 0 : 1);
+const teOK = teTile !== 0; // 放置链路：tile 395 经 msg17 中继落 store
+log(digOK && hurtOK && teOK ? '★VERIFY-PASS（挖掘掉落+伤害上报+TE 三证据）' : `✗VERIFY-FAIL dig=${digOK} hurt=${hurtOK} te=${teOK}`);
+process.exit(digOK && hurtOK && teOK ? 0 : 1);
 await page.screenshot({ path: '/tmp/vanilla-verify.png' });
 await browser.close();
 process.exit(tileOK ? 0 : 1);

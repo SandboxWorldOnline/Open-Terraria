@@ -39,6 +39,9 @@ export interface DoorHelperEnv {
   /** ★BJ322（2026-09-24）：ShiftTallGate 尾 TileFrame 面（:52224-52231）注入——
    *  helper 自动开/关高门走裸写窗后由 Game 侧扫面收口完整性/邻件复检 */
   afterWrite?: (ax: number, ay: number) => void;
+  /** ★BJ722-A D3（2026-10-26）：普通门开门 smash 清位 KillTile 钩（OpenDoor :38095）
+   *  ——注入 breakTile（掉落/尘/声全语义）;缺省回落 setTile(0) 近似 */
+  killCell?: (x: number, y: number) => void;
 }
 
 /** DoorCloseAttemptResult（:17-23） */
@@ -95,16 +98,17 @@ export function commonDoorProvideAnchor(st: TileStore, x: number, y: number): [n
  *  （:94-105 成功判据=tile 不再是关门型）;开门音=WorldGen.OpenDoor :38108 SoundID 8。 */
 export function commonDoorTryOpenDoor(
   st: TileStore, ax: number, ay: number, intendedDir: number, gravDir: number,
-  hitbox: Rect, sfx?: (name: string) => void,
+  hitbox: Rect, sfx?: (name: string) => void, killCell?: (x: number, y: number) => void,
 ): boolean {
   const rect: Rect = { x: ax * 16, y: ay * 16, w: 16, h: 48 };
   if (gravDir === 1) rect.h += 16;
   else if (gravDir === -1) { rect.y -= 16; rect.h += 16; }
   if (!rectsIntersect(rect, hitbox)) return false;                                    // :86-89
   if (hitbox.y < rect.y || hitbox.y + hitbox.h > rect.y + rect.h) return false;       // :90-93 垂直全含
-  openDoor(st, ax, ay, intendedDir);
+  const kc = killCell ? { killCell } : undefined;   // ★BJ722-A D3：smash=KillTile 全语义
+  openDoor(st, ax, ay, intendedDir, kc);
   if (st.get(ax, ay) !== DOOR_CLOSED_T) { sfx?.('door_open'); return true; }          // :95-99
-  openDoor(st, ax, ay, -intendedDir);
+  openDoor(st, ax, ay, -intendedDir, kc);
   if (st.get(ax, ay) !== DOOR_CLOSED_T) { sfx?.('door_open'); return true; }          // :101-105
   return false;
 }
@@ -269,7 +273,7 @@ export class DoorOpeningHelper {
     if (!kind) return;
     const [ax, ay] = kind === 'common' ? commonDoorProvideAnchor(st, x, y) : tallGateProvideAnchor(st, x, y);
     const opened = kind === 'common'
-      ? commonDoorTryOpenDoor(st, ax, ay, info.intendedOpeningDirection, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx)
+      ? commonDoorTryOpenDoor(st, ax, ay, info.intendedOpeningDirection, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx, env.killCell)
       : tallGateTryOpenDoor(st, ax, ay, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx,
         { blocked: env.blocked, afterWrite: env.afterWrite });
     if (opened) this.ongoing.push({ x: ax, y: ay, kind });

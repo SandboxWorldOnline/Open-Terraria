@@ -35,7 +35,7 @@ import { canCutTile } from '../world/CanCutTile';
 import { bigMimicSummonCheck, bigMimicSpawnSmoke } from '../world/BigMimicSummon';   // ★SW-BJ147 钥匙放箱召宝箱怪（NPC.cs:78318）
 import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLockedDoor, unlockDoor,
-  TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
+  TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY, doorKillCellOpts } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors,
@@ -4731,7 +4731,10 @@ export class Game implements GameHooks {
       } else if (ev.closing) {
         closeDoor(st, ev.x, ev.y);
       } else {
-        openDoor(st, ev.x, ev.y, ev.dir) || openDoor(st, ev.x, ev.y, -ev.dir);
+        // ★BJ722-A D3：msg19 重放臂 KillTile 同构（MessageBuffer case19 → OpenDoor
+        //  全语义）——清位列砍切走 breakTile（掉落/尘/声）
+        const kc = doorKillCellOpts((cx, cy) => this.breakTile(cx, cy));
+        openDoor(st, ev.x, ev.y, ev.dir, kc) || openDoor(st, ev.x, ev.y, -ev.dir, kc);
       }
     } finally {
       st.netSuppress = false;
@@ -4764,9 +4767,20 @@ export class Game implements GameHooks {
         this.netNpcPuppets.set(s.netId, pup);
       }
       const e = pup.e;
-      e.netSnapTo(s.x, s.y); // P3.2：渲染位平滑追踪快照；逻辑位（netAx/netAy）= 最新快照
+      // ★自适应插值周期（2026-10-26 用户实报 NPC 乱飞定谳）：固定 4 tick 按 SW 房
+      // 15Hz 调参——vanilla 段流节奏异质（活动怪密/定居 NPC 疏），错配时要么插值
+      // 永远追不上（爬行）要么提前进陈旧速度外推（跳跃/坠落族速度逐拍变→直线飞出
+      // 再被快照拽回=乱飞穿墙）。改用该 NPC 实测快照间隔（pup.seen 差分）作周期,
+      // 插值恰在下一次快照到达时完成——外推几乎不再触发。钳 [1,15] 防病理值。
+      const snapGap = this.tickCount - pup.seen;
+      e.netSnapTo(s.x, s.y, Math.max(1, Math.min(15, snapGap || 4)));
       e.vx = s.vx; e.vy = s.vy;
-      e.hp = s.hp; e.maxHp = s.maxHp;
+      e.hp = s.hp;
+      // ★2026-10-26 债清偿：maxHp 不随快照覆写——创建时接受的值（首拍创建分支的
+      //   s.maxHp：SW 路径=房主 ScaleStats 后真值；vanilla 路径近似 fromVanilla
+      //   def.maxHp 面）是权威。msg23 线格式无 maxHp 段，发送端（VanillaClient
+      //   case MsgId.SyncNpc）传 maxHp=life 近似，逐快照覆写会让受伤 NPC 头顶
+      //   血条比例失真（hp/maxHp 同跌→血条恒满）。
       e.animT = s.animT;
       // 刺球锚点随包（flags bit1/帧级尾段）：傀儡 netPuppet 不跑 AI，锚点只能靠快照
       // 补——按字段存在性门控（旧房主/旧 server 无段=undefined 不动），非零锚点到达
@@ -33047,8 +33061,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       },
       doorOpen: (x: number, y: number) => {
         // 原版 HitWireSingle 10/11:随机方向 + 反向重试(WorldGen.OpenDoor)
+        // ★BJ722-A D3：smash 清位走 breakTile（KillTile 全语义,掉落/尘/声）
+        const kc = doorKillCellOpts((cx, cy) => this.breakTile(cx, cy));
         const dir = Math.random() < 0.5 ? 1 : -1;
-        if (!openDoor(this.world.store, x, y, dir)) return openDoor(this.world.store, x, y, -dir) ;
+        if (!openDoor(this.world.store, x, y, dir, kc)) return openDoor(this.world.store, x, y, -dir, kc) ;
         return true;
       },
       doorClose: (x: number, y: number) => closeDoor(this.world.store, x, y),
@@ -35200,7 +35216,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (open) {
       const dir = this.player.facing >= 0 ? 1 : -1;
-      if (!openDoor(st, x, y, dir) && !openDoor(st, x, y, -dir)) return;
+      // ★BJ722-A D3：smash 清位走 breakTile（KillTile 全语义,掉落/尘/声）
+      const kc = doorKillCellOpts((cx, cy) => this.breakTile(cx, cy));
+      if (!openDoor(st, x, y, dir, kc) && !openDoor(st, x, y, -dir, kc)) return;
       this.sfx.play('door_open');
     } else {
       if (!closeDoor(st, x, y, Math.random, (bx, by) => this.overlapsEntity(bx, by))) return;
@@ -49594,6 +49612,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       sfx: (n: string) => this.sfx.play(n as SfxName),
       blocked: (bx, by) => this.overlapsEntity(bx, by),         // CloseDoor EmptyTile(ignoreTiles:true) 臂
       afterWrite: (ax, ay) => this.tallGateTileFrameFace(ax, ay),   // ★BJ322 高门裸写尾扫面
+      killCell: (cx, cy) => this.breakTile(cx, cy),   // ★BJ722-A D3：helper 自动开门 smash=KillTile 全语义
     });
   }
 
@@ -49868,6 +49887,47 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       q.length = 0;
     } finally {
       this._decorKillDraining = false;
+    }
+  }
+
+  /** ★BJ721-A（2026-10-25）：vanilla Check* 击杀环共型（CheckPot :57345-57354 /
+   *  CheckJunglePlant :48452-48462 / CheckStalactite :39506-39511 `type==件型才
+   *  KillTile` 等 Check* 全族）——件域内【仅同型活格】逐格杀（首格=锚格 dx0dy0,
+   *  完整件行为与旧锚点单杀逐字节同相）。旧 `killDecorTile(锚格)` 单点杀丢了
+   *  类型守卫：门开关（openDoor/closeDoor 清位列 smash+2×3 写面）等【覆写型
+   *  写入面】把外件写上邻件锚格时，锚格≠0 不过 killDecorTile 的 `===0` 早退 →
+   *  breakTile 落在外件上 → 开态门格入 clearDoorAt 整扇拆+掉落（用户实报
+   *  「某些情况下的木门在被打开时会直接拆除变成掉落物」；触发条件=门清位列
+   *  被可砍多格 DECOR 件（瓦罐 28 等）占位——地狱房屋 6/30 扇开门即拆，探针
+   *  scripts/_bj721a-door-open-destroy-v5.mjs 栈定谳 checkDecorSupport('pot')
+   *  →killDecorTile→breakTile(开态门格)）。守卫后外件占位格不杀；本件残格由
+   *  本环逐格清（残格击杀走 breakTile 件分支——smashPot B-1 帧解码/breakPumpkin
+   *  同型收集,清格面自带同型守卫不啃外件）。★域=可被覆写面触及的可砍多格件
+   *  （tileCut∪DOOR_SMASH 族的计算锚击杀 case：pot/hang2x2/jungleplant/
+   *  oasisplant/pumpkin/super/larva3x3/stalactite-165 双格臂）；不可砍件的
+   *  计算锚 case（sunflower/wallhang/hangs/deco3x2 等）现无覆写型写入面可达,
+   *  债 D1 登记（memory/bj721a-door-open-destroy.md）。
+   *  ★BJ722-A D1（2026-10-26）清偿：不可砍族 16 站接入（sunflower 2×4/sapling 1×2
+   *  ×3/orb 2×2/hangs w×h/wallhang w×h/tallgate 1×5/stalactite-Echo 1×n/649 2×1/
+   *  deco3x2 3×2/deco3x1 3×1/hangtop 2×h/gnome 1×2/xmas 4×8/support2x2 2×2——
+   *  对应原版 kill 环逐个核过 type 守卫）。暴露面 census 定谳：仓内唯一可达的
+   *  【异件覆写】写入面=陨石散布环 ④⑤（MeteorFall set(x,y,type) 对任意活格,原版
+   *  :6440-6490 同为无差别覆写）——门/活板门 smash 只覆写可砍格、落沙/放置只写
+   *  空格、液体冲毁与爆炸全走 breakTile（object 支整件清,无锚格碰撞面）。
+   *  两处例外维持原状：table2x1（RB11d F2 已是活成员杀向,天然同型安全）/
+   *  trapdoor 386/387（原版 CheckTrapDoor :52090-52094 kill 环【无 type 守卫】
+   *  =box 逐格杀,本仓 box-kill 1:1 对齐）。185 小堆饰维持锚点单杀（def 1×1,
+   *  守卫环余格杀会逐格双发内容掉落=另行登记债）。 */
+  private killDecorPieceCells(ax: number, ay: number, w: number, h: number, type: number): void {
+    const st = this.world.store;
+    const bx = Math.max(0, ax), by = Math.max(0, ay);
+    for (let dx = 0; dx < w; dx++) {
+      for (let dy = 0; dy < h; dy++) {
+        if (st.inBounds(bx + dx, by + dy) && st.hasTile(bx + dx, by + dy)
+          && st.get(bx + dx, by + dy) === type) {
+          this.killDecorTile(bx + dx, by + dy);
+        }
+      }
     }
   }
 
@@ -50212,7 +50272,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const gs = TILE_DEFS[st.get(gx, gy)]?.vanilla?.sheet ?? -1;
           if (!SUNFLOWER_GROUND_SHEETS.has(gs) || !st.isSolid(gx, gy)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 4, st.type[i]);
         return;
       }
       case 'sapling': {
@@ -50229,12 +50289,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // frameY 带式+两格 type 等值；红队定谳"无门"组）——曾用 isActive 门=致动/幽灵
         // 树苗被误杀。仓内以 twin type 等值承接原版 type 等值判（底格派发+顶格已失
         // （air/异型）时仍判坏 → 不留半截孤儿；顶格派发+底格失型由 groundOk 支杀）
-        if (!st.inBounds(x, below) || st.get(x, top) !== st.type[i]) { this.killDecorTile(x, top); return; }
+        if (!st.inBounds(x, below) || st.get(x, top) !== st.type[i]) { this.killDecorPieceCells(x, top, 1, 2, st.type[i]); return; }
         const gd = TILE_DEFS[st.get(x, below)];
         const groundOk = this.solidAllowBottomSlopeAt(x, below) || !!gd?.platform;
-        if (sheet !== 20) { if (!groundOk) this.killDecorTile(x, top); return; }
+        if (sheet !== 20) { if (!groundOk) this.killDecorPieceCells(x, top, 1, 2, st.type[i]); return; }
         const alt = ACORN_ALT_BY_GROUND_SHEET[gd?.vanilla?.sheet ?? -1];
-        if (!groundOk || alt === undefined) { this.killDecorTile(x, top); return; }
+        if (!groundOk || alt === undefined) { this.killDecorPieceCells(x, top, 1, 2, st.type[i]); return; }
         const curAlt = Math.floor(st.frameX[st.idx(x, top)] / 54);
         if (alt / 3 !== curAlt) {
           // 地基族变更 → 重帧（:43484-43488 num7=54*num6+Next(3)*18）
@@ -50384,7 +50444,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           if (!this.solidAllowBottomSlopeAt(ax + dx, ay + 2)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'pot': {
@@ -50412,7 +50472,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const bi2 = st.idx(ax + dx, ay + 2);
           if (!(st.isSolid(ax + dx, ay + 2) && st.slope[bi2] === 0 && !st.half[bi2])) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：CheckPot 杀环 :57345-57354 同型守卫（锚格被门覆写不杀外件）
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'hangs': {
@@ -50454,7 +50515,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
           }
         }
-        if (!ok) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (!ok) this.killDecorPieceCells(ax, ay, w, h, st.type[i]);
         return;
       }
       case 'hang2x2': {
@@ -50486,7 +50547,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // （`!active() || !tileSolid || tileSolidTop`）→ hasTile
           if (!st.hasTile(ax + dx, ay - 1) || !ud?.solid || ud.platform) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：Check2x2 95/126 杀环同型守卫（126 可砍=门清位列可达）
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'trapdoor': {
@@ -50519,7 +50581,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               || st.frameY[qi] !== fy) bad7 = true;
           }
           if (!bad7 && !(this.solidTileStrictAt(ax7 - 1, y) && this.solidTileStrictAt(ax7 + 2, y))) bad7 = true;
-          if (bad7) this.killDecorTile(Math.max(0, ax7), y);
+          // ★BJ722-A D1：CheckTrapDoor :52090-52094 kill 环【无 type 守卫】=box 逐格杀
+          //  （全族唯一反例,BJ721「Check* 全族守卫」判例的边界成员）——box-kill 1:1
+          if (bad7) { for (let k = 0; k < 2; k++) this.killDecorTile(Math.max(0, ax7 + k), y); }
           return;
         }
         const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
@@ -50550,7 +50614,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 侧锚 sideOK=AnchorValid(SolidTile)（:52297 `if (tileCache.nactive())`）→ isActive 保持
           if (!bad && !(sideOK(ax - 1) && sideOK(ax + 2))) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ722-A D1：同 387——CheckTrapDoor kill 环无守卫 box-kill（2×2 全域逐格）
+        if (bad) {
+          for (let k = 0; k < 2; k++) for (let l = 0; l < 2; l++) this.killDecorTile(Math.max(0, ax + k), Math.max(0, ay + l));
+        }
         return;
       }
       case 'tallgate': {
@@ -50603,7 +50670,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         // ③ 顶/底双行锚（width=1,CheckTileAnchors mode2 逐列循环退化为此两格）
         if (!bad && !(this.solidTileStrictAt(x, ay - 1) && this.solidTileStrictAt(x, ay + 5))) bad = true;
-        if (bad) this.killDecorTile(Math.max(0, x), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(x, ay, 1, 5, st.type[i]);
         return;
       }
       case 'jungleplant': {
@@ -50635,7 +50702,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             ? !this.solidAllowBottomSlopeAt(ax + dx, ay + 2)
             : !(this.solidTileStrictAt(ax + dx, ay + 2) && sheetAt(st, ax + dx, ay + 2) === 60)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：CheckJunglePlant 杀环 :48452-48462 同型守卫（233/236/238 可砍）
+        if (bad) this.killDecorPieceCells(ax, ay, cw, 2, st.type[i]);
         return;
       }
       case 'oasisplant': {
@@ -50654,7 +50722,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!(this.solidTileStrictAt(ax + dx, ay + 2)
             && CONV_SAND_SHEETS.has(sheetAt(st, ax + dx, ay + 2)))) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：CheckOasisPlant 杀环同型守卫（530 可砍=门清位列可达）
+        if (bad) this.killDecorPieceCells(ax, ay, 3, 2, st.type[i]);
         return;
       }
       case 'wallhang': {
@@ -50723,7 +50792,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (!fxOk || !fyOk) { bad = true; break; }
           }
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, w, h, st.type[i]);
         return;
       }
       case 'stalactite': {
@@ -50759,7 +50828,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (!this.solidTileStrictAt(x, top + 2)) bad = true;
             if (Game.BOULDER_SUPPORT_SHEETS.has(sheetAt(st, x, top + 2))) bad = true;
           }
-          if (bad) this.killDecorTile(x, Math.max(0, top));
+          // ★BJ721-A：CheckStalactite 双格杀环 :39506-39511 同型守卫（165 可砍——
+          //  底格残件派发时 top 已被门覆写,旧锚点单杀会拆门）
+          if (bad) this.killDecorPieceCells(x, top, 1, 2, st.type[i]);
           return;
         }
         // 693/694 Echo 凌柱（:39267）——★G1 谓词形态批（2026-09-04）：完整性【无
@@ -50782,7 +50853,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         if (!bad2) bad2 = !(isTop ? this.solidAllowTopSlopeAt(x, ay2 - 1)
           : this.solidAllowBottomSlopeAt(x, ay2 + n));
-        if (bad2) this.killDecorTile(x, Math.max(0, ay2));
+        if (bad2) this.killDecorPieceCells(x, ay2, 1, n, st.type[i]);
         return;
       }
       case 'moss': {
@@ -50815,7 +50886,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           for (let dx = 0; dx < 2 && !bad; dx++) {
             if (!this.solidAllowBottomSlopeAt(ax + dx, y + 1)) bad = true;
           }
-          if (bad) this.killDecorTile(Math.max(0, ax), y);
+          // ★BJ722-A D1：649 → killDecorPieceCells（def 2×1→object 支单掉=守卫环零
+          //  掉落扰动）;185 → 维持锚点单杀——def 1×1,余格杀走 1×1 尾段的
+          //  spawnPileDecoDrops 逐格内容掷（钱币/宝石带按【锚格】frameX 段,原版
+          //  Check2x1 :47105-47137 锚帧单发）——守卫环会双发+右格 fx+18 错带,185
+          //  逐格掉落偏差=独立登记债（本刀不动掉落链）
+          if (bad) {
+            if (sheet === 649) this.killDecorPieceCells(ax, y, 2, 1, st.type[i]);
+            else this.killDecorTile(Math.max(0, ax), y);
+          }
           return;
         }
         if (!this.solidAllowBottomSlopeAt(x, y + 1)) { this.killDecorTile(x, y); return; }
@@ -50871,7 +50950,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
           }
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 3, 2, st.type[i]);
         return;
       }
       case 'deco3x1': {
@@ -50889,7 +50968,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!st.hasTile(ax + dx, y) || st.get(ax + dx, y) !== st.type[i]
             || !this.solidAllowBottomSlopeAt(ax + dx, y + 1)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), y);
+        if (bad) this.killDecorPieceCells(ax, y, 3, 1, st.type[i]);
         return;
       }
       case 'dyeplant': {
@@ -51055,7 +51134,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           else if (band === -1) band = myBand;
           else if (band !== myBand) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 2, h, st.type[i]);
         return;
       }
       case 'gnome': {
@@ -51080,7 +51159,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 杀锚=top,经 breakTile object 支整件清;但原版杀集={num2,num2+1}∩同型
           // （:54428-54432 双 KillTile）恒含派发行——顶格已失(air)时杀 air 空跳会
           // 留派发行孤儿,回落杀派发格（breakTile object 支对该格自锚整清）
-          this.killDecorTile(x, st.isActive(x, top) ? top : y);
+          this.killDecorPieceCells(x, top, 1, 2, st.type[i]);
         }
         return;
       }
@@ -51222,7 +51301,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           if (!bad && (dx === 1 || dx === 2) && !this.solidTileStrictAt(ax + dx, ay + 8)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 4, 8, st.type[i]);
         return;
       }
       case 'support2x2': {
@@ -51254,7 +51333,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (!bad && sheet !== 35 && st.half[st.idx(ax + dx, ay + 2)]) bad = true;
           }
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'drip': {
@@ -51297,7 +51376,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (bs !== 2 && bs !== 109 && bs !== 477 && bs !== 492) bad = true;
           }
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：Check2x2Style 254 杀环同型守卫（254 可砍=门清位列可达）
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'super': {
@@ -51328,7 +51408,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
           } else if (!bad && !this.anchorSolidTileAt(ax + dx, ay + 2)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：CheckSuper 444/485 杀环同型守卫（两 sheet 可砍=门清位列可达）
+        if (bad) this.killDecorPieceCells(ax, ay, 2, 2, st.type[i]);
         return;
       }
       case 'larva3x3': {
@@ -51354,7 +51435,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           if (!bad && !this.solidAllowBottomSlopeAt(ax + dx, ay + 3)) bad = true;
         }
-        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        // ★BJ721-A：Check3x3 231 杀环同型守卫（231 可砍=门清位列可达）
+        if (bad) this.killDecorPieceCells(ax, ay, 3, 3, st.type[i]);
         return;
       }
       case 'multidir': {
@@ -54393,6 +54475,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         onNpcSnapshot: (snaps) => this.netApplyNpcSnaps(snaps),
         onChat: (text, r2, g2, b2) => this.newText(text, r2, g2, b2),
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
+        onProjDespawn: (keys) => this.netRemoveProjPuppets(keys),
         // P3-A（2026-10-25）：掉落物傀儡（msg21/151 → netApplyItemOp 管线;
         // 拾取上报=VC sendItemOp→背包终拍重传+服务器自清收敛）
         onItemOp: (op) => this.netApplyItemOp(op),

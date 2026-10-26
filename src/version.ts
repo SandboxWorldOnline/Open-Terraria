@@ -2,6 +2,6 @@
 // 单一来源=package.json(version)+构建时刻本地时间(stamp,YYMMDDHHMM)
 // ★2026-09-30 用户令:版本显示带构建时间戳,本地构建同样刷新(辨认构建新旧)
 const APP_VERSION = '0.1.78-beta';
-const APP_BUILD_STAMP = '2610252226';
+const APP_BUILD_STAMP = '2610261145';
 export default APP_VERSION;
 export const BUILD_STAMP = APP_BUILD_STAMP;

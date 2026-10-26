@@ -113,7 +113,7 @@ import {
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
-import { openDoor, shiftTallGate } from '../world/Door';
+import { openDoor, shiftTallGate, doorKillCellOpts } from '../world/Door';
 import {
   fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot,
   attemptToFindTeleportSpotNearBooks,
@@ -6182,7 +6182,8 @@ export class Enemy extends Entity {
           if (this.vanillaId === 26) {
             game.breakTile?.(dtx, dty);                // 哥布林苦力直接拆门（:60643-60650）
           } else if (atDoorTile === 10) {
-            const opened = openDoor(st, dtx, dty, dir);
+            // ★BJ722-A D3：怪开门 smash=KillTile 全语义（NPC.cs:60646 → OpenDoor :38095）
+            const opened = openDoor(st, dtx, dty, dir, doorKillCellOpts(game.breakTile));
             if (!opened) {
               this.ai3 = num58F;                       // 开门失败 → ai[3]=num58 停索敌（:60658）
             } else {

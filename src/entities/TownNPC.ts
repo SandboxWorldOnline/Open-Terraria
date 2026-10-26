@@ -8,7 +8,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
+import { openDoor, closeDoor as closeDoorTile, shiftTallGate, doorKillCellOpts } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS, AVOIDED_BY_NPCS_SHEETS, INTERACTABLE_BY_NPCS_SHEETS } from '../data/tiles';
 import { TOWN_CRITTER_IDS } from '../data/critters';   // ★BJ704-G3 D7：TownCritter 集单源（NPCID.cs:4827）
 import type { TileStore } from '../world/TileStore';
@@ -5474,7 +5474,9 @@ export class TownNPC extends Entity {
     if (!(rollHit || this.homeFlag)) return false;            // 本 tick 未中
     const doorOpenable = hitKind === 'door';
     if (doorOpenable) {
-      const opened = openDoor(st, n25, hitY, dir) || openDoor(st, n25, hitY, -dir);
+      // ★BJ722-A D3：NPC 开门 smash=KillTile 全语义（NPC.cs:54601 → OpenDoor :38095）
+      const kc = doorKillCellOpts(game.breakTile);
+      const opened = openDoor(st, n25, hitY, dir, kc) || openDoor(st, n25, hitY, -dir, kc);
       if (opened) {
         this.closeDoor = true;
         this.doorX = n25; this.doorY = hitY;

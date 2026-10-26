@@ -19880,10 +19880,15 @@ export class Renderer {
       if (tex && tex.height >= 224) {
         // DrawPlayer_11_Balloons :1152-1170：锚 = OffsetsPlayerOffhand[bodyRow]
         // (Main.cs:456-477) + (0,14)、origin (26+dir·4, 34);帧 = 真实时钟
-        // Millisecond%800/200 四档（:1154）。dir=−1 档经镜像空间换算见 bx
+        // Millisecond%800/200 四档（:1154）。
+        // ★2026-10-26 气球朝左远离修复：外层 scale(facing,1) 镜像已处理内容翻转+位置
+        //   对称——bx 两向恒同值（镜像空间画同一局部坐标=屏幕自然镜像）;旧公式朝左
+        //   off[0]+12 在镜像空间画到 +26 局部 → 屏幕距玩家 26+44px=「离得非常远」。
+        //   by 追加 vanilla 的 dir=-1 档 y-4（:1155-1156）。origin 差(30↔22)经外层
+        //   镜像自然吸收,不另调。
         const off = OFFSETS_PLAYER_OFFHAND[bodyRow % 20];
-        const bx = p.facing === 1 ? off[0] - 40 : off[0] + 12;
-        const by = off[1] - 76;
+        const bx = off[0] - 40;
+        const by = off[1] - 76 - (p.facing === 1 ? 0 : 4);
         const frame = Math.floor((performance.now() % 800) / 200);
         const fh = Math.floor(tex.height / 4);
         const dyeEmu = ad.dyeBalloon > 0 ? dyeApplyOf(ad.dyeBalloon) : null;

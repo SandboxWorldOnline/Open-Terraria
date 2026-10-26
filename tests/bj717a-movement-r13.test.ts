@@ -382,7 +382,9 @@ describe('BJ717-A F9 湿支 hover 谓词读锁存位（Click 悬停锁存+湿态
 
   it('结构锁：湿支两臂（flag19 悬浮/缓降）均读 tryingToHoverDown', () => {
     expect(playerSrc).toContain('FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.tryingToHoverDown && this.wingTime > 0');
-    expect(playerSrc).toContain('eqWet.wing?.hover && this.tryingToHoverDown && this.inputJump && this.wingTime > 0 && !this.merman');
+    // ★BJ722-A 随刀迁移：缓降臂谓词槽位集 eqWet.wing?.hover（五员 stats 表）→
+    //  HOVER_SLOWFALL_SET（:27607 硬码八员表）+ !isDownDashing 腿（canUseWingAbilities）
+    expect(playerSrc).toContain('HOVER_SLOWFALL_SET.has(wingsW) && this.tryingToHoverDown && this.inputJump && this.wingTime > 0\n        && !this.merman && !this.isDownDashing');
   });
 });
 

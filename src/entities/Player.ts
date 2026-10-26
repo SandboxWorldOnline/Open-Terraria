@@ -39,6 +39,14 @@ import { MOD_ITEM_STABLE_BASE } from '../mods/types';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { options } from '../core/Options';   // ★SW-FX14：hoverControl 档读数（Player.Settings.HoverControl 镜像）
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
+
+/** ★BJ722-A（2026-10-26）：悬浮缓降臂谓词槽位集（Player.cs:27607 硬码表 1:1）
+ *  ——与另两表互异勿混用：FLAP_HOVER_SET（:26991 flag19 悬浮臂,含 29/32 缺 31）、
+ *  wingStats.hover=HasDownHoverStats（:29540 横移覆盖臂,{22,30,31,37,45}——
+ *  WingStatsInitializer.cs:45-58,28/33/35 在默认链无 hover 特性）。本表=悬浮缓降
+ *  ×0.9/×0.8 面——28 Lazure 平台/33 Yoraiz0r 咒/35 Skiphs 爪三员 BJ717-A 登记
+ *  [bj717a-hover-slowfall-slotset] 漏员（旧谓词误用 eq.wing?.hover=五员表） */
+const HOVER_SLOWFALL_SET = new Set([22, 28, 30, 31, 33, 35, 37, 45]);
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal, accFxJsonOfVid } from '../data/vanillaAccFx';
 import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL,
@@ -7853,13 +7861,23 @@ export class Player extends Entity {
         }
       }
       // 悬浮缓降（真锚 :27607-27619,重力后公共段——旧注「:27083-27102」系误锚,序差
-      //   见 BJ717-A 登记）：hover 族 + TryingToHoverDown + 跳 + wingTime>0 → vy×0.9
-      //   （45=0.8）;canUseWingAbilities=CanUseWingAbilities(:3975)=!merman∧!downDash
-      //   （湿臂 !merman 既有,干支缺 downDash 腿=BJ717-A 登记债,两臂谓词槽位集差另册）。
+      //   见 BJ717-A 登记）：硬码槽位集 {22,28,30,31,33,35,37,45}（HOVER_SLOWFALL_SET
+      //   ——★BJ722-A [bj717a-hover-slowfall-slotset]：旧谓词 eqWet.wing?.hover=五员
+      //   stats 表,28/33/35 漏 ×0.9/×0.8）+ TryingToHoverDown + 跳 + wingTime>0 →
+      //   vy×0.9（45=0.8）;canUseWingAbilities=CanUseWingAbilities(:3975)=!merman∧
+      //   !downDash——!isDownDashing 腿 BJ722-A 补（BJ717-A
+      //   [bj717a-hover-slowfall-downdash]）。
       // ★BJ717-A F9（R13 清偿）：inputDown→tryingToHoverDown——原文谓词=TryingToHoverDown
       //   锁存（Click 悬停锁存模式湿态漏触;干支 :8321 同位 hoverDown 已对）。
-      if (eqWet.wing?.hover && this.tryingToHoverDown && this.inputJump && this.wingTime > 0 && !this.merman) {
+      if (HOVER_SLOWFALL_SET.has(wingsW) && this.tryingToHoverDown && this.inputJump && this.wingTime > 0
+        && !this.merman && !this.isDownDashing) {
         this.vy *= wingsW === 45 ? 0.8 : 0.9;
+        if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
+      }
+      // ★BJ722-A [bj717a-wing37-extra-slowfall]：翼 37 再 ×0.92（:27620-27626,干支同款）
+      if (wingsW === 37 && this.tryingToHoverDown && this.inputJump && this.wingTime > 0
+        && !this.merman && !this.isDownDashing) {
+        this.vy *= 0.92;
         if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
       }
       // ---- ★BJ704-G4（BJ703-D2b 登记债清偿,2026-10-21）：坐骑飞行族湿支 vy 链 ----
@@ -8394,9 +8412,23 @@ export class Player extends Entity {
             }
           }
         }
-        // 悬浮缓降（:27083-27102）：hover 族 + ↓+跳 + wingTime>0 → vy×0.9（45=0.8）
-        if (eq.wing?.hover && hoverDown && this.inputJump && this.wingTime > 0) {
+        // 悬浮缓降（真锚 :27607-27619,重力后公共段——旧注「:27083-27102」系误锚）：
+        //  硬码槽位集 {22,28,30,31,33,35,37,45}（HOVER_SLOWFALL_SET——★BJ722-A
+        //  [bj717a-hover-slowfall-slotset]：旧谓词 eq.wing?.hover=五员 stats 表,
+        //  28/33/35 漏 ×0.9/×0.8）+ ↓+跳 + wingTime>0 → vy×0.9（45=0.8）。
+        //  canUseWingAbilities（:3975-3982 = !merman∧!downDash）——干支 merman 不可达
+        //  （merman 置位需 inWater :5649）,!isDownDashing 腿 BJ722-A 补（BJ717-A
+        //  [bj717a-hover-slowfall-downdash]——下砸期不缓降）
+        if (HOVER_SLOWFALL_SET.has(wings) && hoverDown && this.inputJump && this.wingTime > 0
+          && !this.isDownDashing) {
           this.vy *= wings === 45 ? 0.8 : 0.9;
+          if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
+        }
+        // ★BJ722-A [bj717a-wing37-extra-slowfall]：翼 37（Betsy）在 :27607 ×0.9 之上
+        //  【再】×0.92（:27620-27626——37 双表在列,独立 if 全谓词复检=原版形态）
+        if (wings === 37 && hoverDown && this.inputJump && this.wingTime > 0
+          && !this.isDownDashing) {
+          this.vy *= 0.92;
           if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
         }
       }

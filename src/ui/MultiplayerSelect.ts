@@ -107,8 +107,8 @@ export class MultiplayerSelect {
     codeRow.appendChild(codeBtn);
     this.root.appendChild(codeRow);
 
-    // ---- 连接原版服务器（vanilla interop,2026-10-25;P0 观察者阶段=进世界/走动/看服务器流,
-    //      战斗/交互面 P1-P3 在途）----
+    // ---- 连接原版服务器（vanilla interop 全功能:PvE/PvP 战斗/挖掘建造/箱子/物品/弹幕/液体均已接线,
+    //      2026-10-25 战役收官;遗留债见 memory/vanilla-server-interop-scope）----
     const vanHr = el('hr');
     vanHr.style.cssText = 'border:none; border-top:1px solid rgba(90,120,220,0.3); margin:14px 0;';
     this.root.appendChild(vanHr);
