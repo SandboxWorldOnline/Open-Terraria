@@ -15605,8 +15605,9 @@ export class Enemy extends Entity {
     //   max(1, dmg + pen − def×0.5)。pen/2 上限=def/2 ⇒ 穿甲永不把伤害推过全额
     //   （旧自造"def 钳 2×dmg"删除，下限 1 由本式承担）；负防御 def≤0 不吃穿甲
     //   但 −def×0.5 为增伤（原版直算式,2026-08-13 对齐保留）。
-    //   已知偏差登记：crit ×2 原版在防后（StrikeNPC :81990），仓内调用侧预倍——
-    //   crit 会连带翻倍 pen/防（Game.ts 挥击侧,并行会话领走未动）
+    //   已知偏差登记（★S02 BJ723-B 2026-10-26 销账）：crit ×2 原版在防后
+    //   （StrikeNPC_Inner :82067），旧仓内调用侧预倍——crit 连带翻倍 pen/防；
+    //   现 ×2 已移入本函数防后两步式（见下方 S02 注），全仓预翻倍调用面同批清偿。
     // ★A5(2026-10-14):GlobalNPC ModifyIncomingHit 移防前(tML HitModifiers 位
     //  —StrikeNPC 头部对原始 Damage 修正后入防御链;DR/伤害帽族按 tML 语义
     //  作用全链)。≥9999 演出通道门保持(R-A-M2)。旧防后位=R-A-M3 登记债清偿。
@@ -15623,7 +15624,18 @@ export class Enemy extends Entity {
     //   （Main.cs:67126-33），终值只在 StrikeNPC_Inner 处 `(int)` 向零截断
     //   （NPC.cs:82067）。旧 round() 在奇防非暴击面每击系统性 +1（例 10/7→6.5：
     //   原版 6、旧实现 7），统一换 trunc。
-    dmg = Math.trunc(Math.max(1, dmg + penAdd - def * 0.5));
+    // ★S02（BJ723-B 2026-10-26）：crit ×2 移防后——原版 NPC.cs:82067 暴击乘区
+    //   在 CalculateDamageNPCsTake（=max(1.0, dmg−def×0.5) 保底门，Main.cs
+    //   :67126-33）【之后】、(int) 截断之前的 double 上。两步式 1:1：保底门在
+    //   ×2 前（防后 0.5 时原版 crit=2 非中点截 1）。全仓调用侧预翻倍面已同批
+    //   清偿（WhipTag/MinionProj/Arrow/Game 近战/WeaponProj hitEnemies 等 ~90 站，
+    //   台账见 memory/bj723b-settle-chain.md）；调用方一律传未翻倍基伤，crit 参
+    //   单布尔承载「防后 ×2+暴击色+击退 ×1.4」三面。旧「已知偏差登记：crit ×2
+    //   原版在防后,仓内调用侧预倍」就此销账。PvP/玩家受击面（ClientNet
+    //   beetlePvpCredit/Player.hurt）为 Player.cs:38533-35 先折乘域，不在本域。
+    let calcNpc = dmg + penAdd - def * 0.5;
+    if (calcNpc < 1) calcNpc = 1;                       // CalculateDamageNPCsTake 保底（double 域，×2 前）
+    dmg = Math.trunc(calcNpc * (crit ? 2 : 1));         // NPC.cs:82067：crit ×2 防后/trunc 前
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     // （takenDamageMultiplier 段 NPC.cs:82070-82072 亦为 (int) 截断非 round）
@@ -15872,7 +15884,7 @@ export class Enemy extends Entity {
       } else this.ai0 = 400;
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
-    if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);
+    if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby, crit);   // BJ723-B D5 清偿（BJ725-A）：crit 位随报——S02 后 hurt 防后 ×2,房主镜像缺 crit=权威 hp 不翻倍+染色缺
     // 行为录制：受击（防后结算值 + 剩余 hp；受击本身低频——无敌帧天然节流）
     game.recLog?.('hurt', { id: this.id, vid: this.vanillaId ?? null, dmg, hp: this.hp });
     if (this.hp <= 0) {

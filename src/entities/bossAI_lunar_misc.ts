@@ -247,11 +247,6 @@ function solidRect(game: GameHooks, x0: number, x1: number, y0: number, y1: numb
   }
   return false;
 }
-function solidTileAt(game: GameHooks, x: number, y: number): boolean {
-  const st = game.world.store;
-  return x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
-}
-
 // ---------------------------------------------------------------------------
 // 弹幕出口:452 PhantasmalEye / 454 PhantasmalSphere / 462 PhantasmalBolt 贴图
 // Projectile_{452,454,462}.png 已按 601/602 先例补入 sprites/vanilla(Arrow 按 projId
@@ -1265,7 +1260,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
       const rx = 30 + Math.floor(k / 50), ry = 20 + Math.floor(k / 75);
       let tx = ptx + rndRange(-rx, rx + 1);
       let ty = pty + rndRange(-ry, ry + 1);
-      if (solidTileAt(game, tx, ty)) continue;
+      if (st.isSolidStrict(tx, ty)) continue;   // ★BJ728-A（债2）:WorldGen.SolidTile(:38580)严格式——旧 solidTileAt(isSolid 宽)把半砖/坡面起跳格当实心误整列跳过
       let bad = false;
       let n = 50;
       while (n > 0) {
@@ -1275,7 +1270,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) { bad = true; break; }   // 岩浆
         const iiA = st.idx(tx, ty - 1);
         if (st.liquid[iiA] > 0 && st.liquidType[iiA] === 2) { bad = true; break; }
-        if (solidTileAt(game, tx, ty) || (aboveGround && ty > game.world.groundLevel)) break;
+        if (st.isSolidStrict(tx, ty) || (aboveGround && ty > game.world.groundLevel)) break;   // ★BJ728-A（债2）:WorldGen.SolidTile(:38616)严格式（同 BJ715-A-③ 谓词域判例:isSolid/isStrict/Platforms 三式不可混用——宽谓词把半砖/坡面格当落地面）
         ty++;
       }
       if (n <= 0 || bad) continue;

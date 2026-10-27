@@ -13,7 +13,7 @@
 //     lifeMax≤5 经 flag10 lifeMax>5 段恒不吸血 → critter 支只入账不 proc。
 //   D4 1115 pveNumHits 写口：projPveNumHits 读 pveNumHits（PVP 读口单源）,原计数域
 //     在 hits → 读口恒 0 档;写位与 hits 同面同步自增。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -252,6 +252,8 @@ describe('X2-D3 656 ForbiddenSign critter 面（:14245 hitCount/:14263 numHits �
 
 describe('X2-D2 251 RainbowSegment ghostHeal proc（:13712 flag10+:13877-79）', () => {
   it('命中敌 → proc（dmg=防后,numHits=0,Center 出生,isMagic）;critter 同拍先入账 → 敌怪读 1 档', () => {
+    // ★BJ723-C M02：251 DV 首掷后防后值非确定——mock 0.5（tier 0,DV 恒等）恢复定值
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: StealCall[] = [];
     const e = enemySpy(901, 79, 99);                      // id 避让模块级 segImmuneUntil 跨案残留
     const c = mkCritter(902, 79 * TILE + 4, 99 * TILE + 4, 12, 12);

@@ -33,6 +33,7 @@ import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate,
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C M02：535/536 凝视束 DV 首掷（:12970）
 
 type MedusaEnemy = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -221,7 +222,13 @@ export class MedusaHeadProj extends Entity {
       //  （mock hurt 无写支故测试绿;同刀 R「旧 pierce=0 受理写 10」判谳）；②死亡转换
       //  写支（Enemy.ts:14421 四塔血尽转演出写 iframes=2）→ 致死命中拍误判门拒。
       const gate = snapshotVanillaGate(t);
-      t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——535/536 美
+      //  杜莎凝视束逐目标独立掷 ±15% 31 档离散+luck 重掷,原版载体=逐目标出生即
+      //  Damage() 的 536 束（每目标一发 ⇒ 每发各自 DV）;BJ716-A Arrow 主环同式,
+      //  crit ×2 后置=StrikeNPC 内序）
+      const dmgMed = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+      // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)——dmgMed 未翻倍直传
+      t.hurt(applyBannerDamageDealt(game, t, dmgMed), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
         ghostHealProc(game, 536, 0, t);

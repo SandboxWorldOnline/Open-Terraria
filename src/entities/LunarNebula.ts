@@ -339,7 +339,7 @@ export class NebulaBlazeBolt extends Entity {
       //  仅 dontTakeDamage（:12686;本站原后置读与快照等位——hurt 无 dontTakeDamage
       //  写支,唯四塔转换写 iframes 不写旗=本就无污染;转快照为全族单源同形）。
       const gate = snapshotVanillaGate(e);
-      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+      strike(game, e, this.damage, crit, this.knockback,   // ★S02:crit ×2=Enemy.hurt 防后
         Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen, 1);
       const accepted = !vanillaGateRejected(gate, true);
       if (accepted) {
@@ -416,7 +416,7 @@ export class NebulaBlazeBolt extends Entity {
       //  iframes=2,写支 1:1 禁改）仍污染致死命中拍（原版 proc :13877-79/numHits++:
       //  14263 受理面无死亡复查,照达）。快照判据=「进 hurt 前状态」=原版门位语义。
       const gate = snapshotVanillaGate(e);
-      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+      strike(game, e, this.damage, crit, this.knockback,   // ★S02:crit ×2=Enemy.hurt 防后
         Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen, -2);
       const vanillaGated = vanillaGateRejected(gate);
       if (!vanillaGated) {
@@ -640,7 +640,7 @@ export class LunarFlareStar extends Entity {
         //  后后置读在普通面已等位,唯死亡转换写支（Enemy.ts:14421 写 iframes=2,与
         //  pierce 档无关）仍污染致死命中拍;快照判据=「进 hurt 前状态」。
         const gate = snapshotVanillaGate(e);
-        strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+        strike(game, e, this.damage, crit, this.knockback,   // ★S02:crit ×2=Enemy.hurt 防后
           Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen, -3);
         const vanillaGated = vanillaGateRejected(gate);
         if (!vanillaGated) {

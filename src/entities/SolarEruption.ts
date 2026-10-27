@@ -16,7 +16,8 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B19）：城镇 voodoo 靶
+import { damageVarRoll } from '../stats/DamageVar';
 import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyBuffTicks } from './projStatus';
@@ -81,7 +82,13 @@ export class SolarFlare extends Entity {
       const crit = ((game.player as unknown as
         { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
         ?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      // ★W03（BJ723-B 2026-10-26）：日耀喷发/爆焰两站补结算链三件——①DamageVar
+      //  （:12970 逐靶掷,owner luck 正向;612 无类旗=零 crit 掷,DV 为唯一掷面）
+      //  ②攻端旗乘区（:13388 bannerNpcKeyOf→bannerDamageDealtSample,与 BJ716-A
+      //  R15-P1-2 三消费位同链=第 4 攻端消费位）③crit ×2 由 Enemy.hurt 防后承载
+      //  （S02）——旧=直 hurt 无旗无浮动无翻倍（旗 1/1.5/2 实得 100 应 150/200）。
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       // ★F3 接线（蓝队四轮）：爆焰 612 ——vanilla SetDefaults :6586-96 对其【不写】
       // 类旗（611 才有 melee :6575）⇒ 双类门对其恒拒 = 原版同真值；本站仍统一走
       // 单源入口（未来 612 若随版本翻旗自动生效），当前为无行为站位。
@@ -89,8 +96,8 @@ export class SolarFlare extends Entity {
         { projId: 612 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      e.hurt(dmg + (snapBonusFlare612 ? Math.trunc(snapBonusFlare612 * (crit ? 2 : 1)) : 0),
-        0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusFlare612 ? snapBonusFlare612 : 0),
+        0, 0, game, this.armorPen, crit, 0, true);   // ★S02 crit ×2=Enemy.hurt 防后;fromPlayer=DPS 计
       applyDaybreak(e as unknown as Record<string, number>);
       this.hitCd.set(e.id, 4);
     }
@@ -174,7 +181,9 @@ export class SolarEruptionWhip extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,611 melee 旗）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      // ★W03 同 SolarFlare 面（上注）——611 melee 旗=crit 掷+DV+旗,crit ×2 防后（S02）
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       // ★F3 接线（蓝队四轮）：链鞭 611 数据面 melee（SetDefaults :6399-6415）→
       // 焰爆石/拍击石双支（13439-46）；加伤随暴击并入实伤参
       const snapBonusWhip611 = projectileSnapStrikeBonus(game,
@@ -182,8 +191,8 @@ export class SolarEruptionWhip extends Entity {
         { victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
           cy: e.cy ?? e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      e.hurt(dmg + (snapBonusWhip611 ? Math.trunc(snapBonusWhip611 * (crit ? 2 : 1)) : 0),
-        Math.sign(this.vx) * 2, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusWhip611 ? snapBonusWhip611 : 0),
+        Math.sign(this.vx) * 2, 0, game, this.armorPen, crit, 0, true);   // ★S02 crit ×2=Enemy.hurt 防后;fromPlayer=DPS 计
       applyDaybreak(e as unknown as Record<string, number>);
       this.hitCd.set(e.id, 4);
       if (this.lai1 <= 0) {                            // 612 节流（:13229-13236）
@@ -194,6 +203,15 @@ export class SolarEruptionWhip extends Entity {
         flare.armorPen = this.armorPen;
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(flare, 'projectiles');
       }
+    // ★BJ729-A（D1 B19,2026-10-27）：城镇 voodoo 靶——friendly 鞭弹 flag 巫毒窄门
+    //  （:12618-12631,22 killGuide/54 killClothier）;settle 镜像敌怪臂链（DV :12970+
+    //  crit 掷 melee :12915-27;Daybreak debuff 城镇面不接=近似登记[D8]）;4t 节流窗
+    //  由 TownNPC.hurt iframes 承载（D3 族口径）。hitTownNpcs 单源。
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', this.projId,
+      undefined, undefined, undefined, undefined,
+      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.armorPen }));
     }
   }
 

@@ -37,9 +37,13 @@ function makeHooks(enemies: Array<Record<string, unknown>> = []) {
     showPickupLabel: () => {},
   };
   // 随从射击出口（MinionProj.fixedUpdate 射弹经 entities.add 入 projectiles 桶）——
-  // GameHooks 未声明 entities（生产侧统一以 as unknown 收窄），测试同样旁挂
-  (hooks as unknown as { entities: { add: (e: unknown) => void } }).entities =
-    { add: (e: unknown) => { added.push(e); } };
+  // GameHooks 未声明 entities（生产侧统一以 as unknown 收窄），测试同样旁挂。
+  // ★BJ731 补桩（2026-10-27）：BJ650件1 起 fixedUpdate 首拍 whoAmI 懒快照读
+  //   entities.projectiles.indexOf(this)（原版 Main.projectile 首空闲槽对映）
+  //   ——缺 projectiles 数组=TypeError,补空桶（未注册=indexOf −1 → max(0,−1)=0 槽）。
+  const projBucket: unknown[] = [];
+  (hooks as unknown as { entities: { add: (e: unknown) => void; projectiles: unknown[] } }).entities =
+    { add: (e: unknown) => { added.push(e); projBucket.push(e); }, projectiles: projBucket };
   return { hooks, store, player, added };
 }
 
@@ -112,9 +116,10 @@ describe('MinionProj 行为', () => {
     };
     const { hooks, player } = makeHooks([enemy]);
     const s = new MinionProj(player.x, player.y, 308, 100, 7.5, true, 0, false, () => player);
-    // 注入 entities.add 通道
+    // 注入 entities.add 通道（★BJ731:projectiles 桶同补——whoAmI 懒快照读位）
     (hooks as unknown as { entities: unknown }).entities = {
       add: (e: unknown) => { (enemy as unknown as { __shots?: unknown[] }).__shots = [((enemy as unknown as { __shots?: unknown[] }).__shots ?? []), e].flat(); },
+      projectiles: [],
     };
     const h = hooks as unknown as GameHooks & { entities: { add: (e: unknown, b: string) => void } };
     const shots = () => ((enemy as unknown as { __shots?: unknown[] }).__shots ?? []).length;

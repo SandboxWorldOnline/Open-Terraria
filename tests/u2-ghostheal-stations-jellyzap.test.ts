@@ -16,7 +16,7 @@
 //      → TakeDamageFromJellyfish 电玩家（Player.cs:44607,1.3×）→ :12686 return 拦伤害
 //      （写梯 :14031-14183 不达=免疫账零落账）。旧档 hitEnemies 头 dontTakeDamage 整跳
 //      =长矛（105/46/153 aiStyle 19）×充能水母不伤面恰同态、仅电击缺。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ731:vi=DV 恒等档 mock
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -83,7 +83,12 @@ describe('U2-§A：hitEnemies 受理位 ghostHeal 单源（长矛 105 数据面 
     const log: StealCall[] = [];
     const e = enemySpy(1, 400, 250);
     const game = makeGame(log, [e]);
-    hitEnemies(spearSelf(390, 254), game, new HitCooldown(), 10, 1);
+    // ★BJ731 改判史（2026-10-27）：hitEnemies 结算掷 :12970 DV（BJ723-B W01
+    //   落地面）——ghostHeal num41=防后实扣随 DV 漂。0.5 恒等档钉 60−def。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      hitEnemies(spearSelf(390, 254), game, new HitCooldown(), 10, 1);
+    } finally { rvi731.mockRestore(); }
     expect(e.attempts).toBe(1);
     expect(log.length).toBe(1);
     expect(log[0].kind).toBe('ghost');

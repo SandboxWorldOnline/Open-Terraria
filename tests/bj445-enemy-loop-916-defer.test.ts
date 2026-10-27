@@ -206,7 +206,10 @@ describe('BJ445-§B：crit 色补齐（敌怪环色面/城镇臂防后 ×2）', 
     const { hooks, player } = makeHooks([src]);
     player.tagEffectStack.tryApplyTagToNPC(4914, src.id, 0, 0);   // tagDamage 20/critChance 10
     contactDirect(ravenAt(player, 600, 600), hooks);
-    expect(src.calls[0].d).toBe(85);                   // (30+20)×2=100 → DV(100,−15 档)=85（BJ716-A R18-F2）
+    // ★BJ730 改判史：旧值 85（BJ716-A 时点形 (30+20)×2=100 预倍后 DV）→ 新值 42
+    //  ——BJ723-B S02（2026-10-26）crit ×2 移 Enemy.hurt 防后（NPC.cs:82067 两步式）,
+    //  敌怪环预翻倍清偿后 spy 记录=未倍 DV 值:50×0.85=42.5→toEvenRound 42。
+    expect(src.calls[0].d).toBe(42);                   // (30+20)=50 → DV(50,−15 档)=42（×2 在 hurt 防后）
     expect(src.calls[0].crit).toBe(true);              // ★主判别:色位（旧恒 false 必红）
     expect(seq).toEqual(['SRC']);                      // 万花筒无链电（OnTaggedHit=粒子面）
   });
@@ -219,7 +222,9 @@ describe('BJ445-§B：crit 色补齐（敌怪环色面/城镇臂防后 ×2）', 
     // 6176 谓词 = sentry‖SentryShot[type]（:12962-12965）——哨兵位载体直驱
     const sentryRaven = new MinionProj(586, 586, 317, 30, 1.5, true, 0, false, () => player);
     contactDirect(sentryRaven, hooks);
-    expect(src.calls[0].d).toBe(52);                   // 30×2=60 → DV(30,−15 档)=26×2=52（BJ716-A R18-F2）
+    // ★BJ730 改判史：旧值 52（30×2=60 预倍后 DV 再 ×2）→ 新值 26——同 B1,BJ723-B
+    //  S02 crit ×2 移 hurt 防后:30×0.85=25.5→toEvenRound 26（银行家舍入 25.5→26）。
+    expect(src.calls[0].d).toBe(26);                   // 30 → DV(30,−15 档)=26（×2 在 hurt 防后）
     expect(src.calls[0].crit).toBe(true);              // ★主判别:色位（旧恒 false 必红）
   });
 

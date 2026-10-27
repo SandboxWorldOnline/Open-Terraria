@@ -307,10 +307,11 @@ export class VolcanoBlastProj extends Entity {
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       // ★D2:独立结算面补钩(dmgVar 值域→新变量承接)
+      // ★S02(BJ723-B):crit ×2 摘除——移 Enemy.hurt 防后(NPC.cs:82067)
       const dmgHooked = runModModifyHitNpcByProj(game.player, game, (this as unknown as { projId?: number }).projId ?? -1,
-        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmgVar * (crit ? 2 : 1), crit);
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmgVar, crit);
             e.hurt(dmgHooked
-        + (snapBonusVolcano ? Math.trunc(snapBonusVolcano * (crit ? 2 : 1)) : 0),
+        + (snapBonusVolcano ? snapBonusVolcano : 0),
         // pierce=-3 = usesLocal 族清零档（BJ398 现役梯,Enemy.hurt :14317 iframes=0
         // ≙ 原文 :14175-14178 `immune[owner]=0` 写面）——★Q4 刀写半面对齐：旧档
         // pierce=0 写 10t 弹幕域窗,而 978 usesLocalNPCImmunity 节流归弹内局部表

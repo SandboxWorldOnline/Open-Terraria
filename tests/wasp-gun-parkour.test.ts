@@ -252,7 +252,10 @@ describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清�
     const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     expect(wasp.pierceInit).toBe(3);
     const hitTicks: number[] = [];
-    withRng(0.99, () => withTickClock((clock) => {            // 钉 0.99=无暴击,实伤恒 31
+    // ★BJ731 改判史（2026-10-27）：0.99=无暴击但 DV 档 +15（31×1.15→36）——
+    //   BJ723-B W01 起接触结算掷 :12970 DV。改 0.5=无暴击 ∧ DV tier 0 恒等档,
+    //   实伤恒 31 语义保持。
+    withRng(0.5, () => withTickClock((clock) => {
       for (let t = 1; t <= 60 && !wasp.dead; t++) {
         clock.t += 1000 / 60;
         wasp.fixedUpdate(1, hooks);

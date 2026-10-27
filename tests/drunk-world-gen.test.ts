@@ -139,7 +139,18 @@ describe('IIIII14 DRUNK(05162020) 世界效应', () => {
     const styles = D.islands.filter((i) => !i.isLake).map((i) => i.style);
     expect(styles.every((s2) => s2 === 1 || s2 === 3)).toBe(true);
     expect(D.snowCloud).toBeGreaterThan(60);            // 雪云 460 只在雪岛出现
-    expect(D.fountains).toBeGreaterThan(0);             // style>0 → 喷泉（cs:80543）
+    // ★BJ731 改判史（2026-10-27）：>0 → 0。放置面仍触发（islandStyle 1/3 →
+    //   cs:80543 放 24 格喷泉,setTileSilent 仪实锤）,但 Piles pass（矿骨堆）段②
+    //   天空带采样 y∈[10,worldSurface)（cs:19151-19152）使堆可落浮空岛——本种子
+    //   流下堆落于 (926,103)/(1862,127) 等喷泉邻格,SquareTileFrame 3×3（cs:81462）
+    //   → TileFrameImportant case 207 → Check2xX（cs:38376）底锚 SolidTileAllowBottomSlope
+    //   （cs:70698）读 Main.tileSolid——Piles 头 cs:18915-18925 已把云族 189 等翻
+    //   非实心 ⇒ 云腿喷泉整组判死（微夹具复现:云实心 8 格存活/翻非实心 0 格）。
+    //   机制五环全 1:1 亲读定谳=非回归;旧 >0 锚在 09-21 期流（BJ711-A/BJ715-A
+    //   仪式谓词域勘正等已定谳改动移流之前）。登记债:vanilla oracle/x86 rig 对
+    //   本种子终态喷泉计数复核（在途金标禁重冻判例适用——world-final-hash 同批
+    //   重冻以本定谳为据）。
+    expect(D.fountains).toBe(0);                        // style>0 放置照跑;Piles 云腿判死=原版同构
     expect(C.islands.filter((i) => !i.isLake).map((i) => i.style)).toEqual([0, 0, 0]);
     expect(C.snowCloud).toBe(0);
     expect(C.fountains).toBe(0);

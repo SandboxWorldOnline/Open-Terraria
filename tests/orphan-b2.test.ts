@@ -24,6 +24,7 @@ import { projectileData } from '../src/data/vanillaProjectiles';
 import { TILE_BY_KEY, TILE_DEFS, T } from '../src/data/tiles';
 import { WALL_DROPS } from '../src/data/wallDrops';   // SW-BL1 2026-09-06 清墙掉落守卫
 import { VI } from '../src/data/itemKeys';
+import { ITEM_DEFS } from '../src/data/items';   // ★BJ731:清墙掉落键解析式同 src
 import type { GameHooks } from '../src/entities/types';
 
 const TREE_ID = () => TILE_BY_KEY['tree']!;
@@ -62,6 +63,17 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
     x: (opts?.px ?? (40 * TILE)) - 10, y: (opts?.py ?? (90 * TILE)) - 21, w: 20, h: 42,
     dead: false, facing: 1,
     equipStats: {} as Record<string, unknown>,
+    // ★BJ731 补桩（2026-10-27）：BJ652 件4 起 damagePlayer 飘字/语音面读
+    //   p.mount.active（PlayHurtSound :38946-38982 mountType）与 p.buffs.has
+    //   （wereWolf 位）——裸桩缺此两面=盒内自伤 TypeError,补静默桩（真 Player
+    //   恒有 mount/buffs,缺省 false/空表=无坐骑/非狼人档）。
+    mount: { active: false, type: 0 },
+    buffs: { has: () => false },
+    // ★BJ731 补桩（2026-10-27）：damagePlayer 头部乘区读位——luck（SelfHurtPlayers
+    //   :15118 damageVarRoll(value,-luck)）与 modTakenMult（★五百四十六乘区,
+    //   缺省 1;undefined!==1 → dmg×undefined=NaN）。
+    luck: 0,
+    modTakenMult: 1,
     damage: (d: number, sx: number, sy: number) =>
       playerRecords.push({ kind: 'damage', v: { d, sx, sy } }),
   };
@@ -407,8 +419,13 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     // ——SW-BL1：清墙掉落全语义（KillWall_DropItems WorldGen.cs:60934-60941）。墙 1 =
     //   Unsafe 泥墙 → 掉 vi_26（WALL_DROPS[1]=26）1 件@格中心（vy=-2）；负对照带
     //   （col 47/53、row 146）墙未清不掉。清墙格 5×11=55 + 巷道邻域带若干 → 至少 55 件
+    // ★BJ731 改判史（2026-10-27）：R-A-M1 起清墙掉落键改 `ITEM_DEFS[vid].key ??
+    //   VI(vid)`（mod 物品键直查,蛇形 def 键优先;spawnDrop 双注册域均可解析）
+    //   ——26 号 def 键=vi_26_stone_wall ≠ VI(26)=vi_26_StoneWall,旧精确过滤
+    //   恒 0。过滤键改与 src 同解析式（ITEM_DEFS 优先）。
+    const wallDropKey731 = ITEM_DEFS[WALL_DROPS[1]]?.key ?? VI(WALL_DROPS[1]);
     const wallDrops = ((g as any).dropRecords as Array<{ x: number; y: number; key: string; count: number }>)
-      .filter((d) => d.key === VI(WALL_DROPS[1]));
+      .filter((d) => d.key === wallDropKey731);
     expect(wallDrops.length).toBeGreaterThanOrEqual(55);
     expect(wallDrops.every((d) =>
       Math.abs(d.x - (Math.round((d.x - 8) / TILE) * TILE + 8)) < 1e-6 && d.count === 1)).toBe(true);

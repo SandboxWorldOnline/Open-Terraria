@@ -55,6 +55,20 @@
 //   在案),其→105 差(霓虹苔域+液)为该 pass 后半段(ShimmerCleanUp+LiquidCheck
 //   createMergeTilesDuringGen)合法增量,禁作终态对拍基准。共享树在飞:再生值=冻结
 //   时刻快照,后续车道行为面改动会再次合法重触发本门,届时照本注规程再冻。
+//
+// ── ★BJ731 再生（2026-10-27 15:5x，上次冻结 09-06 后累积漂移收敛）──
+//   9293480:     type e50ae4f7 flags 3050130c wall 41d20d3e liquid d63c9182
+//   1511931452:  type 6934fde9 flags 3d190dec wall 88abbbba liquid aecab990
+//   重冻原因:09-06 冻结后 worldgen 已定谳落刀面移流/改写——①BJ711-A/BJ715-A
+//   仪式谓词域勘正（isSolidStrict+isPlatformsType 单源 cultistCheckFloorPts,
+//   移地牢入口仪式位→下游掷流整体移位=四通道全漂主源;bj711a/bj715a 判别锁绿）
+//   ②BJ548 种植箱连接帧 case 380 派发新增 ③IIII99d Check2x2 主组全集派发扩展
+//   ④BJ182b/BJ210/BJ221 表收编（逐值全等,§6d/§6i/§6k 锁,零流移）。
+//   连带定谳:drunk 5162020 浮空岛喷泉终态 24→0（Piles 段②天空带采样+云腿
+//   Check2xX 判死,机制五环 1457 亲读 1:1,见 drunk-world-gen.test.ts ★BJ731
+//   改判史——非回归,随流漂移的合法终态）。x86 槽链末锚认证未随本批重跑
+//   （rig 源不在此会话）,登记债:下批 worldgen 落刀前以 oracle 复跑八通道
+//   认证后再动刀。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

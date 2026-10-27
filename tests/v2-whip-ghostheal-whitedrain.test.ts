@@ -15,7 +15,7 @@
 //     ⇒ immune[owner] 门【生效】——门拒（他弹残窗）=原文 return:不 proc 不计数。
 //   · :14263 numHits++ 受理拍自增在 proc 块后 ⇒ proc 读自增前值（首跳 0 档率 0.20）。
 //  本仓承接 = T 单源快照判据 + U2 ghostHealProc 单源（isMagic 经 projectileData 直传）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -102,6 +102,7 @@ const mkWhip = (player: Player, dmg: number): WhipProj =>
 
 describe('V2-§A：鞭命中环 ghostHeal 白耗面（841 非 magic 数据面）', () => {
   it('首跳 proc：isMagic=false（白耗面）/numHits=0/dmg=防后实扣/出生点=受害者 Center', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C S03 位移修复:鞭 DV 中性档（num41=防后实扣平值复稳）
     const e = enemySpy(1, 400, 600);
     const { hooks, player, log } = makeHooks([e]);
     landOneHit(mkWhip(player, 60), hooks, e);

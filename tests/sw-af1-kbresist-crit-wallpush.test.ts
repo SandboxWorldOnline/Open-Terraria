@@ -78,9 +78,12 @@ describe('SW-AF1 F-4：爆炸 ranged 弹暴击掷（Damage_PVE_Inner :12920）',
   it('explodeAt 三 victim 支接线（敌怪/小动物/城镇）：源面逐支掷入', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     expect(src.match(/Game\.explodeCritRoll\(projId, this\.rangedCritPct\(\)\)/g)?.length).toBe(3);
-    expect(src).toMatch(/en\.hurt\(crit \? hurt \* 2 : hurt/);           // 敌怪支预倍（仓内 crit 惯例面）
-    expect(src).toMatch(/c\.hurt\(ccrit \? churt \* 2 : churt/);         // 小动物支同链同掷
-    expect(src).toMatch(/0, 0, tcrit\);/);                               // 城镇支 crit 参（×2 于防后=TownNPC.hurt 接收端）
+    // ★BJ730 改判史：旧形 `/en\.hurt\(hurt,/`——BJ723-B D4 清偿（BJ725-A）snap 双支
+    //  给敌怪支入参合法加 snap 加成（`hurt + (snapE ? snapE : 0),`）,逗号紧跟形破窗;
+    //  改前缀形（锁「敌怪支以 hurt 直传未预倍」语义,×2=Enemy.hurt 防后,S02 判语不变）。
+    expect(src).toMatch(/en\.hurt\(hurt/);                                // ★S02(BJ723-B)改判:敌怪支未翻倍直传（×2=Enemy.hurt 防后;BJ725-A snap 加成随入参）
+    expect(src).toMatch(/c\.hurt\(churt,/);                               // ★S02 改判:小动物支同链同掷未翻倍
+    expect(src).toMatch(/0, 0, tcrit, false, true, projId\);/);          // 城镇支 crit 参（×2 于防后=TownNPC.hurt 接收端;★R-B-F1 加参后锁随刀走）
   });
 });
 

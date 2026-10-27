@@ -31,7 +31,7 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B23）：城镇 voodoo 靶
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 /** 溶液弹型号表（AI_031 switch，1457 Projectile.cs:27165-27199）：projId → [conv, dust]。
@@ -288,11 +288,32 @@ export class WaterSplashProj extends Entity {
           { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
         const crit = rollCrit || timerCrit;
-        const dmg = crit ? this.damage * 2 : this.damage;
+        const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
         e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
         this.splash(game);
         return;
       }
+    }
+    // ★BJ729-A（D1 B23,2026-10-27）：城镇 voodoo 靶——69/70/621 friendly 弹巫毒窄门
+    //  （:12618-12631）;AABB 自盒;settle 镜像敌怪臂链（crit=rollCrit||TimerCrit
+    //  :12915-28 全掷/DV=面级既有形态不单侧补齐[D6 族登记]/穿甲 armorPen）;
+    //  penetrate 1 受理即 splash 消亡（:14189-196 同相）。
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
+      'playerProj', this.projId, undefined, undefined, undefined, undefined,
+      (tn) => {
+        void tn;
+        return {
+          crit: (this.critChance > 0 && rollVanillaHitCrit(this.projId, game))
+            || ((game.player as unknown as
+              { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+              | null)?.tryConsumingTimerCrit?.(game,
+                (tn as unknown as { x: number }).x, (tn as unknown as { y: number }).y,
+                (tn as unknown as { w: number }).w, (tn as unknown as { h: number }).h) ?? false),
+          penPercent: this.armorPen,
+        };
+      })) {
+      this.splash(game);
+      return;
     }
     // 超时兜底（timeLeft 缺省 3600——正常抛物线内必先撞块；仍照 Kill 链转换）
     if (this.ai0 > 3600) this.splash(game);

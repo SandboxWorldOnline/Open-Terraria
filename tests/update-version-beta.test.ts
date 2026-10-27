@@ -37,10 +37,16 @@ describe('update-version-beta 更新横幅版本段', () => {
     expect(ub).toContain('/^\\d{10}$/.test(vTokens[1]');
     // 本地构建刷戳:dev/build/build:analyze/start/start:analyze 前缀 stamp-build(不升版;
     // ★start:analyze 是自带完整 vite build 的独立长命令,漏接=用户实报「本地构建仍显示旧戳」)
+    // ★BJ731 改判史（2026-10-27）：v0.1.66（72c67689）起 build:analyze/start/
+    //   start:analyze 前挂 `npm run test:assets-guard && ` 素材闸——stamp-build
+    //   退居第二位但仍先于 vite build（戳语义不变）,断言自 startsWith 放宽为
+    //   链内含（dev/build 仍居首=双形态并存）。
     const pkg = JSON.parse(srcOf('package.json'));
     for (const k of ['dev', 'build', 'build:analyze', 'start', 'start:analyze']) {
-      expect(pkg.scripts[k].startsWith('node scripts/stamp-build.mjs')).toBe(true);
+      expect(pkg.scripts[k].includes('node scripts/stamp-build.mjs')).toBe(true);
     }
+    expect(pkg.scripts.dev.startsWith('node scripts/stamp-build.mjs')).toBe(true);
+    expect(pkg.scripts.build.startsWith('node scripts/stamp-build.mjs')).toBe(true);
     expect(srcOf('scripts/versionStamp.mjs')).toContain('APP_BUILD_STAMP');
     expect(srcOf('scripts/bump-version.mjs')).toContain('writeVersionTs');
   });

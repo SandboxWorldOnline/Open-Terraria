@@ -53,7 +53,7 @@ import { rainbowRodHitFx } from '../fx/orchestraFx';
 import { drawStripTrail, type TrailPt, type TrailSpec } from '../fx/TrailShader';
 import type { Renderer } from '../render/Renderer';
 import { ParticleOrchestraType } from '../net/syncModules';
-import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitCrittersAll, hitTownNpcs, playerCanHitEnemy, hitTownNpcsAoeBox } from './projTargets';   // ★BJ729-A：hitCrittersAll（KILL_BURST D4 critter 臂）
 import { rollVanillaHitCrit } from './proj1457';
 import type { VDust } from '../fx/VanillaDust';
 import { canHit } from '../physics/LineOfSight';
@@ -77,6 +77,7 @@ import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW �
  * 2026-09-22）：新导弹族接线已补（steer 引导支）——「接线遗漏判定」销账。
  */
 import { limitPointToPlayerReachableArea } from './PlayerReachableArea';
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C M02：16/34/79 可控导弹族 DV 首掷（:12970）
 export { limitPointToPlayerReachableArea };
 
 /** Utils.GetLerpValue（Utils.cs:315-322——★BJ665 勘正 伪锚 :283-307，clamped=true）——含 from>to 倒置区间 */
@@ -857,7 +858,11 @@ export class MagicMissileProj extends Entity {
       // ★BJ489 def-3：16/34/79 掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+
       //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——16 魔法
+      //  飞弹/34 烈焰火鞭/79 彩虹魔杖弹三型共面,每受理靶 ±15% 31 档离散+luck
+      //  重掷,BJ716-A Arrow 主环同式;crit ×2 后置=StrikeNPC 内序）
+      const dmgMsl = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+      const dmg = dmgMsl;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
@@ -870,8 +875,8 @@ export class MagicMissileProj extends Entity {
           cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
           cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusMissile ? Math.trunc(snapBonusMissile * (crit ? 2 : 1)) : 0),
-        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
+        + (snapBonusMissile ? snapBonusMissile : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点;★S02 crit ×2=Enemy.hurt 防后
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 16 显型档=immune[owner]=8（:14096-14098）→ 非 local 面按表写；
       // 34/79 usesLocalNPCImmunity（1457 SetDefaults :1173/:1605,cd=12）→ 写 0
@@ -980,10 +985,29 @@ export class MagicMissileProj extends Entity {
         const snapBonusRainbow = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, e.id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
-          + (snapBonusRainbow ? Math.trunc(snapBonusRainbow * (crit ? 2 : 1)) : 0),
-          Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
+        // ★BJ723-C M02（2026-10-26）：死亡爆 AoE 同掷（Kill Resize → Damage() →
+        //  :12970 逐受害靶 DV——同 hitStep 面,审计清单漏列的第 7 面,同族并入）
+        const dmgKB = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+        e.hurt(applyBannerDamageDealt(game, e, dmgKB)
+          + (snapBonusRainbow ? snapBonusRainbow : 0),
+          Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★S02 crit ×2=Enemy.hurt 防后
       }
+      // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆 AoE 城镇臂（BJ723-C D4 登记本体清偿）
+      //  ——原版 Resize(盒)+penetrate=-1+Damage() 重跑（79 :72432/16 :72510/34 :72604）
+      //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+      //  敌怪臂 M02 链镜像（DV :12970+crit :12915-27 逐靶掷）。79/16/34 玩家弹=
+      //  playerProj 档（巫毒窄门内无娃娃 no-op）。
+      // ★BJ729-A（D4,2026-10-27）：KILL_BURST critter 臂——原版 Resize(盒)+penetrate
+      //  =-1+Damage() 重跑 victim 循环（:12592）对小动物同链（79/16/34 非 minion/
+      //  sentry → CanNPCBeHit :20675 放行）→ hitCrittersAll 全结算（多靶;主环接触
+      //  面 :847/:1689/:1862 hitCritters 单发档与此分立,两 bucket 面各自 1:1）。
+      hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+      hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
+        () => ({
+          dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+          crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+          penPercent: this.armorPen,
+        }));
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
       // 沿 oldPos 尾迹迸散（79 :72436-72487 / 16 :72511-72577 / 34 :72605-72632，
       // 1458 与 1047 彩虹巨石族同构）。
@@ -1679,7 +1703,7 @@ export class FlyingKnifeProj extends Entity {
       this.hitCd.set(e.id, 10);
       // ★BJ489 def-3：491 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ723-C D1 清偿（BJ725-A）:DV :12970 逐靶掷——★S02:crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
@@ -1692,7 +1716,7 @@ export class FlyingKnifeProj extends Entity {
           cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
           cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusKnife ? Math.trunc(snapBonusKnife * (crit ? 2 : 1)) : 0),
+        + (snapBonusKnife ? snapBonusKnife : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
     }
   }
@@ -1848,7 +1872,7 @@ export class StarfuryStar extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,9 melee 旗）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ723-C D1 清偿（BJ725-A）:DV :12970 逐靶掷——★S02:crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级）——
       // 老星怒落星 9 数据面 melee → 过 kind1 门即脉冲；返回 num14 加伤随暴击并入实伤参
       const snapBonusStar = projectileSnapStrikeBonus(game, this,
@@ -1857,7 +1881,7 @@ export class StarfuryStar extends Entity {
           cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
           cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusStar ? Math.trunc(snapBonusStar * (crit ? 2 : 1)) : 0),
+        + (snapBonusStar ? snapBonusStar : 0),
         Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }

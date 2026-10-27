@@ -83,6 +83,9 @@ function mkMineGame(w: World) {
   g.tileAboveProtected = () => false;
   g.canPoundTile = () => true;
   g.trackTile = 0;
+  // ★BJ730 夹具补桩：tryMine 接入意图猜测器（intentionGuesser.track/allowTracking,
+  //  Game 构造器字段 :3956——真 Game 恒有,Object.create 壳须手铺,同壳模式既有习语）。
+  g.intentionGuesser = { track: () => {}, allowTracking: () => {}, update: () => {} };
   g.hammerPoundRelease = false;
   return { g, sounds, dusts };
 }
@@ -185,7 +188,11 @@ describe('SW-FX5 E1 残余：拆墙节拍 = itemTime = useTime/2（Player.cs:463
 
 describe('SW-FX5 E3 残余：工具支挥摆时长下限钳 14→1（SetItemAnimation :4440-4447）', () => {
   it('结构锚：工具支 spd= max(1, round(useAnimation/attackSpeedMult))，14 钳退役', () => {
-    expect(gameSrc).toContain('Math.max(1, Math.round((tool.speed ?? 46) / this.player.attackSpeedMult))');
+    // ★BJ730 改判史：旧形 `Math.max(1, Math.round((tool.speed ?? 46) / attackSpeedMult))`
+    //  ——BJ640（2026-10-11 攻速三面重写）整面替换:①方向应【乘】M 非÷（+加成→变短）
+    //  ②词缀 spd 烘定 roundCSf32Mul ③(int) 截断 truncCSf32Mul（f32 位级,:4438-4446）;
+    //  下限钳 1 语义在新形在位（:4444 同源）,锁随 BJ640 形。
+    expect(gameSrc).toContain('Math.max(1, truncCSf32Mul(roundCSf32Mul(nativeSpd, psSw?.spd ?? 1), this.player.attackSpeedMult))');
     expect(gameSrc).not.toContain('Math.max(14, Math.round((tool.speed');
   });
   it('数据锚：快工具 5 件 useAnimation=12（修复前挥摆/挥击音/重启被钳 14t）', () => {

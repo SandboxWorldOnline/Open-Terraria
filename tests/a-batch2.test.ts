@@ -132,6 +132,11 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
   });
 
   it('命中：曲线上控制点处敌被命中且每次挥动仅一次（18×18 盒 :14482-14494 / cd=-1 :10104）', () => {
+    // ★BJ729-A（2026-10-27）DV 中性档钉值：BJ723-C S03 起鞭本体每受理靶掷
+    //  DamageVar（:12970,damageVarRoll ±15% 31 档）——本测未 mock 时非中性档
+    //  期望 14 必漂（12-16,~90% 红=S03 落地起预存 flaky,BJ716-A 同款修法,
+    //  见本文件 :258 族）。0.5 → tier 0 → ×1.0 恒等档。
+    const rvi729 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const enemy = mkEnemy(1, 0, 0);
     const { hooks, player } = makeHooks([enemy]);
     const w = new WhipProj(player.cx, player.cy, 0, 841, 4672, 14, 1, 30, 4, () => player);
@@ -143,6 +148,7 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
     expect(enemy.hits[0]).toBe(14);                        // 全额（召唤乘区 1 / 护穿 0）
     w.fixedUpdate(1, hooks);
     expect(enemy.hits.length).toBe(1);                     // localNPCHitCooldown=-1 每敌一次
+    rvi729.mockRestore();
   });
 
   it('射程门：841 峰值 reach = 4×30×2×0.75=180 → 400px 外敌全程不命中（:45643/:45703）', () => {
@@ -155,6 +161,8 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
   });
 
   it('多目标衰减：841 falloff 0.5 → 第二命中敌 7（damage 字段链 :12604-12678）', () => {
+    // ★BJ729-A DV 中性档钉值（同上测,S03 起 DV 掷使未 mock 期望 14/7 必漂）。
+    const rvi729b = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const a = mkEnemy(3, 0, 0), b = mkEnemy(4, 0, 0);
     const { hooks, player } = makeHooks([a, b]);
     const w = new WhipProj(player.cx, player.cy, 0, 841, 4672, 14, 1, 30, 4, () => player);
@@ -167,6 +175,7 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
     w.fixedUpdate(1, hooks);
     expect(a.hits[0]).toBe(14);   // 曲线序在前的全额
     expect(b.hits[0]).toBe(7);    // 之后 ×0.5
+    rvi729b.mockRestore();
   });
 
   it('tag 窗口：命中写入 240t/TagDamage（1457 TagEffectStack :80-87）；4912 火鞭 flat=0（:1397）', () => {

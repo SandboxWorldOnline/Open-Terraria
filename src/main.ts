@@ -1194,3 +1194,10 @@ kvHas('sandboxworld.quicksave').catch((e) => {
   splashGate.resolve();        // 全量完成才解 splash"加载完成"门（时序尽自收场）
   await splash.finished;       // 渐隐到菜单后揭幕
 });
+
+// ★BJ724-A 刀2:启动握手信号——index.html 内联看门狗(独立于主包)据此判定
+// 「主模块已下载并求值」。置位点=模块执行尾:上面的 kvHas().then 启动链是异步
+// 回调不阻塞本行,任何更早的求值失败都会让信号缺席→看门狗 60s 超时出失败提示;
+// 模块图任一下载失败另有 script error 自动重试一发(见 index.html #sw-boot-watchdog 注)。
+// 幕布消失由游戏自身流程管(静态幕摘除/启动幕交接),本信号只管「主包活着」。
+(window as unknown as { __swBooted?: boolean }).__swBooted = true;

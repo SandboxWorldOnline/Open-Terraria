@@ -3251,7 +3251,15 @@ export class Player extends Entity {
         else if (p === 66) mana += 20;           // Arcane：魔力 +20
         else if (p === 67) { critMelee += 2; critRanged += 2; critMagic += 2; }
         else if (p === 68) { critMelee += 4; critRanged += 4; critMagic += 4; }
-        else if (p >= 69 && p <= 72) dmgMelee += dmgRanged += dmgMagic += (p - 68) / 100; // 69-72：+1..4% 全伤
+        else if (p >= 69 && p <= 72) {
+          // ★BJ723-A S01：69-72 四系独立各 +1..4%（1457 GrantPrefixBenefits
+          //   :14087-14114——melee/ranged/magic/minionDamage 逐系 `+= 0.01f..0.04f`）。
+          //   曾写成 `dmgMelee += dmgRanged += dmgMagic += x` 复合赋值——右结合串联：
+          //   远程吃魔法【累加值】、近战吃远程累加值（5×+4% 词缀实测近战+140%/
+          //   远程+60%/魔法+20%，应各+20%）、召唤整漏；修=四系各自独立加法
+          const pd = (p - 68) / 100;
+          dmgMelee += pd; dmgRanged += pd; dmgMagic += pd; minionDmg += pd;
+        }
         else if (p <= 76) move += (p - 72) / 100; // 73-76：+1..4% 移速
         else meleeSpeed += (p - 76) / 100;        // 77-80：+1..4% 近战速度
       }
@@ -3647,11 +3655,15 @@ export class Player extends Entity {
       if (s.huntressT2) huntressT2 = true;
       return s;
     })();
-    // 天界石族复合（Player.cs:12558-12570：life+2/def+4/近战速+10%/全系伤+10%/全系暴+2%）
+    // 天界石族复合（1457 Player.cs:13088-13102 skyStoneEffects：lifeRegen+2/def+4/
+    // 近战速+10%/四系伤+10%【含 minionDamage】/三系暴+2%/镐速−15%/召唤击退+0.5）。
+    // ★BJ723-A S06：原块漏 minionDmg+0.1/minionKB+0.5/pickSpeedOff+0.15 三行
+    // （issue 点名召唤伤；另两行同块补齐至 1:1——昼夜八组验证召唤曾恒 0%）
     if (skyStone) {
       life += 2; def += 4; meleeSpeed += 0.1;
-      dmgMelee += 0.1; dmgRanged += 0.1; dmgMagic += 0.1;
+      dmgMelee += 0.1; dmgRanged += 0.1; dmgMagic += 0.1; minionDmg += 0.1;
       critMelee += 2; critRanged += 2; critMagic += 2;
+      pickSpeedOff += 0.15; minionKB += 0.5;   // :13099/:13101（pickSpeed−0.15 折入折扣正池）
     }
     // buffImmune 刷新（Player.cs:14911-15003 装备段 + :9576-9578 黑曜石皮 buff 段；
     // buff 103 Wet 的 buffImmune[24]/[323]/[67] 见 UpdateBuffs :11342-11346——水行族
@@ -3952,22 +3964,23 @@ export class Player extends Entity {
       m += this.buffs.hungerDamage;      // 饥饿/极饿全系 -5/-10%（:11565+/:11588+，含召唤）
       m += this.modDmgAdd?.summon ?? 0;   // ★四百九十五:mod 每 tick 条件伤加算池
       m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
-      if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:25715）
       // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
       if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
       // 帕鲁坐骑 62-65（1457 Mount.cs UpdateEffects case 62/63/64/65 :4862-4867：
       // melee/ranged/magic/minion 四系各 += 0.1——疾旋鼬/疾旋火鼬及其 Trusty 版）
       if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
       m += (this.equipStats as any).modDmgMinion ?? 0;   // ★五百七十七:mod dmgMinion
+      // ★BJ725-A D1（2026-10-26）：枯萎 ×0.5 移全加算源后（1457 Player.cs:26232-26238
+      //  Update 尾=UpdateEquips :25830 全部加算源（含坐骑 :25855 鱼鲨+0.15/帕鲁+0.1/
+      //  modDmgMinion）聚合后才乘——旧位在坐骑加算前=增益逃过折半;melee/ranged/magic
+      //  支同序（M01 批对齐）,召唤支本批补齐（bj723a 登记债 D1 清偿）
+      if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:26236）
       return m;
     }
     let m = 1 + (kind === 'melee' ? (st.dmgMelee ?? 0) : kind === 'ranged' ? (st.dmgRanged ?? 0) : (st.dmgMagic ?? 0));   // ★BJ175 桩面 ?? 防御（缺省 0）
     m += this.modDmgAdd?.[kind] ?? 0;   // ★四百九十五:mod 每 tick 条件伤加算池(Victide 水下族)
     if (kind === 'magic') {
       m += this.buffs.magicDmgBonus;            // MagicPower +20%（:9669）
-      m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10003/:25616）
-      m *= this.manaHeatMult;                   // 1457: 魔力过热乘区（Update :26104
-                                                //   magicDamage *= manaHeat，紧跟 manaSick 段）
     }
     // Archery 药水(16) ×1.1 不在此乘（:9711-9712 只进 arrowDamage → bowEffectiveDamage
     // :3820-3822 仅箭族消费；枪弹 gunEffective/火箭 specialistEffective 均不含
@@ -3981,6 +3994,19 @@ export class Player extends Entity {
       m += 0.1 * this.beetleMightOrbs;                         // 甲虫力量每档 +10%（:10518-10520 98-100 分支）
       if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
+    // ★BJ723-A R01 潜行加伤【加算】入远程池（1457 Player.cs:26015-26018/:26043：
+    // shroomite `rangedDamage += (1−Remap(s,1,0.75,1,0))×0.5f`、vortex
+    // `rangedDamage += (1−s)×0.8f`——Update 内直加远程池，随后 GetWeaponDamageMultiplier
+    // :54032-54047 箭/弹/火箭/other 四弹种统一消费；other(:54046) 裸吃 rangedDamage）。
+    // 曾误作【乘数】（箭/弹/火箭 ×(1+bonus)）且 other 整漏——满潜行+50% 通用远程：
+    // 星璇箭 2.70/other 1.50，应均 2.30（=1+0.5+0.8）；蘑菇矿箭 2.25 应 2.00。
+    // 互斥链序 = 变态刀(:25930) > 蘑菇矿(:25982) > 星璇(:26024) if-else——
+    // 手持变态刀时链首支吃掉潜行语义，远程无潜行加成
+    if (kind === 'ranged' && !this.heldPsychoKnife) {
+      if (st.shroomiteSet) m += (1 - shroomiteStealthRemap(this.stealth)) * 0.5;   // :26016
+      else if (st.vortexSet && this.vortexStealthActive) m += (1 - this.stealth) * 0.8;                        // :26043
+      // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
+    }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
     m += this.buffs.hungerDamage;    // 饥饿/极饿全系 -5/-10%（:11564+/:11587+）
     m += 0.15 * this.nebula[0];      // 星云四系 +15%/层
@@ -3990,6 +4016,15 @@ export class Player extends Entity {
     // 帕鲁坐骑 62-65（1457 Mount.cs UpdateEffects case 62/63/64/65 :4862-4867）：
     // melee/ranged/magic/minion 四系各 += 0.1
     if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
+    // ★BJ723-A M01 乘区序（1457 Player.cs:26098-26105）：manaSick/manaHeat 两乘区在
+    // Update 内位于 UpdateBuffs(:25763)/UpdateEquips(:25830 含坐骑 :25855)/
+    // UpdateArmorSets(:25882) 全部加算源聚合【之后】才乘（枯萎 ×0.5 :26234 又在其后）。
+    // 曾折在暴怒/食物/饥饿/星云/坐骑加算源之前 = 这些通用来源逃过眩晕/过热乘区
+    // （基准 1+暴怒.10+食物.10+星云.45 眩晕 0.75 时得 1.40，应 1.2375）
+    if (kind === 'magic') {
+      m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10412-10414/:26100）
+      m *= this.manaHeatMult;                   // 1457 魔力过热乘区（:26104 magicDamage *= manaHeat）
+    }
     // 枯萎武器(196)：四系伤害 ×0.5（Player.cs:25712-25719）
     if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;
     // ★五百四十七:mod 输出乘区面(C# multiplicativeDamage :4535-4540——
@@ -3999,16 +4034,13 @@ export class Player extends Entity {
   }
   /** 远程分道乘区（1457 Player.cs:3966-3970 bowEffectiveDamage/gunEffectiveDamage/
    *  specialistEffectiveDamage 拆分,消费 GetWeaponDamageMultiplier :54031-54055）：
-   *  箭 = (rangedDamage + 箭袋stack) × Archery × 蘑菇矿箭头 1.12 × 潜行增伤；
-   *  弹/火箭 = rangedDamage × 对应蘑菇矿头 1.12 × 潜行；其他（飞镖等）= rangedDamage */
+   *  箭 = (rangedDamage + 箭袋stack) × Archery × 蘑菇矿箭头 1.12；
+   *  弹/火箭 = rangedDamage × 对应蘑菇矿头 1.12；其他（飞镖等）= rangedDamage。
+   *  ★BJ723-A R01：潜行加伤已【加算】入 base（damageMult('ranged') :26016/:26043），
+   *  四弹种统一随池消费——不再是独立乘数，other 不再整漏 */
   rangedDamageMult(kind: 'arrow' | 'bullet' | 'rocket' | 'other'): number {
     const st = this.equipStats;
-    const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff）
-    // 潜行增伤：星璇平铺 (1−s)×0.8（:26043）；蘑菇矿走 Remap 轴 ×0.5（:26015-26016
-    //  num26=Remap(s,1,0.75,1,0)、rangedDamage += (1−num26)×0.5f——曾误平铺 ×0.6）
-    const stealthBonus = st.vortexSet ? 1 + (1 - this.stealth) * 0.8
-      : st.shroomiteSet ? 1 + (1 - shroomiteStealthRemap(this.stealth)) * 0.5
-      : 1;
+    const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff+潜行加算）
     if (kind === 'arrow') {
       // 1457 Player.cs:3966 bowEffectiveDamage = (rangedDamage/rangedMultDamage
       //   + arrowDamageAdditiveStack) × rangedMultDamage × arrowDamage——箭袋 stack
@@ -4018,10 +4050,10 @@ export class Player extends Entity {
       //   ('ranged')（:1769）→ 先 /M 还原加算链、stack 加在后、再回乘 M,与原式逐项等价
       const arrowMult = this.buffs.arrowDmgMult * (st.shroomiteType === 'arrow' ? 1.12 : 1);
       const rangedMultDamage = this.buffs.has(BuffType.WitheredWeapon) ? 0.5 : 1;   // :26233
-      return ((base / rangedMultDamage) + (st.arrowStack ?? 0)) * rangedMultDamage * arrowMult * stealthBonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
+      return ((base / rangedMultDamage) + (st.arrowStack ?? 0)) * rangedMultDamage * arrowMult;   // ★BJ175 桩面 ?? 防御（缺省 0）
     }
-    if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1) * stealthBonus;
-    if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
+    if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1);
+    if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1);
     return base;
   }
   /** 手持变态刀 3106（潜行判定用） */
@@ -4046,7 +4078,8 @@ export class Player extends Entity {
     let a: number;
     if (this.heldPsychoKnife) a = -Math.round(750 * s1);             // :25976 平铺 (1−s),首支
     else if (eqA.shroomiteSet) a = -Math.round(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26016 Remap 轴
-    else if (eqA.vortexSet) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
+    else if (eqA.vortexSet && this.vortexStealthActive) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
+    // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
     else a = 0;
     a += (eqA.aggroAcc ?? 0) + (eqA.aggroPiece ?? 0);   // 配饰轴+甲件轴（多源 +=,终零波批;★BJ175 桩面 ?? 防御,缺省 0）
     a += this.modAggroDyn;   // ★596:mod 每帧 aggro 动态面(mirage_mirror -200 等;赋值语义)
@@ -4269,7 +4302,8 @@ export class Player extends Entity {
     if (kind === 'ranged') {
       if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
       // 潜行暴击：星璇平铺 (1−s)×20（:26044）；蘑菇矿 Remap 轴 ×10（:26015/:26017）
-      if (st.vortexSet) c += Math.round((1 - this.stealth) * 20);
+      if (st.vortexSet && this.vortexStealthActive) c += Math.round((1 - this.stealth) * 20);
+      // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
       else if (st.shroomiteSet) c += Math.round((1 - shroomiteStealthRemap(this.stealth)) * 10);
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
@@ -9774,9 +9808,12 @@ export class Player extends Entity {
           //  item.crit+crt；this.critChance('melee') 只载装备/buff 面 ⇒ 补 4+heldItemCritBonus。
           const crit = Math.random() * 100 < 4 + this.critChance('melee')
             + heldItemCritBonus(this.inv.heldItem());   // :20811-20813
-          const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')) * (crit ? 2 : 1));
+          const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')));
+          // ★S02(BJ723-B):克盾冲撞 crit 直传（原版 :21258-21267 ApplyDamageToNPC(…,
+          //  crit,3097) 单布尔,×2 在 StrikeNPC_Inner 防后 NPC.cs:82067=Enemy.hurt 承载）
+          //  ——旧「预倍 dmg+crit=false 字面」=暴击飘字色双缺,随刀归位。
           const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
-          en.hurt(dmg, dir * kb, -4, game, 0, false, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
+          en.hurt(dmg, dir * kb, -4, game, 0, crit, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
           // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（受击音+飘值同点，
           // 见 Enemy.hurt 内 :82006-82015 收口注）；免疫早返 false 时本行曾仍弹
           // 「幻影伤害」（2026-08-31 二轮红队同案复核）。色走单源敌方族表
@@ -10071,9 +10108,11 @@ export class Player extends Entity {
         //  meleeCrit` 含基 4+:25712-14 持械折入,补 4+heldItemCritBonus（F11 同式）。
         const crit3 = Math.random() * 100 < 4 + this.critChance('melee')
           + heldItemCritBonus(this.inv.heldItem());
-        const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')) * (crit3 ? 2 : 1));  // :21317
+        const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')));  // :21317
+        // ★S02(BJ723-B):crit3 直传（原版 :21317-21327 ApplyDamageToNPC 形,×2 在
+        //  StrikeNPC_Inner 防后=Enemy.hurt 承载）——旧「预倍+false 字面」色缺随刀归位
         const kb3 = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);        // :21318-21327
-        en.hurt(dmg3, dir3 * kb3, -4, game, 0, false, 0, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317)
+        en.hurt(dmg3, dir3 * kb3, -4, game, 0, crit3, 0, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317)
         if (en.iframes !== undefined) en.iframes = 6;   // :21348 immune[whoAmI]=6
         // ★GC1/D3 统一时钟双写：NPC 面 → 共享表（近战三重门消费）；
         // 玩家面 GiveImmuneTimeForCollisionAttack(4)（:21349——原旧注"仍走各自旧近似，

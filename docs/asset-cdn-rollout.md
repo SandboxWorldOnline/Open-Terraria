@@ -88,6 +88,29 @@ asset-repull-cost-policy:内容变更才付一次性全量,切源这类纯通道
 即覆盖。剩余散件=代码 chunk(主 chunk 13MB)+ l10n(刻意同源网络优先)——
 代码走 CDN 会牵动 index.html/壳缓存语义,当前不值得,列入「不做」清单。
 
+### ★BJ724-A 复核(2026-10-26):入口 JS 走 CDN = 登记部署面任务书,代码侧不硬造
+
+弱网实报「入口 JS 69.7s ERR_ABORTED,幕布永转无重试」曾把「入口走 CDN」重新
+提上桌。定谳(构建产物+消费链亲读):**可用性问题已由 BJ724-A 两层收口**
+(sw.js fetchShell 正文看门狗+单次重试 / index.html 内联启动看门狗自动重注一发
++60s 握手超时——入口失败不再幕布永转),CDN 化余下的是**提速项**而非可用性项,
+且有三处部署面架构障碍,维持「不做」并登记任务书:
+
+1. **发现面不可达**:入口 `<script type="module" crossorigin
+   src="/assets/index-<hash>.js">`(dist/index.html 实形)在浏览器解析期即发起,
+   先于一切页面 JS;素材 CDN 的发现机制(assets-zip/cdn.json)由页侧 AssetCache
+   拉取,对入口天然迟到。CDN URL(包名@版本)只有发布时才知道,sw.js/index.html
+   均为静态字节——须构建期注入(define/模板),发布管线改造。
+2. **回退面只能内联**:入口失败时页面无 JS 可用,候选降级逻辑(源站→CDN,同
+   partFetcher 形态)只能活在 index.html 内联脚本;BJ724-A 刀2 的「重注一发」
+   骨架可扩展为双候选,但候选表注入同障碍①。
+3. **缓存语义**:shell 支 cache-first 键=源站 URL;CDN 直取体落 SW 缓存需定义
+   键映射(hash 内容寻址名恰好可自校验,是现成的完整性门)。
+
+触发条件:再有弱网「入口慢」实报(非「入口失败」——那已封死)/发版节奏允许时
+再开工;届时按 publish-assets-cdn 增量(把 dist/assets 入 tarball)+构建期注入
+双候选表 + 探针验活三步走。
+
 ## 四、幂等与发布纪律
 
 - **版本=0.0.0-<hash8>**(内容寻址):同名=同字节=已发布即跳过;重跑零副作用。

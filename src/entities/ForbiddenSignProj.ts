@@ -292,7 +292,7 @@ export class ForbiddenSignProj extends Entity {
       if (prevImmune > 0) continue;                              // localNPCHitCooldown=8
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
       //  656 数据面 magic ⇒ 原版 Ancient Storm 本就吸血,本仓漏接）——受理位挂接,
       //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。

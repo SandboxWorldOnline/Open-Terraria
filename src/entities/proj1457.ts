@@ -551,7 +551,8 @@ export function dealContacts(
     //  （表=EXPERT_EOW_FIFTH_PROJS 弹域单源,与 Game.explodeNpcDamageChain 爆炸 face
     //  同源——旧仅爆炸 face 有此臂,281 兔爆/蜂族经 dealContacts 的直击面全 5× 超伤）
     dmg = expertEowFifthDmg(dmg, self.projId, (e as unknown as { vanillaId?: number }).vanillaId, game.world);
-    dmg *= crit ? 2 : 1;
+    // ★S02(BJ723-B):crit ×2 摘除——移 Enemy.hurt 防后(NPC.cs:82067);banner/EoW /5
+    //  现均作用未翻倍值=BJ716-A 登记债②同批清偿
     // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——
     // 本共享结算面承载 1126/1127/1128/1129 等 1457 近战系新弹（数据面 melee），
     // 类门+触发统一走 projectileSnapStrikeBonus 单源；返回 num14 加伤在 banner 采样
@@ -564,7 +565,7 @@ export function dealContacts(
           cy: (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2 },
         targeterBox: { x: self.x, y: self.y, w: self.w, h: self.h },
       });
-    if (snapBonus1457 > 0) dmg += Math.trunc(snapBonus1457 * (crit ? 2 : 1));
+    if (snapBonus1457 > 0) dmg += snapBonus1457;   // ★S02:snap 随整体进 hurt 吃防后 ×2
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
     //（免疫门已在上收编——被拒敌到不了此处;★勿改为消费 hurt 布尔返作拒收判别:
@@ -1908,7 +1909,7 @@ export class StormLightning extends Entity {
           | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) {
         crit = true;
       }
-      let dmg = crit ? this.damage * 2 : this.damage;
+      let dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633,
       // 1457 :14632 同式）：×Remap(Main.Difficulty 浮点轴, Classic1, Master3, 1, 3)——
       // 经典 D=1→1 / 专家 D=2→2 / 大师 D=3→3 / 旅程滑杆缺省 D=0.5→clamp 1

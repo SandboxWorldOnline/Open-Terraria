@@ -65,7 +65,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { projectileWetSection, projWaterDragFactor, type ProjWetFlags } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHitPoint } from '../physics/LineOfSight';
-import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B22）：城镇 voodoo 靶
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源（★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
@@ -216,6 +216,21 @@ export class BeamBoltProj extends Entity {
       //  Damage() victim 循环（:12618）critter 恒在内,本仓独立桶不被扫到=激光弹对
       //  小动物零受击。
       if (hitCritters(this, game)) { this.pveNumHits++; this.killBeam(game); break; }
+      // ★BJ729-A（D1 B22,2026-10-27）：城镇 voodoo 靶——255/260 friendly 弹巫毒
+      //  窄门（:12618-12631）;AABB 自盒;settle 镜像敌怪臂链（crit 掷 magic/
+      //  mod 修正链=hitTownNpcs 原语内置/穿甲 armorPen/kb 受害体相对向）;mod 钩在
+      //  原语内于 settle 值后施加（敌怪臂 hook→trunc 序微差,整数域无观测）;
+      //  penetrate 1 受理即 killBeam（:14189-196 递减归零 → Kill 铺束同相）。
+      if (hitTownNpcs(this, game, Math.max(1, Math.trunc(this.damage)), 0,
+        'playerProj', this.projId, undefined, undefined, undefined, undefined,
+        (tn) => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+          penPercent: this.armorPen,
+          kb: Math.sign((tn as unknown as { x: number; w: number }).x
+            + (tn as unknown as { w: number }).w / 2 - this.cx) * this.knockback || 1 }))) {
+        this.pveNumHits++;
+        this.killBeam(game);
+        break;
+      }
       for (const ent of game.enemies()) {
         const e = ent as HurtTarget;
         if (e.dead || !e.hurt) continue;

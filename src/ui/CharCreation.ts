@@ -42,9 +42,9 @@ import {
   type Appearance, type RGBColor, randomAppearance, DIFFICULTY_INFO,
   VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, MALE_VARIANTS, FEMALE_VARIANTS,
   hslToRgb, rgbToScaledHsl, scaledLuminosity,
-  defaultVoiceVariant,
+  defaultVoiceVariant, defaultAppearance,
 } from '../player/Appearance';
-import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
+import { cycleVoiceVariant, hurtVoicePlan, autoSwitchVoiceOnGenderFlip } from '../player/PlayerVoice';
 import { compositePaperDoll, dollFrame, walkFrame, clearPaperDollCache, variantSheetName } from '../player/PaperDoll';
 import { bakeCells, canvasToUrl, isObjectUrl, SingleFlightBake, DelayedMask, BAKE_MASK_DELAY_MS, yieldTask, type BakeOutcome } from './charBake';   // SW-AX1 2026-09-06 / SW-BB1 2026-09-06
 import { UITextures } from '../vui/assets/UITextures';
@@ -558,6 +558,9 @@ export class CharCreation {
   private panel: HTMLElement;          // 根容器（保留 .sw-char-panel 类 = 探针锚点）
   private appearance: Appearance;
   private clipboard: Appearance | null = null;
+  /** ★BJ732-A:语音↔性别自动跟随的旧性别追踪(原版 _oldMaleForVoiceAutoSwitch :136
+   *  缺省 true;SW 兼更衣窗——构造时按底稿性别初始化,新建路径 default 男=true 同构) */
+  private voiceAutoSwitchPrevMale = true;
   private previewCanvas: HTMLCanvasElement;
   private previewCtx: CanvasRenderingContext2D;
   private raf = 0;
@@ -616,7 +619,14 @@ export class CharCreation {
     this.priceOf = opts.priceOf ?? null;
     this.appearance = opts.initial
       ? { ...structuredClone(opts.initial) }        // 更衣/理发窗：现外观为底稿（确认才生效）
-      : randomAppearance();
+      // ★BJ732-A 改判史（2026-10-27,用户报「受伤音效不是男/女声」）：旧=randomAppearance()
+      // 每个新号出生即随机——连带其 50% 掷 voiceVariant=3「其他」（原版
+      // Click_RandomizePlayer :1571-1575 仅骰子钮才掷）,用户全程手动建号也会中招且
+      // 无从察觉。原版新建=固定默认（UICharacterSelect.cs:111 `new Player()` →
+      // Player() 构造器 :56702 skinVariant=0/hair=0/voiceVariant=1 男声/默认色板）——
+      // 改 defaultAppearance() 同构。随机外观仍是显式骰子钮（buildLook 随机入口）。
+      : defaultAppearance();
+    this.voiceAutoSwitchPrevMale = MALE_VARIANTS.includes(this.appearance.skinVariant ?? 0);   // ★BJ732-A:底稿性别初始化 tracker
     // 初始颜色页部位 = 各形态第一个颜色页签（更衣窗六色无发色；理发窗仅发色）
     this.colorPart = this.dresser ? 'eyeColor' : 'hairColor';
     this.syncHslFromPart();
@@ -1383,6 +1393,15 @@ export class CharCreation {
 
   // ---- 服装页 ----
 
+  /** ★BJ732-A:PlayVoicePreview 等价（UICharacterCreation.cs:1518-1528——dummy 玩家
+   *  PlayHurtSound 一发,本地 (-1,-1) 无空间化）。原版三消费位:体型钮切换尾/语音循环
+   *  钮/滑杆变档;SW 语音钮与滑杆既有 preview 闭包,收编本单源（buildContent 内引用）。 */
+  private playVoicePreview(): void {
+    const plan = hurtVoicePlan(this.appearance);
+    UISfx.sfx.playWavFile(plan.files[Math.floor(Math.random() * plan.files.length)],
+      plan.vol, undefined, undefined, plan.pitch);
+  }
+
   private buildLook() {
     const box = el('div', 'sw-cc-look');
     const grid = el('div', 'sw-cc-styles');
@@ -1397,7 +1416,18 @@ export class CharCreation {
       thumb.style.backgroundPosition = `-${i * 44}px 0px`;
       if (this.lookSheetUrl) thumb.style.backgroundImage = `url(${this.lookSheetUrl})`;
       b.appendChild(thumb);
-      b.addEventListener('click', () => { this.appearance.skinVariant = styleId; this.buildContent(); UISfx.click(); });
+      b.addEventListener('click', () => {
+        this.appearance.skinVariant = styleId;
+        // ★BJ732-A:原版 UpdateSelectedGender（UICharacterCreation.cs:1312-1330,体型
+        //  钮 Click_ClothStyle :1290-1299 尾部调用）——性别翻转时语音 1↔2 自动跟随
+        //  （switch 无 case3 分支=「其他」声存活）;同性别切换不动语音;尾部恒试听。
+        const male = MALE_VARIANTS.includes(styleId);
+        this.appearance.voiceVariant = autoSwitchVoiceOnGenderFlip(
+          this.appearance.voiceVariant, this.voiceAutoSwitchPrevMale, male) ?? undefined;   // 入参无 null ⇒ 出参 null 不可达,收窄回 Appearance 域
+        this.voiceAutoSwitchPrevMale = male;
+        this.playVoicePreview();   // 原版 :1312-1330 尾部 PlayVoicePreview（切体型即听当前声部）
+        this.buildContent(); UISfx.click();
+      });
       grid.appendChild(b);
     });
     if (!this.lookSheetUrl) box.classList.add('baking');   // SW-AX1: 首访烘焙遮罩(同 hair 页)
@@ -1421,11 +1451,7 @@ export class CharCreation {
     // 切换 = CycleVoiceStyle(+1) 男→女→其他→男;每次切换/滑杆变档经 dummy 玩家
     // PlayHurtSound 预览（:45397-45407/:45449-45455 同式,本地 (-1,-1) 无空间化）
     if (this.dresser) {
-      const preview = () => {
-        const plan = hurtVoicePlan(this.appearance);
-        UISfx.sfx.playWavFile(plan.files[Math.floor(Math.random() * plan.files.length)],
-          plan.vol, undefined, undefined, plan.pitch);
-      };
+      const preview = () => this.playVoicePreview();   // ★BJ732-A:收编类方法单源(原版 PlayVoicePreview 同式)
       const dot = el('i', 'sw-cc-voicedot');
       const name = el('span', 'sw-cc-voicename');
       const vbtn = el('button', 'sw-cc-voicebtn');

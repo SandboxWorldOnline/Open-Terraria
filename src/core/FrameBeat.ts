@@ -734,6 +734,21 @@ export let varAdapt = (() => {
 /** 测试/对拍翻面(生产代码禁调——生产只读 URLSearchParams 一次) */
 export function varAdaptSetForTest(v: boolean): void { varAdapt = v; }
 
+/** ?framecap=N URL 覆写（只读一次;null=用户设置档）——帧档 A/B 实验口,不落存档
+ *  不动设置面读数。0=跟满档（「关」:恒渲不锁不监测,头注 v9.12 档语义——即
+ *  「禁用 FrameBeat 调度」观察口）;正值=任意锁帧档（period=1000/cap,effTier∈
+ *  TIER_LADDER∪{cap},如 ?framecap=45 亦可）。消费点=Game.start 的 observeVsync
+ *  入参（游戏内渲染域）;VUI 菜单环 cap 不受影响。node/测试环境恒 null。 */
+export const frameCapUrl: number | null = (() => {
+  try {
+    if (typeof location === 'undefined') return null;
+    const v = new URLSearchParams(location.search).get('framecap');
+    if (!v) return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= 240 ? Math.floor(n) : null;
+  } catch { return null; }
+})();
+
 /** 拍变更原因(诊断/探针)。★v5:'overbudget'(v4 单帧立即降)已退役——成本驱动
  *  降拍统一 'capacity';类型保留该字面量仅为旧探针快照兼容,引擎不再发出 */
 export type BeatReason = 'init' | 'capacity' | 'overbudget' | 'miss-streak' | 'upgrade' | 'floor';

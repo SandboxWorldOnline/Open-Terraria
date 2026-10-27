@@ -63,7 +63,7 @@ function fakeDir(name: string, files: Record<string, string>, perm: 'granted' | 
         (e as { name?: string }).name = 'NotFoundError';
         throw e;
       }
-      return { text: async () => map.get(n) ?? '' };
+      return { getFile: async () => ({ text: async () => map.get(n) ?? '' }) };   // ★Issue#25 标准句柄形状
     },
     removeEntry: async () => { /* restore 链不消费 */ },
   };

@@ -72,7 +72,7 @@ export class FirstFractalSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,857 melee 旗）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitSet.add(e.id);
     }

@@ -168,11 +168,11 @@ describe('①minecartNpcRampage 全链（1457 :27748-27831 / 1456 :27225）', ()
     expect(e.iframes).toBe(30);
   });
 
-  it('暴击翻倍走调用侧预倍惯例（critChance 钉满）', () => {
+  it('暴击 crit 直传 hurt（×2=Enemy.hurt 防后,S02;critChance 钉满）', () => {
     const { game, e } = setup({ playerOver: { critChance: () => 100 } });
     minecartNpcRampage(CART(), game, IDENTITY_RND);
     expect(e.hits[0].crit).toBe(true);
-    expect(e.hits[0].dmg).toBe(152);   // 76 × 2
+    expect(e.hits[0].dmg).toBe(76);    // ★S02(BJ723-B)改判:未翻倍基伤(旧 152=预倍形)
   });
 
   it('三择大口径：melee/ranged/magic 取最大者参与掷骰', () => {

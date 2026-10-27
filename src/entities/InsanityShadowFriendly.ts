@@ -205,7 +205,7 @@ export class InsanityShadowFriendly extends Entity {
         //  旧 pierce=0=Enemy.hurt 通用尾档开 10t 自造全局窗（964 命中后 10t 内玩家
         //  他武器全被拒——BJ436 主病灶同形,原版无此窗）。修复式=BJ452/455 家族
         //  （656/856）+WhipProj S3b（WhipProj.ts:844 0→-3 同式）+BJ398 梯。
-        e.hurt(applyBannerDamageDealt(game, e, this.dmg) * (crit964 ? 2 : 1), 0, 0, game, 20, crit964, -3, true);   // fromPlayer=DPS 计;★BJ467② crit 色位+×2;★BJ482① pierce=-3 清窗档
+        e.hurt(applyBannerDamageDealt(game, e, this.dmg), 0, 0, game, 20, crit964, -3, true);   // fromPlayer=DPS 计;★BJ467② crit 色位;★S02 ×2=Enemy.hurt 防后;★BJ482① pierce=-3 清窗档
         if (--this.pierceLeft <= 0) {
           this.dead = true;
           game.onProjectileDeath?.(964, this.x, this.y);

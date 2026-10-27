@@ -69,7 +69,14 @@ describe('SW-RB14a F1 定谳：merman 门四面净语义（:23731/:23767 干专�
     const gd = opts.gd ?? 1;
     // gd=1：头距顶 4px（湿链当拍可走满 −5.01 → 触顶）;gd=-1：盒底（头）距地板 4px
     // 湿态位移 ×liqFactor 0.5（WetCollision）→ 行程减半,起点再贴近 1px 保撞顶
-    const py = gd === 1 ? (opts.water ? 1027 : 1028) : 1042;
+    // ★BJ730 改判史：湿支起点旧 1027（头距顶 3px）——夹具 vy0=−5.21 系 BJ717-A 前
+    //  旧湿跳轨迹口径（旧序无 sustain 钉,当拍末速恰触顶）。BJ717-A F1（2026-10-25,
+    //  R13 P0 清偿）钉序翻正后当拍净 vy=钉(−6.01)+湿重力(0.2)=−5.81,×湿位移 0.5
+    //  =−2.905px < 3px 恰差 0.095px 不触顶（探针实证 1024.095,vy0 被钉覆写=调 vy0
+    //  无效）。起点重校 1026（距顶 2px<2.905px 必触顶）——语义目标不变（:28463
+    //  !merman 撞顶清 jumpHold+vy=+0.01,探针实证 y=1024/vy=0.01/jh=0 三件套全通;
+    //  R1-2 merman 组随之从「不触顶的空转绿」变为真触顶不清华=更强判别）。
+    const py = gd === 1 ? (opts.water ? 1026 : 1028) : 1042;
     const p = new Player(60 * TILE, py, new Inventory());
     if (opts.mermanShell) p.inv.armor[4] = { id: iid(861), stack: 1 };   // 月亮贝壳 → fx.merman
     if (opts.water) {

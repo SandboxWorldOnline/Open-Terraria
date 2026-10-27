@@ -4,7 +4,7 @@
 //     【加法】（发射器 shoot + 弹药 shoot——非替换！一型 0→基弹/二型 +3/三型 +6/四型 +9）
 //   · GrenadeProj fired 模式：火箭加速 ×1.1/雪人追踪 lerp 1/12/发射榴弹 15u 后
 //     重力+摩擦/感应雷恒重力+减速布防；撞块语义表（火箭贴墙 vel0+3t 爆、榴弹反弹 ×−0.4）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ731:vi=DV 恒等档 mock
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -200,7 +200,13 @@ describe('GrenadeProj 接触引爆（Damage_PVE_Inner aiStyle16 :12330-12340）'
     r.fired = true;
     // 飞向目标:10px/t,起点 26*16=416 → 目标左缘 480:~6t 接触
     let guard = 0;
-    while (hurts.length === 0 && guard++ < 100) r.fixedUpdate(1, game);
+    // ★BJ731 改判史（2026-10-27）：接触结算走 Damage_PVE_Inner :12970 DV 掷
+    //   （BJ723-B W01 落地面）——0.5 恒等档钉 100（未 mock 必漂 85-115）。
+    //   crit 掷 0.5<0.04+100/100 恒真,不受影响。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      while (hurts.length === 0 && guard++ < 100) r.fixedUpdate(1, game);
+    } finally { rvi731.mockRestore(); }
     expect(hurts.length).toBe(1);                              // 接触即结算(曾=0)
     expect(hurts[0].d).toBe(100);                              // 弹体伤害
     expect(hurts[0].pen).toBe(7);                              // 发射侧穿甲

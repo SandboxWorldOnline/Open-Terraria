@@ -1285,6 +1285,66 @@ export class Sfx {
     };
   }
 
+  /** ★BJ728-A（债1,BJ715-A D-⑤S 清偿）：跟踪式一次性音（SoundEngine.PlayTrackedSound
+   *  一次性档——枯萎兽灵气脉冲 DD2_WitherBeastAuraPulse，NPC.cs:64084-64094）。
+   *  每次调用在变体组内随机取一（LegacySoundStyle.Style getter=Random.Next(_style,
+   *  _style+Variations) 每播重掷，LegacySoundStyle.cs:24-29）非循环播放；返回句柄
+   *  {done, stop, setPos}——onended 置 done+断节点（ActiveSound 槽随播毕释放,
+   *  GetActiveSound 转 null 同语义——调用方下拍判 done 即重触发，重触发节拍=音长
+   *  本身 2.3/3.0s 两变体交替）；setPos 刷新距离衰减/声像（在播实例
+   *  activeSound.Position=Center 跟随，:64093）。音量=调用方传值（CreateTrackable
+   *  无 WithVolume → SoundStyle 缺省 1，SoundStyle.cs:35；本文件 FILE_CASE_VOL/
+   *  PITCH_CASE 均无该族档=不乘不抖，与原版一致）。缓冲未就绪返回 null（后台懒加载
+   *  已触发，调用方下拍重试——GetActiveSound 空重播同语义）。
+   *  ★禁 startTrackedLoop 近似顶替（BJ715-A 备案：loop=true 丢变体随机+无重触发
+   *  节拍=反模式⑧）；反向同理，循环语义勿用本函数。 */
+  startTrackedOneShot(files: string[], vol: number, x: number, y: number): {
+    readonly done: boolean; stop(): void; setPos(px: number, py: number): void;
+  } | null {
+    if (this.suppress) return null;          // 载入期静音门（同 startTrackedLoop）
+    if (!files.length) return null;
+    const file = files[Math.floor(Math.random() * files.length)];   // 每播随机变体
+    const ctx = this.ensure();
+    if (!ctx) return null;
+    const buf = this.ensureBuffer(file);
+    if (!buf) return null;                   // 未就绪静默，下拍重试
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = pitchRateFor(file);
+    const g = ctx.createGain();
+    // 终钳 min(1,·)=原版 DetermineIntendedVolume 终口 Clamp(num,0,1)（ActiveSound.cs:160,
+    // 同 startTrackedLoop applyAt 清偿刀 A 判据）
+    const applyAt = (px: number, py: number) => {
+      g.gain.value = Math.min(1, this.atten(vol, px, py) * this.master);
+      if (panner) panner.pan.value = this.panOf(px, py);
+    };
+    g.gain.value = Math.min(1, this.atten(vol, x, y) * this.master);
+    src.connect(g);
+    // 声像（原版跟踪轨每次重设 Pan 同语义；`panner` 下方声明,applyAt 仅句柄返回后调用）
+    let panner: StereoPannerNode | null = null;
+    if (typeof ctx.createStereoPanner === 'function') {
+      panner = ctx.createStereoPanner();
+      panner.pan.value = this.panOf(x, y);
+      g.connect(panner);
+      panner.connect(ctx.destination);
+    } else {
+      g.connect(ctx.destination);
+    }
+    let done = false;
+    src.onended = () => { done = true; g.disconnect(); panner?.disconnect(); };
+    src.start();
+    // 触发面事件（与 playWavFile 同形；实际出声=同步起振故 o='ok'）
+    this.emit('wav', {
+      f: file, v: Math.round(vol * 1000) / 1000,
+      x: Math.round(x), y: Math.round(y), o: 'ok',
+    });
+    return {
+      get done() { return done; },
+      stop: () => { try { src.stop(); } catch { /* 已停 */ } },
+      setPos: (px: number, py: number) => applyAt(px, py),
+    };
+  }
+
   // ---- 环境循环轨（SoundEngine.PlayTrackedSound 语义：常驻节点 + 音量平滑跟随）----
 
   /** 异步取缓冲（单一加载管线：ensureBuffer 同步面 / deferPlay 首播补播 /

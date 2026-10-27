@@ -92,7 +92,7 @@ function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
       targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
   e.hurt(applyBannerDamageDealt(game, e, dmg)
-    + (snapBonusFury ? Math.trunc(snapBonusFury * (crit ? 2 : 1)) : 0),
+    + (snapBonusFury ? snapBonusFury : 0),
     kdir * kb, 0, game, pen, crit, 0, true);   // ★F1 旗乘区;音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
 }
 
@@ -249,7 +249,7 @@ export class SkyDragonSpin extends Entity {
       //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
       //  （★BJ492②：708/709/1110 右键三型已收编同式,swCrit 出生拍冻结载体退役）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       // 浸剂三链（netMode/测试态 player 可为 null——null 门跳过，原版单机恒有主）
@@ -391,7 +391,7 @@ export class SkyDragonSwing extends Entity {
       //  聚合,命中拍动态;与左键 707 面 BJ489 迁移同形,时序差收口）。critChance 字段
       //  保留=关断钉（critChance≤0 门,sun 站 skydragon.test.ts 同相）;伤害面不动。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx) || this.owner.facing, this.armorPen, this);
     }
@@ -487,7 +487,7 @@ export class SkyDragonShot extends Entity {
       // ★BJ492②（2026-10-04）静态载体退役→rollVanillaHitCrit 单源（709 SetDefaults
       //  :7510-7518 亲读 melee=true → 三类掷 :12916 达,命中拍动态;关断钉保留,伤害面不动）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       hurtEnemy(game, e, dmg, crit, this.knockback, Math.sign(this.vx) || 1, this.armorPen, this);
       this.explode(game);                            // penetrate 1 → 命中即 Kill
       return;
@@ -661,7 +661,7 @@ export class SkyDragonCircle extends Entity {
       //  `circle.critChance=shot.critChance` 沿载体写位随刀摘除——圈面自掷同单源;
       //  关断钉保留,伤害面不动）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx0) || 1, this.armorPen, this);
     }

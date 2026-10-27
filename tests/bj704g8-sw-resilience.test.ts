@@ -103,7 +103,9 @@ function loadSw(fetchStub: ReturnType<typeof makeFetch>, cachesStub: ReturnType<
     setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask,
     caches: cachesStub,
     fetch: fetchStub.fn,
-    Request, Response, AbortController, URL, TextDecoder, Blob, DecompressionStream,
+    // ★BJ724-A 锁随刀演化:补 Headers——fetchShell 正文看门狗重建 Response 用
+    //   new Headers(res.headers)(浏览器 SW 全局固有,vm 求值须显式供给)。
+    Request, Response, Headers, AbortController, URL, TextDecoder, Blob, DecompressionStream,
   };
   ctx.self = ctx;
   ctx.addEventListener = (type: string, h: (e: unknown) => void) => { (listeners[type] ??= []).push(h); };

@@ -19,7 +19,7 @@
 //  §A5 同步直伤反序=主伤丢（30≠1）/目标面反记=tag 伤双记（30≠31）;§A6 自造 10t 窗;
 //  §A7 链电目标面缺=链靶零伤;§C1/C2 城镇臂缺=无 buff/无哨兵;§C4 穿甲不透传;
 //  §D1 星雨城镇臂缺。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -241,6 +241,7 @@ describe('Y2-§C：WHIP_HIT_BUFF/SIDEKICK 城镇臂（:13987/:13997 case 912/102
   });
 
   it('C4 穿甲透传（:13686-87）：玩家 armorPen 10 → 池≤def 钳半=+5 → 60+5−15=50（旧恒 0=45 必红）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C S03 位移修复:鞭城镇 DV 中性档——平值断言复稳
     const list: Enemy[] = [], towns: TownNPC[] = [];
     const { hooks, player } = makeGame(list, towns);
     voodooOn(player);

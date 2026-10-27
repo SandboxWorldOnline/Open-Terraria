@@ -275,9 +275,11 @@ export const enum Msg {
                        //   （:1972）/ 进场补发（NetMessage.cs:2924 SyncOnePlayer 捆包段）。
                        //   消费 = Chest.UsingChest（Chest.cs:492-503）服务器拒开门 + 客户端
                        //   镜像（Wiring.cs:2571/:2667 提纯机/抽取机在用门等未来消费面）
-  StrikeNPC = 42,      // 访客→房主（服务器定向转发）{u32 netId, i16 dmg, f32 kbx, f32 kby}
+  StrikeNPC = 42,      // 访客→房主（服务器定向转发）{u32 netId, i16 dmg, f32 kbx, f32 kby}[u8 crit]
                        //   （原版 42=Unknown42：旧 StrikeNPC 槽位；注释曾误写 crit/kbDir/srcX/srcY——
                        //    实际线格式自 v3 起即为 dmg+击退两分量，2026-08 校正）
+                       //   BJ723-B D5 清偿（BJ725-A）：尾部追加 u8 crit（C→S 直附;S→C 在 slot 后重排——
+                       //    旧端 remaining>0 只吃 slot,残留 crit 字节被旧端忽略=双向优雅降级）
   StrikePlayer = 44,   // C→S→定向转发（v7 PvP）：C→S {u8 targetSlot, i16 rawDmg, i16 kbx, i16 kby,
                        //   u16 weaponId, u8 flags}；S→C 追加尾部 u8 fromSlot
                        //   （服务器回填发送方槽位——被打端 InOpposingTeam 门禁需要攻击者身份，

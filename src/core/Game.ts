@@ -25,7 +25,7 @@ import { plates428Pressed } from '../render/VanillaTiler';
 import { imageToGrid, findArtPlacement, placeArt } from '../dev/PixelArtImport';
 import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
-import { FrameBeat } from './FrameBeat';
+import { FrameBeat, frameCapUrl } from './FrameBeat';
 import { Input, armBlockMouse } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction, seasonalHolidayFlags } from '../world/World';
@@ -499,7 +499,7 @@ import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { MagnetSphereProj, BeamBoltProj, HEAT_RAY_BOLT, MAGNET_SPHERE_BALL } from '../entities/MagnetSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
-import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample, bannerDamageDealtMultOf, bannerNpcKeyOf, EXPERT_EOW_FIFTH_PROJS } from '../entities/projTargets';   // ★BJ716-A：EXPERT_EOW_FIFTH_PROJS 弹域单源（R18-F1）
+import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, hitTownNpcsAoeBox, hitCrittersAll, bannerDamageDealtSample, bannerDamageDealtMultOf, bannerNpcKeyOf, EXPERT_EOW_FIFTH_PROJS } from '../entities/projTargets';   // ★BJ716-A：EXPERT_EOW_FIFTH_PROJS 弹域单源（R18-F1）;★BJ729-A：hitCrittersAll（D4 爆面 critter 臂）
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import { grantCollisionAttackImmunity } from '../entities/MountCombat';
 // ★BJ494：stellarTuneCritChance 生产调用面退役（冻结载体摘除）→ 移出 import;
@@ -533,7 +533,7 @@ import { TitaniumStormShard,
   PetalstormShot, StormLightning, GlacierFangShot,
   ThunderBoltShot, LaserMachinegunHolder, LaserMachinegunLaser, BookStormTwister, PrincessMagicCircle,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
-import { heldItemCritBonus } from '../entities/proj1457';   // ★BJ-C2/F2/F7/F10/F14 持械折入单源（BJ486③ :25712-14 同算式）
+import { heldItemCritBonus, rollVanillaHitCrit } from '../entities/proj1457';   // ★BJ-C2/F2/F7/F10/F14 持械折入单源（BJ486③ :25712-14 同算式）
 // 叶绿水晶叶套装弹族（台账 L3 清偿批 2026-08-31——锚体 226 + 隐藏叶弹 227；
 // canBeChasedBy 于 projTargets 处已有导入（:373 段）无需另引）
 import { ChloroLeafCrystalAnchor, ChloroLeafShot,
@@ -583,6 +583,7 @@ import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
 // module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
 // module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
 import { type InfoAccCtx, mphOf, radarCountsEnemy } from '../stats/InfoAccs';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';   // ★BJ723-B D4 清偿（BJ725-A）
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { GolfState } from '../world/golf/GolfState';
 import { golfVanillaTileId, BallState } from '../world/golf/golfPhysics';
@@ -3507,6 +3508,9 @@ export function maintainMinionBuffs(
           birdDmg, birdKb,
           false, 0, false, () => owner,   // ★F5：AI_158 :49643 全程读 Main.player[owner] 不查 dead
         );
+        // ★BJ723-C S05：词缀 tagdmg 同保留（ApplyStatsFromSource :11129——重生弹
+        //  走背包实例 item 出生,同 spawnMinion 主链;inst 缺失=无词缀 0）
+        bird.bonusTagDmg = inst4281?.prefix ? prefixStat(inst4281.prefix).tagdmg : 0;
         spawn(bird);
         owned.set(759, (owned.get(759) ?? 0) + 1);
       }
@@ -5110,7 +5114,7 @@ export class Game implements GameHooks {
    *  M3：尾部 fromSlot（服务器回填打击者）经 pendingStrikeOwner 归账 Boss 伤害统计；
    *  per-client 批：同 slot 登记 interactionSlots（NPC.ApplyInteraction 等价——
    *  hurt fromPlayer 只标本地玩家,访客打击的交互位在此补） */
-  private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) {
+  private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number, crit?: boolean) {
     const localId = netIdLocal(netId);
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
@@ -5119,7 +5123,7 @@ export class Game implements GameHooks {
         setPendingStrikeOwner(fromSlot);
         e.applyNetInteraction(fromSlot, this);
       }
-      e.hurt(rawDmg, kbx, kby, this);   // 音/飘值=StrikeNPC 单点(OthersDamagedHostile 灰)
+      e.hurt(rawDmg, kbx, kby, this, 0, crit);   // BJ723-B D5 清偿（BJ725-A）：crit 位穿参——S02 Enemy.hurt 防后 ×2;音/飘值=StrikeNPC 单点(OthersDamagedHostile 灰)
       setPendingStrikeOwner(null);   // hurt 早退路径（iframes/已死）不残留——防串账
       return;
     }
@@ -9392,7 +9396,7 @@ export class Game implements GameHooks {
         //  保存退出全部置位点汇于此)+入场冻结窗/传送幕帘两个同族 fixedUpdate 停态
         //  ——hold 冻结档位迁移(方差账暂停期清零,头注 v9.12)。
         this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
-        this.beat.observeVsync(now, options.data.frameCap);
+        this.beat.observeVsync(now, frameCapUrl ?? options.data.frameCap);   // ★?framecap=N URL 覆写(实验口;0=跟满档「禁用调度」)
         if (!this.beat.shouldRender(now)) {
           requestAnimationFrame(loop);
           return;
@@ -20440,6 +20444,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                    // 逐型 AI_026/067 分发接管（BJ435——统一飞行近似已逐批退役）
             () => owner,   // ★F5：AI_026/062/067 全程读 Main.player[owner] 不查 dead（dmgOf 同）
           );
+          // ★BJ723-C S05（2026-10-26）：召唤物词缀 tagdmg 保留（Projectile.
+          //  ApplyStatsFromSource :11129 `bonusTagDamage += item.bonusTagDamage`——
+          //  EntitySource_ItemUse 出生继承,Item.cs:586 前缀 tagdmg 如 Fabled85=3;
+          //  消费=随从命中被 tag 敌 :12954 (num18+bonusTagDamage)×SummonTagMul,
+          //  经 MinionProj.resolveWhipTagHit 第 8 参向下传递。旧形态只消费 ps.dmg
+          //  =词缀 tagdmg 整丢（Fabled3+皮鞭标4+基伤10 实 14 应 17）。
+          m.bonusTagDmg = ps?.tagdmg ?? 0;
           this.entities.add(m, 'projectiles');
           return m;
         };
@@ -33726,7 +33737,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  （NPC.cs:82251-82254,作用序=resist 乘(:82218)→软帽(:82223-82250)→×1.4,
         //  Enemy.ts:13456 已接）。28/29/102/108/164/1002/773 无 ranged 标=恒不暴击。
         const crit = Game.explodeCritRoll(projId, this.rangedCritPct());
-        en.hurt(crit ? hurt * 2 : hurt,
+        // ★BJ723-B D4 清偿（BJ725-A）：snap 双支（:13439-46——炸弹 Kill→PrepareBombToBlow
+        //  →Damage() 重跑同链,host {projId} 类位门经 projectileData）
+        const snapE = projectileSnapStrikeBonus(this, { projId }, (en.cx ?? cx), (en.cy ?? cy),
+          (en as { id?: number }).id ?? -1,
+          { victimBox: { w: en.w, h: en.h, cx: en.cx ?? cx, cy: en.cy ?? cy } });
+        // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)——调用侧预倍退役
+        en.hurt(hurt + (snapE ? snapE : 0),
           kb === undefined ? cx - (en.cx ?? cx)
             : (kbDir || (Math.sign(cx - (en.cx ?? cx)) || 1)) * kb,
           kb === undefined ? cy - (en.cy ?? cy) : 0, this, pen, crit, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
@@ -33766,7 +33783,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  ×2 预倍/crit 旗→kb×1.4 同敌怪支口径）——fromPlayer 同步对齐敌怪支 true
         //  （原版 critter=NPC 全表遍历同链,DPS 计数同面;钛金风暴 hp>5 门天然不触发）
         const ccrit = Game.explodeCritRoll(projId, this.rangedCritPct());
-        c.hurt(ccrit ? churt * 2 : churt,
+        // ★S02 同敌怪支:crit ×2=Enemy.hurt 防后
+        c.hurt(churt,
           kb === undefined ? cx - (c.cx ?? cx)
             : (kbDir || (Math.sign(cx - (c.cx ?? cx)) || 1)) * kb,
           kb === undefined ? cy - (c.cy ?? cy) : 0, this, pen, ccrit, 0, true);
@@ -34211,7 +34229,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const crystalTimerCrit = (this.player as unknown as
           { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(this, en.x, en.y, en.w, en.h) ?? false;   // 双?.形=测试桩无方法静默 false（house 习语,MinionProj tryConsumeTimerCritOf 同式）
-        en.hurt(this.explodeFriendlyVictimDamage(40, en) * (crystalTimerCrit ? 2 : 1),
+        //  ★BJ729-A（2026-10-27）:S02(BJ723-B) 全仓预倍清偿漏站——BJ467④ 期形
+        //  `* (crystalTimerCrit ? 2 : 1)` 预倍+crit 同传=×4 双倍;Enemy.hurt:15638 防后
+        //  单次 ×2（NPC.cs:82067）承载,预倍摘除。
+        en.hurt(this.explodeFriendlyVictimDamage(40, en),
           kbDir ? kbDir * (PREPARE_BOMB_KB[102] ?? 2)
             : ((Math.sign((en.cx ?? px) - px) * (PREPARE_BOMB_KB[102] ?? 2)) || 1),
           0, this, 0, crystalTimerCrit, 0, true);
@@ -34332,12 +34353,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★BJ467④（2026-10-03）爆炸结算面 TimerCrit :12928 补位——773 Kill 爆炸走
         //  Damage_PVE_Inner 全链,TryConsumingTimerCrit 对一切玩家弹无条件消费（773
         //  三类掷面位本臂未掷=SW-AF1 explodeAt 同族缺口,登记;蓄能暴击为独立无条件
-        //  消费面,先补）。门读 hurt 前状态=快照纪律;Enemy.hurt crit 参仅染色 →
-        //  数值预倍 ×2 交调用侧（banner 乘区后=dealContacts :461 同序）。
+        //  消费面,先补）。门读 hurt 前状态=快照纪律。
+        //  ★S02(BJ723-B 2026-10-26)+BJ729-A 漏站清偿（2026-10-27）:Enemy.hurt crit 参
+        //  已承载防后 ×2（NPC.cs:82067 单次）——本臂 BJ467④ 期预倍 ×2 残留=S02 全仓
+        //  清偿漏站（×4 双倍,同函数 critter 臂 :34380 已被 S02 清偿的函数内自不对称
+        //  实证）,预倍摘除,基伤+crit 旗传参（banner 乘区后=dealContacts :461 同序）。
         const scarabTimerCrit = (this.player as unknown as
           { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(this, en.x, en.y, en.w, en.h) ?? false;   // 双?.形=测试桩无方法静默 false（house 习语）
-        en.hurt(eowFifth * (scarabTimerCrit ? 2 : 1), (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, scarabTimerCrit, 0, true);   // kb=8（P.cs:47644）;★BJ467④ crit 色位+×2
+        en.hurt(eowFifth, (kbDir || (Math.sign(en.cx - exPx) || 1)) * 8, 0, this, pen, scarabTimerCrit, 0, true);   // kb=8（P.cs:47644）;★BJ467④ crit 位;★BJ729-A 预倍摘除（S02 漏站,NPC.cs:82067 Enemy.hurt 防后单次 ×2）
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
       }
     }
@@ -34359,8 +34383,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const critterTimerCrit = (this.player as unknown as
           { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(this, c.x, c.y, c.w, c.h) ?? false;   // 双?.形=测试桩习语
+        // ★S02(BJ723-B):critterTimerCrit ×2 摘除——Enemy.hurt 防后承载(NPC.cs:82067)
         c.hurt((this.world.isExpert && (c.vanillaId ?? 0) >= 13 && (c.vanillaId ?? 0) <= 15
-          ? Math.trunc(cdmg / 5) : cdmg) * (critterTimerCrit ? 2 : 1),
+          ? Math.trunc(cdmg / 5) : cdmg),
           (kbDir || (Math.sign(c.cx - exPx) || 1)) * 8, 0, this, pen, critterTimerCrit, 0, true);   // SW-AC1：方向同上=弹体朝向;SW-AF1 2026-09-04（蓝队 F2）：补 ×8——原版 Damage_PVE 全表遍历同式 StrikeNPC(100,8,num40)（PrepareBombToBlow :47644 kb=8f）,与同函数敌怪支(:24976)/城镇支口径统一;SW-RB10d：尾 fromPlayer=true（Projectile.cs:13382 并集）;★BJ467④ crit 色位+×2
       }
     }
@@ -37269,7 +37294,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ——ApplyNPCOnHitEffects 的 bees/muramasa 支按 dmgRandomized/n 取值,
       // Player.cs:44762 传参序 :44893/:44879）。
       const dmgRandomized = damageVarRoll(chainDmg, p.luck ?? 0);
-      let dmg = dmgRandomized * (crit ? 2 : 1);
+      // ★S02(BJ723-B 2026-10-26):crit ×2 摘除——原版近战链 ProcessHitAgainstNPC 无
+      //  预倍(Player.cs:44698 num3=DV→:44760 nano→:44766 pen→:44773 StrikeNPC(...,crit)
+      //  单次翻倍在防后,NPC.cs:82067,由 Enemy.hurt 承载);BJ716-A 登记债②同批清偿。
+      let dmg = dmgRandomized;
       // D8（1457 :44760-44764）：Nano 灌注 ×1.05（meleeEnchant==6 →
       // GetNanoFlaskDamageBoost()=1.05）乘在 DamageVar【后】——曾乘在方差前,±1 舍入差
       if (this.player.buffs.has(BuffType.ImbueNano)) dmg = Math.trunc(dmg * 1.05);
@@ -45639,13 +45667,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (e.dead || !e.hurt) continue;
           const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
           if (Math.abs(ecx - cx286) < R286 + e.w / 2 && Math.abs(ecy - cy286) < R286 + e.h / 2) {
-            const critE = Math.random() < (this.player.critChance('ranged') / 100);
-            e.hurt(applyBannerDamageDealt(this, e as unknown as { vanillaId?: number }, dmg),
+            // ★BJ729-A（D2 残差清偿,2026-10-27）：286 数据面 ranged（SetDefaults
+            //  :3743-3754 亲读）→ Kill 重跑 Damage() 逐靶 DV(:12970 无条件)+ranged
+            //  crit 掷收编 rollVanillaHitCrit 单源（旧裸掷 `random()<critChance
+            //  ('ranged')/100` 漏基 4%+持械折入=BJ494 族幻影面,弃）。
+            const critE = rollVanillaHitCrit(286, this as unknown as import('../entities/types').GameHooks);
+            e.hurt(applyBannerDamageDealt(this, e as unknown as { vanillaId?: number },
+              damageVarRoll(dmg, this.player.luck ?? 0)),
               Math.sign(ecx - cx286) * (flags?.kb ?? 0), 0,
               this as unknown as import('../entities/types').GameHooks,
               flags?.arpen ?? 0, critE, 0, true);   // !hostile=玩家弹=DPS 计（★F1 旗乘区）
           }
         }
+        // ★BJ729-A（D4）：critter 臂——victim 循环（:12592）对小动物同链（286 非
+        //  minion/sentry → CanNPCBeHit :20675 放行）;penetrate=-1 多靶 → hitCrittersAll。
+        hitCrittersAll({ x: cx286 - R286, y: cy286 - R286, w: R286 * 2, h: R286 * 2, projId: 286 },
+          this as unknown as import('../entities/types').GameHooks);
+        // ★BJ727-A（C-D4 族刀）：286 爆城镇臂（:77612-77652 Resize(80)+Damage() 重跑
+        //  含城镇 voodoo 靶）——敌怪臂链镜像。owner 门内=playerProj 档。
+        //  ★BJ729-A（D2）：settle 同扩 DV+crit 收编（与敌怪臂同链同掷,D2 债清偿条款）。
+        hitTownNpcsAoeBox(cx286, cy286, R286,
+          this as unknown as import('../entities/types').GameHooks, dmg, 286,
+          'playerProj',
+          () => ({ dmg: damageVarRoll(dmg, this.player.luck ?? 0),
+            crit: rollVanillaHitCrit(286, this as unknown as import('../entities/types').GameHooks),
+            penPercent: flags?.arpen ?? 0 }));
       }
       return;
     }
@@ -45972,7 +46018,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!playerCanHitEnemy(e, this, projId)) continue;   // Damage_PVE_Inner flag 门
         if (inBox(e.cx, e.cy, e.w, e.h)) {
           // ★F1：Damage 面（Kill 态二次结算 Resize 盒）→ 攻端旗乘区
-          e.hurt(applyBannerDamageDealt(this, e, Math.max(1, Math.trunc(dmg))), cx - e.cx, 0, this, flags?.arpen ?? 0, false, 0, true);
+          // ★BJ723-B D1+D4 清偿（BJ725-A）：Kill 重跑 Damage()=Inner 全链——crit 掷+DV 逐靶
+          //  （R03 同式,同块 critter 臂既有,敌怪臂本批补齐）+snap 双支（:13439-46 焰爆石
+          //  kind1/拍击石 kind0,host {projId} 类位门经 projectileData;ranged 族过 kind0）
+          const critX41 = rollVanillaHitCrit(projId, this);
+          const dmgV41 = damageVarRoll(dmg, this.player.luck ?? 0);
+          const snapX41 = projectileSnapStrikeBonus(this, { projId, hostile: flags?.hostile === true },
+            e.cx, e.cy, (e as { id?: number }).id ?? -1,
+            { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });
+          e.hurt(applyBannerDamageDealt(this, e, dmgV41) + (snapX41 ? snapX41 : 0), cx - e.cx, 0, this, flags?.arpen ?? 0, critX41, 0, true);
         }
       }
       for (const cent of this.entities.critters) {
@@ -45982,8 +46036,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  Damage_PVE 单管线全表遍历（:11869）含小动物（:13388 banner 乘区/:13382
         //  lastCreatureHit/:13712 addDPS/StrikeNPC :82097 interaction）；旧缺参=
         //  爆炸杀鸟不进旗杀账/图鉴/计数器行
-        if (inBox(c.cx, c.cy, c.w, c.h)) c.hurt(applyBannerDamageDealt(this, c, Math.max(1, Math.trunc(dmg))), cx - c.cx, 0, this, 0, false, 0, true);
+        // ★R03 同敌怪支逐靶掷（critter 原版同链 Damage_PVE_Inner,全参 hurt 非 shim）
+      if (inBox(c.cx, c.cy, c.w, c.h)) {
+        const critC = rollVanillaHitCrit(projId, this);
+        const dmgVC = damageVarRoll(dmg, this.player.luck ?? 0);
+        c.hurt(applyBannerDamageDealt(this, c, dmgVC), cx - c.cx, 0, this, 0, critC, 0, true);
       }
+      }
+      // ★BJ727-A（C-D4 族刀）：41 Kill 爆城镇臂（:73256-73296 Resize(64)+Damage() 重跑
+      //  单遍历含城镇 voodoo 靶;敌怪臂 D1/R03 链镜像,形制同 settleKillExplosion 城镇臂）
+      hitTownNpcsAoeBox(cx, cy, R41, this, dmg, 41,
+        flags?.hostile === true ? 'hostile' : 'playerProj',
+        () => ({
+          dmg: damageVarRoll(dmg, this.player.luck ?? 0),
+          crit: rollVanillaHitCrit(41, this),
+          penPercent: flags?.arpen ?? 0,
+        }));
       if (flags?.hostile) {
         const p = this.player;
         if (p && !p.dead && inBox(p.cx, p.cy, p.w, p.h)) this.damagePlayer(Math.max(1, Math.trunc(dmg)), cx, cy, undefined);
@@ -46536,7 +46604,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** Kill 爆炸判定盒重结算（Projectile.Kill Resize(N×N)+penetrate=-1+Damage()
    *  段，41 狱炎箭分支同式提取）：盒 = 以 (cx,cy) 为心半宽 half 的 AABB
    *  （中心距 < half+目标半宽）；enemies 走 playerCanHitEnemy flag 门 + hurt
-   *  全参（fromPlayer=true），critters 单参 shim，hostile 弹对称结算玩家 */
+   *  全参（fromPlayer=true），critters 单参 shim，hostile 弹对称结算玩家。
+   *  ★R03（BJ723-B 2026-10-26）：三消费位=刺炮 246（Kill :78644-78678,Resize150
+   *  /penetrate=-1/maxPenetrate=0→Damage()）/爆炸南瓜 312（:78583-78643,Resize
+   *  128→Damage() 无 owner 门）/钉弹 514（:77985-78020,owner 门内 penetrate=-1+
+   *  Resize112+ai[0]=2→Damage()）——原版重跑【全 Damage() 管线】=逐靶 crit 掷
+   *  （三型 SetDefaults 全 ranged 旗亲读 :3291/:4048/:5843→:12920 ranged 臂）+
+   *  DamageVar（:12970,luck 正向）+攻端旗乘区（:13388）+crit ×2 防后（:82067,
+   *  S02 Enemy.hurt 承载）。旧=固定 trunc(dmg)+crit=false=恒不暴击零浮动（旗面
+   *  已在 SW-RB10d 接,本刀补 crit/DV 两件）。爆炸盒几何与免疫写梯（pierce=0 档
+   *  10t）保持不动=原版 246/514 写梯段位（immune 7/1）另档,登记债不改面。 */
   private settleKillExplosion(cx: number, cy: number, half: number, dmg: number, projId: number,
     flags?: { hostile?: boolean; arpen?: number }): void {
     const inBox = (ex: number, ey: number, ew: number, eh: number) =>
@@ -46546,8 +46623,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (e.dead || !e.hurt) continue;
       if (!playerCanHitEnemy(e, this, projId)) continue;   // Damage_PVE_Inner flag 门
       if (inBox(e.cx, e.cy, e.w, e.h)) {
-        // ★F1：Damage 面（Kill AoE 统一结算）→ 攻端旗乘区
-        e.hurt(applyBannerDamageDealt(this, e, Math.max(1, Math.trunc(dmg))), cx - e.cx, 0, this, flags?.arpen ?? 0, false, 0, true);
+        // ★F1：Damage 面（Kill AoE 统一结算）→ 攻端旗乘区。
+        // ★R03：crit 掷+DV 逐靶（Damage_PVE_Inner 逐 victim 形）,crit ×2 在
+        //  Enemy.hurt 防后（S02）——原版 Resize 后 Damage() 重跑全管线。
+        const critX = rollVanillaHitCrit(projId, this);
+        const dmgVX = damageVarRoll(dmg, this.player.luck ?? 0);
+        // ★BJ723-B D4 清偿（BJ725-A）：snap 双支（:13439-46——Kill 重跑 Damage() 同链,
+        //  host {projId} 类位门;敌怪臂既有 crit/DV=R03,本批补 snap）
+        const snapX = projectileSnapStrikeBonus(this, { projId, hostile: flags?.hostile === true },
+          e.cx, e.cy, (e as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });
+        e.hurt(applyBannerDamageDealt(this, e, dmgVX) + (snapX ? snapX : 0), cx - e.cx, 0, this, flags?.arpen ?? 0, critX, 0, true);
       }
     }
     for (const cent of this.entities.critters) {
@@ -46555,8 +46641,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (c.dead || !c.hurt) continue;
       // ★SW-RB10d（F-BJ47-B,settleKillExplosion 通用支）：同 41 爆炸支——旗乘区
       //  + fromPlayer=true（Projectile.cs:11869/:13382/:13388/:13712 单管线并集）
-      if (inBox(c.cx, c.cy, c.w, c.h)) c.hurt(applyBannerDamageDealt(this, c, Math.max(1, Math.trunc(dmg))), cx - c.cx, 0, this, 0, false, 0, true);
+      // ★BJ723-B D4 清偿（BJ725-A）：critter 臂补 crit 掷+DV（原版 Kill 重跑 Damage() 单遍历
+      //  同掷——41 爆炸支既有同形,R03 只落了敌怪臂;Math.max(1,trunc) 档随 DV 退役;掷在
+      //  受理门内（:12909 每受击体各掷——盒外 critter 不耗掷）
+      if (inBox(c.cx, c.cy, c.w, c.h)) {
+        const critCK = rollVanillaHitCrit(projId, this);
+        const dmgVCK = damageVarRoll(dmg, this.player.luck ?? 0);
+        c.hurt(applyBannerDamageDealt(this, c, dmgVCK), cx - c.cx, 0, this, 0, critCK, 0, true);
+      }
     }
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂补齐——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;敌怪臂 R03 链（DV/crit
+    //  逐靶掷+arpen）镜像,单源 hitTownNpcsAoeBox（巫毒窄门/免疫帧/banner/防后 crit
+    //  ×2 全走原语）。hostile 弹走 flag2 恒命中档（:12631 hostile&victim.friendly）。
+    hitTownNpcsAoeBox(cx, cy, half, this, dmg, projId,
+      flags?.hostile === true ? 'hostile' : 'playerProj',
+      () => ({
+        dmg: damageVarRoll(dmg, this.player.luck ?? 0),
+        crit: rollVanillaHitCrit(projId, this),
+        penPercent: flags?.arpen ?? 0,
+      }));
     if (flags?.hostile) {
       const p = this.player;
       if (p && !p.dead && inBox(p.cx, p.cy, p.w, p.h)) this.damagePlayer(Math.max(1, Math.trunc(dmg)), cx, cy, undefined);
@@ -49136,6 +49240,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** PlayTrackedLoopedSound 实现（GameHooks.startTrackedLoop——AI_016 引信嘶声） */
   startTrackedLoop(name: string, vol: number, x: number, y: number) {
     return this.sfx.startTrackedLoop(name as SfxName, vol, x, y);
+  }
+
+  /** ★BJ728-A：PlayTrackedSound 一次性档实现（GameHooks.startTrackedOneShot——
+   *  枯萎兽灵气脉冲 DD2_WitherBeastAuraPulse，NPC.cs:64084-64094） */
+  startTrackedOneShot(files: string[], vol: number, x: number, y: number) {
+    return this.sfx.startTrackedOneShot(files, vol, x, y);
   }
 
   /** 无人机相机跟拍登记（GameHooks.droneCameraTrack——DroneCameraTracker.Track,
@@ -54240,7 +54350,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
           world.store.netReporter = (op) => net.reportTileOp(op);
           // 实体同步钩子（Enemy.hurt 傀儡分支 → StrikeNPC 上报）
-          entityNet.reportStrike = (netId, rawDmg, kbx, kby) => net.sendStrike(netId, rawDmg, kbx, kby);
+          entityNet.reportStrike = (netId, rawDmg, kbx, kby, crit) => net.sendStrike(netId, rawDmg, kbx, kby, crit);
           this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
             // 终审 H1：SSC 暂存消费——loadWorld 完成后新 Player 就绪，此刻应用才不丢
             if (net.pendingSSC) {
@@ -54291,7 +54401,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
-        onStrike: (netId, dmg, kbx, kby, fromSlot) => this.netApplyStrike(netId, dmg, kbx, kby, fromSlot),
+        onStrike: (netId, dmg, kbx, kby, fromSlot, crit) => this.netApplyStrike(netId, dmg, kbx, kby, fromSlot, crit),
         // M4 msg120：其他端玩家表情——锚到对应远端代理头顶出泡 360t
         // （原版锚实体是 Player → OnBubbleChange Player 门适用）
         // msg144：其他端树妖星露谷演出（编排器全局态由 stardewActive 防重入）+
@@ -54435,7 +54545,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           // netReporter 不触发=无回声;服务器中继时 ignoreClient=发送者亦双保险
           world.store.netReporter = (op) => vc.reportTileOp(op);
           // ★P2-A（2026-10-25）：傀儡受击上报（Enemy.hurt 傀儡分支 → msg28 DamageNPC）
-          entityNet.reportStrike = (netId, rawDmg, kbx, kby) => vc.sendStrike(netId, rawDmg, kbx, kby);
+          entityNet.reportStrike = (netId, rawDmg, kbx, kby, crit) => vc.sendStrike(netId, rawDmg, kbx, kby, crit);
           this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
             if (settled) return;
             settled = true;

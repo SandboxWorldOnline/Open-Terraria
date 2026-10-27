@@ -301,12 +301,17 @@ function whipFixture(nano = false, party = false) {
 
 describe('X1-face3/4/5：WhipProj 城镇受理环（巫毒窄门过门后）', () => {
   it('F3a nano 浸剂：受理伤 =trunc(60×1.05)=63 → 63−def/2=48（无浸剂 45）', () => {
-    const a = whipFixture(true);
-    landOneHit(mkWhip(a.player, 60), a.game, a.guide);
-    expect(250 - a.guide.hp).toBe(Math.trunc(Math.max(1, Math.trunc(60 * 1.05) - GUIDE_DEF * 0.5)));
-    const b = whipFixture(false);
-    landOneHit(mkWhip(b.player, 60), b.game, b.guide);
-    expect(250 - b.guide.hp).toBe(Math.trunc(Math.max(1, 60 - GUIDE_DEF * 0.5)));
+    // ★BJ731 改判史（2026-10-27）：BJ723-C S03 起鞭城镇受理面掷 :12970 DV——
+    //   0.5 恒等档（未 mock 受理伤必漂 ±15%）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      const a = whipFixture(true);
+      landOneHit(mkWhip(a.player, 60), a.game, a.guide);
+      expect(250 - a.guide.hp).toBe(Math.trunc(Math.max(1, Math.trunc(60 * 1.05) - GUIDE_DEF * 0.5)));
+      const b = whipFixture(false);
+      landOneHit(mkWhip(b.player, 60), b.game, b.guide);
+      expect(250 - b.guide.hp).toBe(Math.trunc(Math.max(1, 60 - GUIDE_DEF * 0.5)));
+    } finally { rvi731.mockRestore(); }
   });
 
   it('F3b party 浸剂：受理拍出彩带伴生弹（:13693-95 289 于目标 Center/目标速度）', () => {
@@ -318,7 +323,11 @@ describe('X1-face3/4/5：WhipProj 城镇受理环（巫毒窄门过门后）', (
 
   it('F4a ghostHeal 白耗面：applyLifeSteal("ghost", num41, preHits=0, isMagic=false)', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    // ★BJ731 改判史（2026-10-27）：同 F3a——DV 恒等档钉 num41。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    } finally { rvi731.mockRestore(); }
     expect(f.lifeSteal.length).toBe(1);
     const c = f.lifeSteal[0];
     expect(c.kind).toBe('ghost');
@@ -329,7 +338,11 @@ describe('X1-face3/4/5：WhipProj 城镇受理环（巫毒窄门过门后）', (
 
   it('F4b lastStrikeDealt 镜像：受理写实扣;拒收（iframes 残窗）路径不落值', () => {
     const f = whipFixture();
-    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    // ★BJ731 改判史（2026-10-27）：同 F3a——DV 恒等档钉 lastStrikeDealt。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    } finally { rvi731.mockRestore(); }
     expect(f.guide.lastStrikeDealt).toBe(Math.trunc(Math.max(1, 60 - GUIDE_DEF * 0.5)));
     // 鞭写梯清窗形态（iframes=0）——手工置残窗验证拒收早退在入口清零【前】（Enemy.hurt 同形）
     f.guide.lastStrikeDealt = 777;
@@ -384,7 +397,13 @@ describe('X1-face6：GRAVE_MISTAKE 墓碑全链 + 鞭杀向导零效果勘误', 
   it('F6b 勘误钉面：鞭杀向导 → 不发 36（原版 OnKillNPC(ref attempt, 鞭) 零城镇效果）', () => {
     const f = whipFixture();
     f.guide.hp = 40;                                  // 45 ≥ 40 → 致死
-    landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    // ★BJ731 改判史（2026-10-27）：BJ723-C S03 鞭受理 DV 掷使 45±15% 跨 40 致死门
+    //   =掷运翻车（38.25<40 不死）——恒等档 0.5 钉（a-batch2 BJ729-A 同款,鞭路径
+    //   无概率生尘循环,恒 mock 安全[nebula 判例反证不适用于本路径]）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      landOneHit(mkWhip(f.player, 60), f.game, f.guide);
+    } finally { rvi731.mockRestore(); }
     expect(f.guide.dead).toBe(true);
     expect(f.ach).not.toContain(36);
   });

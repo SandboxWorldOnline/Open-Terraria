@@ -293,10 +293,10 @@ describe('BJ488-②：612 无类旗零掷（1091 判例族）+ :12928 TimerCrit 
     flare.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);              // ★消费返值单源 crit（旧码零消费必红）
-    expect(calls[0].dmg).toBe(120);                // 60×2
+    expect(calls[0].dmg).toBe(60);                 // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——未翻倍基伤(旧 120=预倍形)
     expect(t.box.length).toBe(1);
     expect(t.box[0]).toEqual([e.x, e.y, e.w, e.h] as unknown as [number, number, number, number]);
-    expect(rnd.mock.calls.length).toBe(0);         // ★零掷（无类旗;旧码幻影掷必红）
+    expect(rnd.mock.calls.length).toBe(1);         // ★W03(BJ723-B)改判:612 补 DV(:12970)——唯一掷=DamageVar 首掷;无类旗=crit 掷仍零(旧幻影掷必红)
   });
 
   it('2b 无 6170（消费假）→ crit 恒假（dmg 原值）：random=0 若幻影掷尚在必暴（旧码必红钉）', () => {
@@ -311,8 +311,8 @@ describe('BJ488-②：612 无类旗零掷（1091 判例族）+ :12928 TimerCrit 
     flare.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(false);
-    expect(calls[0].dmg).toBe(60);                 // 原值（×2 不达）
-    expect(rnd.mock.calls.length).toBe(0);        // 掷面已不存在
+    expect(calls[0].dmg).toBe(51);                 // ★W03 改判:DV(60,0.0 掷 −15 档)=51(旧 60=无 DV 平值)
+    expect(rnd.mock.calls.length).toBe(1);        // crit 掷面已不存在（DV 掷=W03 新增唯一掷,与上注同口径）
   });
 
   it('2c 结构锁：SolarFlare 类域零 critChance 载体+611 掷面保持 BJ486 3e 锚', () => {
@@ -325,7 +325,7 @@ describe('BJ488-②：612 无类旗零掷（1091 判例族）+ :12928 TimerCrit 
     const srcCode = src.replace(/^\s*\/\/[^\n]*/gm, '');
     expect(srcCode).not.toContain('flare.critChance');        // 出生拍写位摘除
     expect(srcCode).not.toContain('Math.random() < this.critChance');
-    expect(srcCode.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(1);   // 仅 611 面
+    expect(srcCode.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(2);   // 611 敌怪面+BJ729-A 城镇 settle 面（D1 B19,2026-10-27,1→2;与 BJ486 3e 锚同步）
   });
 });
 
@@ -350,7 +350,7 @@ describe('BJ488-③：hitEnemies autoCritPct 兜底支补持械折入（itemComb
     hitEnemies({ ...proj978 }, g, new HitCooldown(), 10, 1, 0);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);              // ★折入（旧 0.04 档必红）
-    expect(calls[0].dmg).toBe(20);                 // 10×2
+    expect(calls[0].dmg).toBe(9);                  // ★S02 改判:DV(10,0.10 掷 −12 档)=9 未翻倍(旧 20=预倍形)
   });
 
   it('3b 词缀 crt 段（prefix 61 crt+5）→ 阈值 0.25：random 0.22 无词缀假/有词缀真', () => {

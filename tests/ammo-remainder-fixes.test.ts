@@ -14,7 +14,7 @@
 //      （CanAcornPlant :44206-44246 / Kill :70507-70530）
 //   ⑥ 迷你核弹伤害盒 25（Kill :74246-74263 Resize(50,50)，曾恒 11）
 //   ⑦ 坠落星 75 点击消耗（useStyle4+consumable，:42602 门无豁免）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ731:vi=DV 恒等档 mock
 import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -92,7 +92,12 @@ describe('① Kill 爆炸三分支（onProjectileDeath）', () => {
 
   it('246 刺炮弹：判定盒 150×150（半宽 75）——70px 内结算 / 90px 外不结算', () => {
     const near = mkDeathGame({ enemies: [mkEnemy(1000 + 70, 1000), mkEnemy(1000 + 90, 1000)] });
-    near.g.onProjectileDeath(246, 1000 - 5, 1000 - 5, 10, 10, 5, 0, 17, { arpen: 0 });
+    // ★BJ731 改判史（2026-10-27）：爆箱伤走 explodeNpcDamageChain :12970 DV 掷
+    //   （BJ723-B/BJ716-A 落地面）——0.5 恒等档钉 17（未 mock 必漂 14-19）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      near.g.onProjectileDeath(246, 1000 - 5, 1000 - 5, 10, 10, 5, 0, 17, { arpen: 0 });
+    } finally { rvi731.mockRestore(); }
     expect(near.hurt.map(([i]) => i)).toEqual([0]);          // 仅 70px 内敌
     expect(near.hurt[0]?.[1]).toBe(17);
     expect(near.sfx).toContain('Item_14');
@@ -130,7 +135,11 @@ describe('① Kill 爆炸三分支（onProjectileDeath）', () => {
 
   it('312 爆炸南瓜：伤害盒 128×128（半宽 64）——60px 内 / 80px 外（补 B"22 盒"系尘盒误读）', () => {
     const d = mkDeathGame({ enemies: [mkEnemy(4000 + 60, 4000), mkEnemy(4000 + 80, 4000)] });
-    d.g.onProjectileDeath(312, 4000 - 16, 4000 - 16, 32, 32, 0, 0, 60, {});
+    // ★BJ731 改判史（2026-10-27）：同 246——DV 恒等档钉 60。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      d.g.onProjectileDeath(312, 4000 - 16, 4000 - 16, 32, 32, 0, 0, 60, {});
+    } finally { rvi731.mockRestore(); }
     expect(d.hurt.map(([i]) => i)).toEqual([0]);
     expect(d.hurt[0]?.[1]).toBe(60);
     expect(d.sfx).toContain('Item_14');

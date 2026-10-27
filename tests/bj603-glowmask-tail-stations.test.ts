@@ -591,7 +591,10 @@ describe('BJ603 件1 UI 槽位光罩', () => {
   });
 
   it('iconUrl 烘焙接线锁（dropGlowColors 单源复用 + 3858 帧 0 定格 + iconCache 槽位共用）', () => {
-    expect(UI_SRC).toContain('ITEM_GLOWMASK[tvid] !== undefined && !UI_GLOW_EXCLUDED.has(tvid)');
+    // ★BJ730 改判史：旧锁 `ITEM_GLOWMASK[tvid] !== undefined && …`——mod 光罩扩展
+    //  （modItemGlowMaskIdOf）后改形 `… || modItemGlowMaskIdOf(tvid) !== undefined) && …`
+    //  （mod 物品光罩与 vanilla 同门同烘焙通道）;锁随现形,语义不变（Glow 门+排除表）。
+    expect(UI_SRC).toContain('ITEM_GLOWMASK[tvid] !== undefined || modItemGlowMaskIdOf(tvid) !== undefined) && !UI_GLOW_EXCLUDED.has(tvid)');
     expect(UI_SRC).toContain('dropGlowColors(tvid');
     expect(UI_SRC).toContain('monkT3GlowRect(0)');
     expect(UI_SRC).toContain('xnaColorToOp');

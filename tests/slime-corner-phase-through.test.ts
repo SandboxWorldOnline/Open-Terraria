@@ -318,7 +318,11 @@ describe('SW-BJ9 坡角嵌固漂移穿墙硬化（刻意偏离原版：不穿越
     expect(en.match(/this\.applyUnwedgeDrift\(st, dir\);/g)?.length).toBe(2);
     // episode 闩唯一写点=门方法内;嵌固判定（SolidCollision 语义）仍在两漂移点原位评估
     expect(en.match(/this\.unwedgeBlocked = true;/g)?.length).toBe(1);
-    expect(en.match(/solidBoxOverlap\(st, this\.x, this\.y, this\.w, this\.h\)/g)?.length).toBe(2);
+    // ★BJ731 改判史（2026-10-27）：BJ434 仙灵舞 AI 两处开域落地窗复用同款
+    //   solidBoxOverlap 四参式（非漂移点,共享谓词合法消费）——计数锁改下界
+    //   ≥2;漂移点路由仍由上行 applyUnwedgeDrift===2 精确锁定。
+    expect(en.match(/solidBoxOverlap\(st, this\.x, this\.y, this\.w, this\.h\)/g)?.length)
+      .toBeGreaterThanOrEqual(2);
     // 全实心谓词 + 刻意偏离声明在位
     expect(en).toContain('function fullSolidBoxOverlap(');
     expect(en.match(/刻意偏离原版/g)?.length).toBeGreaterThanOrEqual(2);

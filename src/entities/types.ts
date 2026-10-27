@@ -354,6 +354,15 @@ export interface GameHooks {
   startTrackedLoop?(
     name: string, vol: number, x: number, y: number,
   ): { stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void; setPitch?(p: number): void } | null;
+  /** ★BJ728-A（债1,BJ715-A D-⑤S 清偿）：跟踪式一次性音（SoundEngine.PlayTrackedSound
+   *  一次性档——枯萎兽灵气脉冲 DD2_WitherBeastAuraPulse，NPC.cs:64084-64094）：
+   *  files=变体组（每播组内随机取一）；返回句柄 done（onended=槽释放,判 done 重触发
+   *  同 GetActiveSound 空语义,重触发节拍=音长 2.3/3.0s）/setPos（在播 Position 跟随
+   *  :64093）/stop。缓冲未就绪返回 null（下拍重试）。Game 实现=Sfx.startTrackedOneShot,
+   *  缺省无（测试 mock/SimHost 兼容）。★勿以 startTrackedLoop 近似顶替（反模式⑧）。 */
+  startTrackedOneShot?(
+    files: string[], vol: number, x: number, y: number,
+  ): { readonly done: boolean; stop(): void; setPos(px: number, py: number): void } | null;
   /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
    *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用） */
   refreshChannelItem?(aim?: number): void;

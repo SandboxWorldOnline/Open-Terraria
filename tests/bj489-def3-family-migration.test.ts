@@ -130,12 +130,18 @@ describe('BJ489-§1：def-3 家族全清单结构锁（写位零残留+读者掷
   it('1d 各载体读者掷率口径=rollVanillaHitCrit（逐文件计数锚）', () => {
     const counts: Array<[string, number]> = [
       ['entities/WeaponProj.ts', 5],        // hitEnemies 注入支+手雷接触环×2+破晓 636+悠悠球伴生 1125/1130/1134/1135（★BJ494）
-      ['entities/Arrow.ts', 11],       // ★BJ496①③：通用环+661 爆面+617/659 爆面+whipTagShot 支（旧 2）;★BJ497①：五遗留面收编（:1848 1023/:5372 631/:7337+:9309 514 双面/:10424 190,5→10）;★BJ704-G24：烟花 167-170 爆面 AoE 掷率（killNow :5202 critFw,10→11——该批漏改本计数锚,BJ708-G28 顺手清记账）
-      ['entities/MagnetSphereProj.ts', 1],  // 255/260 BeamBoltProj
+      // ★BJ729-A 改判史注（2026-10-27）：本表两处陈旧随迁——①BJ727-A（C-D4 城镇臂
+      //  +5 掷位/KILL_BURST settle +1）漏改本锚（Arrow 11→16、MissileProj 4→5,
+      //  其时本测未入基线清单=预存红）;②BJ729-A（D2 残差+D1 城镇臂）：gem 敌臂
+      //  +settle/283 敌臂+settle +4（Arrow 16→20,gem magic/283 ranged 原版亲读勘误
+      //  census 判语）;MagnetSphere 255 城镇 settle +1（1→2）;PrismProj 461 城镇
+      //  settle +1（2→3）。锁语义=面存在性非清单冻结（BJ725-A 判例 3）。
+      ['entities/Arrow.ts', 20],       // ★BJ496①③：通用环+661 爆面+617/659 爆面+whipTagShot 支（旧 2）;★BJ497①：五遗留面收编（5→10）;★BJ704-G24：烟花爆面（10→11）;★BJ727-A：Kill 爆城镇臂 +5（11→16）;★BJ729-A：gem/283 双臂 DV+crit 补齐 +4（16→20）
+      ['entities/MagnetSphereProj.ts', 2],  // 255/260 BeamBoltProj;★BJ729-A：255 城镇 settle +1（1→2）
       ['entities/LunarNebula.ts', 3],       // 634/635 飞行盒+Kill 爆+645
       ['entities/RainbowProj.ts', 1],       // 251 段
-      ['entities/PrismProj.ts', 2],         // 632 光棱+461 光束
-      ['entities/MissileProj.ts', 4],       // 16/34/79 直击+Kill 爆+491+星怒 9（BJ486③ 既有）
+      ['entities/PrismProj.ts', 3],         // 632 光棱+461 光束;★BJ729-A：461 城镇 settle +1（2→3）
+      ['entities/MissileProj.ts', 5],       // 16/34/79 直击+Kill 爆+491+星怒 9（BJ486③ 既有）;★BJ727-A：KILL_BURST 城镇 settle +1（4→5）
       ['entities/MonkStaffFury.ts', 4],     // 697/699/700+武僧蓄爆 25（BJ486④ 既有）
       ['entities/SkyDragonFury.ts', 4],     // 707+708/709/1110（★BJ492② 右键三型收编,swCrit 载体退役）
       ['entities/DeadCellsFlint.ts', 2],    // 1043 波+1041 尖刺
@@ -269,7 +275,9 @@ describe('BJ489-§3：抽样型定谳判别', () => {
     prong.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);                // 命中拍聚合 50 掷中（冻结 0.04 档必假）
-    expect(calls[0].dmg).toBe(200);                  // 100×2（charge<180 无 ×3）
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 200,
+    //  现收基伤+crit 旗（100,charge<180 无 ×3;×2 下游 hurt 内）
+    expect(calls[0].dmg).toBe(100);
   });
 });
 
@@ -283,8 +291,11 @@ describe('BJ489-§4：critChance=0 关断钉=掷面整门关（聚合/held 再�
     const pinned = { x: 60 * TILE, y: 60 * TILE, w: 22, h: 22, vx: 1,
       damage: 10, knockback: 1, projId: 153, critChance: 0 };
     hitEnemies({ ...pinned }, g, new HitCooldown(), 10, 1, 0);
-    expect(e.calls[0].crit).toBe(false);             // ★门关=零掷（RNG 零消费）
-    expect(rnd.mock.calls.length).toBe(0);
+    expect(e.calls[0].crit).toBe(false);             // ★门关=crit 掷臂零消费（crit 位假）
+    // ★BJ726 改判史：W01(BJ723-B) hitEnemies 补 DV 掷(:12970,逐靶无条件)后 RNG 计数
+    //  旧期望=0,现=1——唯一 1 次消费=DamageVar 掷（原版序 crit 掷→DV 掷,crit 臂
+    //  critChance=0 短路仍零消费;掷面整门关判别由 crit 位假承载不变）
+    expect(rnd.mock.calls.length).toBe(1);
   });
 
   it('4b 类自有读者钉：prong 置 0（bj380/bj382 习语）→ 命中照常 crit 位假+dmg 原值', () => {
@@ -299,10 +310,12 @@ describe('BJ489-§4：critChance=0 关断钉=掷面整门关（聚合/held 再�
     const bx = prong.cx + prong.vx * 60, by = prong.cy + prong.vy * 60;
     const { e, calls } = mkEnemy(62, bx - 24, by - 24, 48, 48);
     const g = makeHooks({ enemies: [e], player: { critChance: () => 50 } });
-    vi.spyOn(Math, 'random').mockReturnValue(0.0);   // 若门未关必暴
+    // ★BJ723-C M02：0.0 档下 632 DV 首掷 = 85（tier -15）——改 0.5（tier 0,DV 恒等）
+    //  保「dmg 原值」判读;crit 关断钉判别不受 mock 值影响（0.5<0.50 聚合仍假）
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     prong.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(false);
-    expect(calls[0].dmg).toBe(100);                  // 原值（×2 不达）
+    expect(calls[0].dmg).toBe(100);                  // 原值（×2 不达;DV tier 0 恒等）
   });
 });

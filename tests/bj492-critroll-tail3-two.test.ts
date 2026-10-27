@@ -128,7 +128,9 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
     //    rollCrit‖timerCrit‖monkCrit‖golemCrit,ref-crit 消费不短路=vanilla
     //    TryConsumingTimerCrit(:12928) 无条件语义,|| 链内联会短路=禁）
     //  · 城镇臂（tn×1,tHitTick settle 内原位未动）
-    const triple = s.match(/const rollCrit = rollVanillaHitCrit\(this\.projId, game\);\s*\n\s*const timerCrit = tryConsumeTimerCritOf\(this\.ownerRef\(\), game, (en|tn)\.x, (en|tn)\.y, (en|tn)\.w, (en|tn)\.h\);\s*\n\s*const monkCrit = monkAuraForcedCrit\(this\.ownerRef\(\), this\.projId\);\s*\n\s*const crit = rollCrit \|\| timerCrit \|\| monkCrit;/g);
+    // ★BJ723-C S05 改判（2026-10-26 随刀走）：946 城镇臂三段后并入 golemCrit →
+    //  critTown 并链形（三段不短路语义保持;旧裸三段锁随 S05 重构退役）
+    const triple = s.match(/const rollCrit = rollVanillaHitCrit\(this\.projId, game\);\s*\n\s*const timerCrit = tryConsumeTimerCritOf\(this\.ownerRef\(\), game, tn\.x, tn\.y, tn\.w, tn\.h\);\s*\n\s*const monkCrit = monkAuraForcedCrit\(this\.ownerRef\(\), this\.projId\);/g);
     expect(triple?.length).toBe(1);                   // 946 城镇臂（tHitTick settle 原位）
     // 敌怪臂新形：ai156Strike 内三段+并链（摘任一段/摘并链必红）
     const a156 = s.indexOf('private ai156Strike(');
@@ -179,7 +181,7 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
     expect(t.box.length).toBe(1);                     // ★TimerCrit :12928 消费达（旧整缺必红）
     expect(t.box[0]).toEqual([z.x, z.y, z.w, z.h] as unknown as number[]);
     expect(calls[0].crit).toBe(true);
-    expect(calls[0].dmg).toBe(60);                    // TimerCrit 强制翻倍（预倍习语 30×2）
+    expect(calls[0].dmg).toBe(30);                    // ★S02(BJ723-B)改判:TimerCrit 强制位走 hurt 防后 ×2——spy 收未翻倍基伤(旧 60=预倍形)
   });
 
   it('1d 946 城镇臂 settle 运行时：TimerCrit 照达 ×2 / 无 timer=dmg0（巫毒门位同相零 RNG）', () => {
@@ -197,7 +199,7 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
       callAs(m, 'tHitTick')(hooks, player, 30);
       expect(rnd).not.toHaveBeenCalled();             // 零掷
       expect(t.box.length).toBe(1);                   // 消费达（tn.x/y/w/h=城镇靶盒）
-      expect(calls[0].dmg).toBe(timerRet ? 60 : 30);  // ★TimerCrit 翻转（预倍形）
+      expect(calls[0].dmg).toBe(30);  // ★S02 改判:TimerCrit 翻转走 hurt 防后 ×2——两态同基值,crit 旗分(旧 timerRet?60:30=预倍形)
     }
   });
 
@@ -214,7 +216,7 @@ describe('BJ492-①：MinionProj 三臂掷面收编 rollVanillaHitCrit 单源', 
     expect(rnd).toHaveBeenCalledTimes(1);              // ★唯一掷=DamageVar 首掷（BJ716-A）
     expect(t.box.length).toBe(1);
     expect(calls[0].crit).toBe(true);
-    expect(calls[0].dmg).toBe(60);
+    expect(calls[0].dmg).toBe(30);   // ★S02 改判:×2=Enemy.hurt 防后
   });
 
   it('1f 武僧强制掷形位钉（:12929-43 全链;946/755 恒假零 RNG——contact() 面运行时=BJ491 §2c/2d 承载）', () => {
@@ -285,7 +287,7 @@ describe('BJ492-②：SkyDragonSwing/Shot/Circle 静态载体退役→rollVanill
       sw.fixedUpdate(1, game);
     }
     expect(calls.length).toBe(2);                     // 6t 冷却期满第二跳
-    expect(calls[1]).toEqual({ dmg: 140, crit: true });
+    expect(calls[1]).toEqual({ dmg: 70, crit: true });   // ★S02(BJ723-B)改判:×2 移 Enemy.hurt 防后——spy 面收未翻倍基伤(旧 140=预倍形)
     // 关断钉：critChance=0 → 掷门关死——agg=100（阈 1.04,rnd 0.5 必暴）下仍不暴
     // =门关死判别（skydragon.test.ts critChance=0 同相;尘面掷与判定掷分离,不数 rnd 总调用）
     const calls2: HurtCall[] = [];
@@ -294,7 +296,7 @@ describe('BJ492-②：SkyDragonSwing/Shot/Circle 静态载体退役→rollVanill
     const sw2 = new SkyDragonSwing(owner, 36, 0, 70, 9, () => 29, () => {});
     sw2.critChance = 0;
     sw2.fixedUpdate(1, game);
-    expect(calls2[0].dmg).toBe(70);                   // 关断钉关死（门开则 1.04 阈必暴=140）
+    expect(calls2[0].dmg).toBe(70);                   // 关断钉关死（门开则 1.04 阈必暴=S02 后仍 70,×2 在 hurt 防后）
   });
 
   it('2d 709/1110 命中拍动态 ×2+圈面自掷（spawnCircle 后类字段 0.04,不沿载体复制）', () => {
@@ -319,7 +321,7 @@ describe('BJ492-②：SkyDragonSwing/Shot/Circle 静态载体退役→rollVanill
     shot.consumeCircles = () => {};
     const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     shot.fixedUpdate(1, game);
-    expect(calls[0]).toEqual({ dmg: 140, crit: true });   // 命中拍动态暴击
+    expect(calls[0]).toEqual({ dmg: 70, crit: true });   // 命中拍动态暴击（★S02 改判:spy 收未翻倍基伤）
     expect(shot.dead).toBe(true);                     // penetrate 1 → 命中即 Kill
     expect(circles[0][2]).toBe(70);                   // 圈伤=弹伤（伤害面不动）
     // 1110：圈面自掷（单源直掷,旧 circle.critChance=shot.critChance 沿载体已摘）
@@ -329,6 +331,6 @@ describe('BJ492-②：SkyDragonSwing/Shot/Circle 静态载体退役→rollVanill
     const circle = new SkyDragonCircle(80 * TILE, 100 * TILE, 70, 300);
     expect(circle.critChance).toBe(0.04);             // 类字段关断钉（无载体复制）
     circle.fixedUpdate(1, game);
-    expect(calls2[0]).toEqual({ dmg: 140, crit: true });   // 自掷同单源动态
+    expect(calls2[0]).toEqual({ dmg: 70, crit: true });   // 自掷同单源动态（★S02 改判:未翻倍基伤）
   });
 });

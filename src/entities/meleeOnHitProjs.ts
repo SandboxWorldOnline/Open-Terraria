@@ -323,8 +323,9 @@ export class MuramasaSlashProj extends Entity {
         { projId: 977 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: px, y: py, w: this.w, h: this.h } });
-      e.hurt(dmgVar * (crit ? 2 : 1)
-        + (snapBonusMuramasa ? Math.trunc(snapBonusMuramasa * (crit ? 2 : 1)) : 0),
+      // ★S02(BJ723-B):crit ×2 摘除——移 Enemy.hurt 防后(NPC.cs:82067)
+      e.hurt(dmgVar
+        + (snapBonusMuramasa ? snapBonusMuramasa : 0),
         Math.sign((e.cx ?? this.cx) - this.cx) || 1,     // kb 原文 0f → 位移 0；方向位保留
         // pierce=-3 = usesLocal 族清零档（BJ398 梯,Enemy.hurt iframes=0 ≙ 原文
         // :14175-14178 immune[owner]=0 写面）——★Q4 刀写半面对齐：旧档 pierce=0
@@ -528,8 +529,9 @@ export class BladetongueGlobProj extends Entity {
           { projId: 524 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
           { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
             targeterBox: { x: px, y: py, w: this.w, h: this.h } });
-        e.hurt(dmgVar * (crit ? 2 : 1)
-          + (snapBonusGlob ? Math.trunc(snapBonusGlob * (crit ? 2 : 1)) : 0),
+        // ★S02(BJ723-B):crit ×2 摘除——移 Enemy.hurt 防后(NPC.cs:82067)
+        e.hurt(dmgVar
+          + (snapBonusGlob ? snapBonusGlob : 0),
           Math.sign((e.cx ?? this.cx) - this.cx) || 1, 0,
           game, this.armorPenInject, crit, -2, true);      // ★R1 写面：pierce=-2 三不写档
           // （写梯 :14031-14038 usesIDStatic 支：penetrate=5≠1 ⇒ 内层真 = immune[owner]=0

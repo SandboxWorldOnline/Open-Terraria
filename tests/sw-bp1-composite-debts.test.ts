@@ -231,7 +231,10 @@ describe('★SW-BP1 craftSources 弹体容器支全弹扫+去重（NearbyChests.
   it('结构锁：飞猪循环无 break-after-first；去重经 includes（同一 bank 只入列一次）', () => {
     const game = src('../src/core/Game.ts');
     const from = game.indexOf('const projectileBanks: CraftItemSource[] = [];');
-    const to = game.indexOf('960 Chester → 同 -2 = bank');
+    // ★BJ730 改判史：尾锚旧用裸 '960 Chester → 同 -2 = bank'（当时全文唯一）——
+    //  Game.ts 增重（容器宠物悬停 petProbes 面）后 :44004 出现同名注释先于声明位,
+    //  indexOf 首中即窗口倒置。改用带 :80561 尾注的循环内唯一样本锚。
+    const to = game.indexOf('projectileBanks.push(banksWrapped[0]);   // 960 Chester → 同 -2 = bank（:80561）');
     expect(from).toBeGreaterThan(-1);
     expect(to).toBeGreaterThan(from);
     const loop = game.slice(from, to);

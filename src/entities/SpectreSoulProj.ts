@@ -36,7 +36,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { canBeChasedBy, playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, hitCritters, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B29）：城镇 voodoo 靶
 import { cutTilesBox } from './ProjCutTiles';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
@@ -518,6 +518,14 @@ export class SpectreSoulProj extends Entity {
             e.hurt(applyBannerDamageDealt(game, e, this.damage), 0, 0, game, 0, false, 1, true);
       this.penetrate--;                            // （:14189 命中尾递减,写段判定用写前值）
       return;                                      // keepIterating=false（单发结算终了）
+    }
+    // ★BJ729-A（D1 B29,2026-10-27）：城镇 voodoo 靶——356 AI_059 ai[1]>=60 置
+    //  friendly=true（:29371 亲读）后巫毒窄门可达（:12618-12631）;AABB 自盒;
+    //  settle 镜像敌怪臂链（mod 修正链=hitTownNpcs 原语内置/DV=面级既有形态
+    //  [D6 族登记]/kb=0）;flag3 单发族受理即 penetrate-- 终了（:14189 同相）。
+    if (hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId)) {
+      this.penetrate--;
+      return;
     }
   }
 

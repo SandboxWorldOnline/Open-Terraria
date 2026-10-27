@@ -34,9 +34,12 @@ describe('631 幻象矢贴图朝向(AI_122 :35613 −π/2)', () => {
   it('结构锁:draw 链分支在位且先于默认支', () => {
     const src = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
     expect(src).toContain('const PROJ_ROT_DOWN = new Set([631])');
-    // 分支序:PROJ_ROT_DOWN 支必须位于默认支(else 兜底 rotate(ang + Math.PI / 2))之前
+    // 分支序:PROJ_ROT_DOWN 支必须位于默认支(else 兜底)之前
+    // ★BJ731 改判史（2026-10-27）：G10（R2-F13 字面纪律）缺省支 `ang + Math.PI / 2`
+    //   改原版字面 1.57f（:58733）——默认支定位锚随迁;G11 件4 加 0.785/π/4 两斜
+    //   支仍在 631 支之后（链序语义不变）。
     const downIdx = src.indexOf('PROJ_ROT_DOWN.has(this.projId)');
-    const defaultIdx = src.indexOf(': ang + Math.PI / 2)');
+    const defaultIdx = src.indexOf(': ang + 1.57)');
     expect(downIdx).toBeGreaterThan(0);
     expect(defaultIdx).toBeGreaterThan(downIdx);
     // 减号锁(防回改 +π/2)

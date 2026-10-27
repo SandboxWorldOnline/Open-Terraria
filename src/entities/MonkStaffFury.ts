@@ -85,7 +85,7 @@ function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
       targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
   e.hurt(applyBannerDamageDealt(game, e, dmg)
-    + (snapBonusFury ? Math.trunc(snapBonusFury * (crit ? 2 : 1)) : 0),
+    + (snapBonusFury ? snapBonusFury : 0),
     kdir * kb, 0, game, pen, crit, 0, true);
 }
 
@@ -286,7 +286,7 @@ export class MonkStaffSpin extends Entity {
       // ★BJ489 def-3：697 掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+:25712
       //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // 击退向远离【玩家】中心（Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
@@ -376,7 +376,7 @@ export class MonkSlam extends Entity {
       //  meleeCrit 聚合+:25712 持械折入 + 25。旧 critTotal+0.25 静态冻结载体建模退役,
       //  写位已摘）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game, 25);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // 击退向 = 默认弹体相对向（698 不在 Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.vxSign;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
@@ -528,7 +528,7 @@ export class GhastlyGlaiveProj extends Entity {
       if (!segHitsRect(this.cx, this.cy, hx, hy, 23, e)) continue;
       // ★BJ489 def-3：699 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || facing;   // 远离玩家（:13652-13661）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
@@ -672,7 +672,7 @@ export class MonkGhast extends Entity {
       this.hitDone.add(e.id);
       // ★BJ489 def-3：700 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       const kdir = Math.sign(this.vx) || 1;          // 默认弹体方向（700 不在 num40 特列）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);

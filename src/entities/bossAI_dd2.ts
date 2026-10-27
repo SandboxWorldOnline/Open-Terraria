@@ -221,6 +221,39 @@ function fuseLoopStop(e: Enemy): void {
   fuseLoops.delete(e);
 }
 
+// ---------------------------------------------------------------------------
+// ★BJ728-A（债1,BJ715-A D-⑤S 清偿）：枯萎兽灵气脉冲一次性跟踪轨
+// 原版 :64084-64094 = GetActiveSound(SlotId.FromFloat(localAI[1])) 空 →
+// PlayTrackedSound(SoundID.DD2_WitherBeastAuraPulse, Center)（SoundID.cs:966
+// CreateTrackable(…,2)：音量=SoundStyle 缺省 1（无 WithVolume）,2 变体每播随机
+// LegacySoundStyle.cs:24-29;非循环 2.3/3.0s——播毕槽释放,次拍判空重触发=以音长
+// 为节拍的重触发链,整段灵气期连续）;在播仅 activeSound.Position=Center 跟随
+// （:64093）。旧实现 x[1] 单闩只响一声 + 0.5 音量（无锚）退役;★禁 startTrackedLoop
+// 近似（loop=true 丢变体随机+无重触发节拍=反模式⑧,BJ715-A 备案）。
+// ---------------------------------------------------------------------------
+/** 一次性跟踪轨句柄（GameHooks.startTrackedOneShot 返回值结构面） */
+interface TrackedOneShotHandle {
+  readonly done: boolean; stop(): void; setPos(px: number, py: number): void;
+}
+const witherAuraSfx = new Map<Enemy, TrackedOneShotHandle>();
+/** 灵气段逐拍 manage（:64084-64094 1:1）：done/亡实体弃槽【不截声】（原版播毕自然
+ *  释放、实体亡后 ActiveSound 余音照放同语义——区别于循环轨 stop 全拆）;无槽 →
+ *  重触发（音量 1 + 变体组整组传入,Sfx 内每播随机取一）;有槽 → 仅 setPos 跟随。 */
+function witherAuraSfxManage(e: Enemy, game: GameHooks): void {
+  for (const [k, h] of witherAuraSfx) {
+    if (k.dead || h.done) witherAuraSfx.delete(k);
+  }
+  const h = witherAuraSfx.get(e);
+  if (!h) {
+    // GetActiveSound 空 → PlayTrackedSound（:64088）;缓冲未就绪返回 null →
+    // 下拍重试（GetActiveSound 空重播同语义）;缺省 mock 无此可选钩 = 静默跳过
+    const nh = game.startTrackedOneShot?.(soundTrackFiles('dd2_wither_beast_aura_pulse'), 1, e.cx, e.cy);
+    if (nh) witherAuraSfx.set(e, nh);
+    return;
+  }
+  h.setPos(e.cx, e.cy);   // activeSound.Position = Center（:64093,每拍跟随）
+}
+
 /** 原版 oldVelocity（碰撞前一帧速度,cs:93795 collideX/collideY 判定源）→ WeakMap */
 const oldVel = new WeakMap<Enemy, { x: number; y: number }>();
 /** 黑魔法师施法期瞄准快照（AI_109 头部 GetTargetData 一次取值,施法全程不重定向） */
@@ -2817,8 +2850,9 @@ function w107WalkAccel(e: Enemy, p: Walker107P): void {
 export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player | null): void {
   if (!e.bInit) {
     e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
-    // ★台账⑩：小妖精引信跟踪轨随实体剔除拆轨（Entity.compact 对 dead 回调 destroy）
-    (e as { destroy?: () => void }).destroy = () => fuseLoopStop(e);
+    // ★台账⑩：小妖精引信跟踪轨随实体剔除拆轨（Entity.compact 对 dead 回调 destroy）;
+    // ★BJ728-A：枯萎兽灵气脉冲槽一并弃置（不截声,一次性轨余音自然播完）
+    (e as { destroy?: () => void }).destroy = () => { fuseLoopStop(e); witherAuraSfx.delete(e); };
   }
   const x = dd2LocalAI(e);
   const id = e.vanillaId ?? 0;
@@ -2876,7 +2910,7 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
   // ---- 枯萎兽灵气态（NPC.cs:64050-64135,1457/1458 同行号;旧注 cs:63861 系
   //      陈旧行号）:ai[0]==1 进入,此后 1↔2 振荡驻留 ----
   if (id === 568 || id === 569) {
-    if (e.ai0 === 0) x[1] = 0;
+    if (e.ai0 === 0) { x[1] = 0; witherAuraSfx.delete(e); }   // localAI[1]=SlotId.Invalid（:64064-64069）——弃槽不截声,再入灵气态首拍即重触发
     if (e.ai0 === 1) {
       e.def.hitSound = soundTrackFiles('dd2_wither_beast_crystal_impact');  // HitSound（:64078）
       e.ai0 += 1;                          // →2,由下方 flag5 块减回 1 形成驻留
@@ -2888,17 +2922,14 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
           { r: 0, g: 0, b: 0, a: 0 }, 0.6, true);
         if (d) { d.vx /= 2; d.fadeIn = 1.5; d.y += 4; }
       }
-      // ★BJ715-A-⑤ 音面【登记债 D-⑤S,窄判备案】原版 :64087-64095 =
-      // GetActiveSound(localAI[1]) 空则 PlayTrackedSound(DD2_WitherBeastAuraPulse,
-      // Center)（:64088,音量=CreateTrackable 缺省 1,2 变体每播随机）+在播仅
-      // Position 跟随——非循环音(2.3/3.0s)整段灵气期连续重触发。本仓 x[1] 单闩
-      // 只响一声;真值落地需 Sfx.startTrackedOneShot（onended done 门+随机变体+
-      // setPos）+ GameHooks 可选方法 + Game.ts 三行代理——Game.ts 系 BJ714-A 在途
-      // 域本轮禁触,勿以 startTrackedLoop(loop=true,丢变体随机+无重触发节拍)近似顶替。
-      if (x[1] === 0) {
-        x[1] = 1;
-        game.playSfxFiles(soundTrackFiles('dd2_wither_beast_aura_pulse'), 0.5, e.cx, e.cy);
-      }
+      // ★BJ728-A（债1,BJ715-A 登记债 D-⑤S 清偿,2026-10-27）：原版 :64084-64094 =
+      // GetActiveSound(localAI[1]) 空 → PlayTrackedSound(DD2_WitherBeastAuraPulse,
+      // Center)（音量=CreateTrackable 缺省 1,2 变体每播随机）+在播仅 Position 跟随
+      // ——非循环音(2.3/3.0s)播毕槽释放次拍重触发=整段灵气期连续重触发链。落地=
+      // Sfx.startTrackedOneShot（onended done 门+每播随机变体+setPos 距离衰减/声像）
+      // + GameHooks.startTrackedOneShot 可选钩 + Game.ts 三行代理（见文件头
+      // witherAuraSfx 注释;startTrackedLoop 近似=反模式⑧ 勿回退）。
+      witherAuraSfxManage(e, game);
       x[0] += 1;                           // localAI[0]++（:64096,环带门计数）
       // ★BJ715-A-⑤ 尘面 2/2:d27 灵气环带（:64097-64109）——localAI[0]>60 ∧ 1/10
       // 无目标门:Center+随机角×400×(0.3+0.7r) 环点,落点非实心格（WorldGen.SolidTile

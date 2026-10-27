@@ -66,7 +66,8 @@ describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
     expect(RDR).toContain("markWorldDynamicScratch(img: HTMLCanvasElement, key?: string,\n    tint?: readonly [number, number, number]): boolean {");
     expect(RDR).toContain('if (key) { this.bglShimReg().uploadScratchNow(img, key); return false; }');
     expect(RDR).toContain('this.bglShimReg().markDynamic(img);');
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');
-    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): string {');
+    expect(RDR).toContain('const key = `${fam}:${n % ring}`;');   // ★BJ731 改判史(2026-10-27):R3b-1 环键回传(d0a1859d,2026-10-17 尘批)——键先存 const 回传,内联直呼形退役
+    expect(RDR).toContain('sh.uploadScratchNow(img, key, rw, rh, preBytes);');
   });
 });

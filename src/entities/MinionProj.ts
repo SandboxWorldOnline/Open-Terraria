@@ -861,15 +861,18 @@ export class MoonGateBeam extends Entity {
       const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
         this.damage, game,
         (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-        SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerPlayer, 0, this.projId);
+        SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerPlayer,
+        // ★BJ723-C S05：词缀 tagdmg（:11140 EntitySource_Parent 从 648 宿主哨兵继承）
+        this.hostRef()?.bonusTagDmg ?? 0, this.projId);
       const gated = en.dead;                                       // dontTakeDamage 已被头门早退（窄化余项）
       const golemCrit = rollGolemSentryCrit(game, this.projId, false);   // 6176 SentryShot 10%
       const crit = res.crit || timerCrit || monkCrit || golemCrit;
       // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970 `Main.DamageVar(num15,
       //  Main.player[owner].luck)`）——原版序=tag(:12947)→golem(:12962-65)→DV;
-      //  掷 res.dmg（tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+      //  掷 res.dmg（tag 乘后基数;★S02 BJ723-B:res.crit ×2 已摘（WhipTag 尾）,DV
+      //  掷基数复位未翻倍值=BJ716-A 登记债①清偿;crit ×2 统一在 Enemy.hurt 防后）
       const dmgV867 = damageVarRoll(res.dmg, this.ownerPlayer?.luck ?? 0);
-      en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? dmgV867 * 2 : dmgV867),
+      en.hurt(applyBannerDamageDealt(game, en, dmgV867),
         this.vx * this.knockback, this.vy * this.knockback, game, 0, crit, 1, true);
       if (!gated) {
         ghostHealProc(game, this.projId, 0,
@@ -1555,6 +1558,15 @@ export class MinionProj extends Entity {
   damage: number;
   knockback: number;
   projId: number;
+  /** ★BJ723-C S05（2026-10-26）：召唤物词缀 tagdmg（Projectile.bonusTagDamage——
+   *  ApplyStatsFromSource :11129 出生经 EntitySource_ItemUse 从 item.bonusTagDamage
+   *  继承（Item.cs:586 前缀 tagdmg,Fabled85=3）;消费=各命中面 resolveWhipTagHit
+   *  第 8 参（:12954 `(num18 + bonusTagDamage) × SummonTagDamageMultiplier`——
+   *  仅 tag 态激活的受理拍并入）。出生拍冻结载体（原版弹字段无 live 刷新）;
+   *  子体继承（625-628 龙段/spawnBody/MoonGateBeam 642/whipTagShot 箭）=
+   *  EntitySource_Parent :11140 同式。Game 'summon' spawnMinion/雀鸟 4281 注入;
+   *  缺省 0=无词缀。 */
+  bonusTagDmg = 0;
   /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true——随从弹
    *  tileCollide 族同 HandleMovement 面,原版可穿 Hoik 单向墙） */
   hoik = true;
@@ -2180,6 +2192,7 @@ export class MinionProj extends Entity {
         // 基础链段 noSlot：原版 626/627 各 0.5 槽（:6737-6739）+ 头 0 槽 = 1 槽,
         // 本仓头 625 计 1 槽 + 段 0 = 总量等价（延伸段另计,见 extendDragon 注）
         m.noSlot = true;
+        m.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：EntitySource_Parent :11140 龙段继承（段为伤害主体）
         const par = parent;
         m.parentRef = () => (par.dead ? null : par);
         m.hitCd = this.hitCd; // 全链共用命中表（localNPCHitCooldown=7 语义）
@@ -2341,6 +2354,7 @@ export class MinionProj extends Entity {
     const oldParent = tail.parentRef;
     const a = new MinionProj(tail.cx, tail.cy, 626, this.damage, this.knockback, false, 0, false, this.ownerRef);
     const b = new MinionProj(tail.cx, tail.cy, 627, this.damage, this.knockback, false, 0, false, this.ownerRef);
+    a.bonusTagDmg = b.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 龙延伸段继承
     a.noSlot = b.noSlot = false;              // :6737-6739 minionSlots=0.5f×2
     a.parentRef = oldParent;
     b.parentRef = () => (a.dead ? null : a);
@@ -3066,7 +3080,10 @@ export class MinionProj extends Entity {
       const dist = Math.hypot(dx, dy);
       let num6 = Math.min(num3, 4 + Math.ceil(dist / 50)); // :46463-46468
       if (num6 < 5) num6 = 5;
-      add(new TigerPounce(cx0, cy0, dx, dy, dmg0, () => this.ownerRef(), -num4 * 4, num6 * 4)); // :46470
+      // ★BJ723-C S05：818 扑击弹继承词缀 tagdmg（:11140 EntitySource_Parent）
+      const tp818 = new TigerPounce(cx0, cy0, dx, dy, dmg0, () => this.ownerRef(), -num4 * 4, num6 * 4);
+      tp818.bonusTagDmg = this.bonusTagDmg;
+      add(tp818); // :46470
       cx0 = hx; cy0 = h.y;
       num4 += num6; // :46473-46474
     }
@@ -5016,6 +5033,7 @@ export class MinionProj extends Entity {
             const laser = new Arrow(this.cx - 2, this.cy - 2, dx / d * 8, dy / d * 8,
               Math.max(1, Math.trunc(dmg0 * 1.15)), 0, 389, { grav: 0, life: 300 });
             laser.whipTagShot = true;                // 389 ∈ MinionShot（ProjectileID.cs:291）
+            laser.bonusTagDmg = this.bonusTagDmg;    // ★BJ723-C S05：:11140 随从弹继承
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(laser, 'projectiles');
           }
         }
@@ -5200,7 +5218,7 @@ export class MinionProj extends Entity {
     //  StartAttack 清）。★BJ703-D4（BJ684 登记债清偿,2026-10-21）：原版 voodoo 放行
     //  后 :12947 tag ModifyHit 城镇同跑——城镇臂 settle 收编 contactTown 同式全链
     //  （resolveWhipTagHit tag 乘区/TagCrit + 916 汇出 darkHarvestChain + kbDir/
-    //  minionKB/穿甲两源 + crit 摘半防后重倍 + townAcceptLadder StatusNPC/命中视效/
+    //  minionKB/穿甲两源 + crit 参防后单次 ×2（S02 形） + townAcceptLadder StatusNPC/命中视效/
     //  attackFlash）。暴露面=巫毒窄门（向导 267/裁缝 1307 装备态）放行拍,亲读
     //  :11970-11976/:12947 定谳非零——城镇 tag 面 1:1 补齐（敌怪臂已随 ai156Strike）。
     {
@@ -5245,7 +5263,7 @@ export class MinionProj extends Entity {
           //  无 946 表项=1,ProjectileID.cs:37 唯特例 864）
           const res = resolveWhipTagHit(tn as never as import('./WhipTag').WhipTagged, dmg0, game,
             (el) => add946(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy,
-            this.ownerRef());
+            this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05：词缀 tagdmg 透传
           pendingDirect946 = direct946;
           const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 946 非 sentry 恒假,形位对齐
           const owner0 = this.ownerRef() as unknown as
@@ -5258,9 +5276,9 @@ export class MinionProj extends Entity {
             : Math.sign(tn.cx - this.cx);   // 946 不在方向表族（:13652-13660）→ 随从→靶 sign
           const critTown = res.crit || rollCrit || timerCrit || monkCrit || golemCrit;
           return {
-            // TownHitSettle crit=防后 ×2（NPC.cs:82067 原序,dmg 勿预倍）——res.crit 的
-            // tag 掷率 ×2 已嵌 res.dmg → 摘半还原防后重倍（contactTown :7748-7753 同式）
-            dmg: res.crit ? res.dmg / 2 : res.dmg,
+            // TownHitSettle crit=防后 ×2（NPC.cs:82067 原序,dmg 勿预倍）——★S02:
+            // tag 掷率 ×2 已从 WhipTag 尾摘除,res.dmg 即防前值直传（旧「摘半还原」档退役）
+            dmg: res.dmg,
             crit: critTown,
             flatPen: pen0,
             kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477-52482,同敌怪臂）
@@ -5425,8 +5443,8 @@ export class MinionProj extends Entity {
    *    hurtFx→darkHarvestChain 延迟落地,W5 反序判例同形）
    *  · 暴击源并链：rollVanillaHitCrit（BJ492① 收编,755/946 无三类旗恒假零 RNG）‖
    *    TimerCrit :12928‖武僧 :12929-43‖golemCrit 6176 背包（rollGolemSentryCrit,
-   *    :12962-12965;755/946 非 sentry 恒假,形位对齐）——res.crit 的 ×2 已嵌
-   *    res.dmg,他源强制时补一次 ×2（BJ453 并链归位式）
+   *    :12962-12965;755/946 非 sentry 恒假,形位对齐）——★S02(BJ723-B):res.crit
+   *    ×2 已在 WhipTag 尾摘除,他源并入单布尔 crit 参,×2 统一在 hurt 防后
    *  · applyBannerDamageDealt（:13388-13390）/穿甲两源 pen0（玩家 AP+弹 AP
    *    :13686-87）/击退=裸 kb+minionKB（:52477-52482）方向=随从→敌 sign（755/946
    *    不在 MINION_PLAYER_ANCHOR_KB :13652-13660 switch 族）
@@ -5448,7 +5466,7 @@ export class MinionProj extends Entity {
     const monkCrit = monkAuraForcedCrit(this.ownerRef(), this.projId);
     const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged, dmg0, game,
       (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
-      this.ownerRef(), 0, this.projId);
+      this.ownerRef(), this.bonusTagDmg, this.projId);   // ★BJ723-C S05：词缀 tagdmg 透传
     const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);
     const owner0 = this.ownerRef();
     const o0 = owner0 as unknown as { equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;
@@ -5460,9 +5478,9 @@ export class MinionProj extends Entity {
     const mainGated = en.dead || (en as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
     const critHit = res.crit || rollCrit || timerCrit || monkCrit || golemCrit;
     // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970）——tag→golem→DV 原序;掷 res.dmg
-    //  （tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+    //  （tag 乘后基数;★S02 BJ723-B:res.crit ×2 已摘,DV 掷基数复位未翻倍值=登记债①清偿）
     const dmgV156 = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-    en.hurt?.(applyBannerDamageDealt(game, en, critHit && !res.crit ? dmgV156 * 2 : dmgV156),
+    en.hurt?.(applyBannerDamageDealt(game, en, dmgV156),
       kbDir * (this.knockback + mkb), 0, game, pen0, critHit, -3, true);
     if (!mainGated) {
       ghostHealProc(game, this.projId, this.pveNumHits,
@@ -5946,6 +5964,7 @@ export class MinionProj extends Entity {
               (ay - this.cy) / l * shooter.speed, dmg, this.knockback, shooter.shot,
               { grav: 0, life: shooter.life ?? 1200 });
             shot.whipTagShot = true;   // MinionShot 吃鞭 tag（ProjectileID.Sets.MinionShot）
+            shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
             if (shooter.shot === 614) {
               // 614 星尘细胞弹 = aiStyle 113 TargetSticker（蓝队 R7-19）：NewProjectile
               // 第 11 参传目标索引 num13（:67122-67128）——硬追踪/失的即杀/183 buff 门
@@ -7150,6 +7169,7 @@ export class MinionProj extends Entity {
     const shot = new Arrow(this.cx - hw, ay0 - hh, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
       dmg, this.knockback, shooter.shot, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
     shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
+    shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
     if (foxAi1 !== undefined) shot.foxAi1 = foxAi1;   // ★BJ525(c)：NewProjectile Ai1 形参直传（:62753 num159——1113 3/1 循环,余型缺省 0 不写）
     if (shooter.burn === 'fire') shot.onFireHit = { buff: 24, minT: 300, maxT: 599 };   // ★R1:Next(300,600)=[300,599]
     else if (shooter.burn === 'hellfire') shot.onFireHit = { buff: 323, minT: 300, maxT: 599 };
@@ -7626,18 +7646,19 @@ export class MinionProj extends Entity {
           const timerCritFist = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
           const monkCritFist = monkAuraForcedCrit(this.ownerRef(), this.projId);
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
-            this.ownerRef());
+            this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05：词缀 tagdmg 透传
           // ★BJ452 N2 crit 色位（res.crit=tag 掷率强制位 WhipTagEffect.cs:70-72——Enemy.hurt
           //  纯染色,数值预倍已在 res.dmg 内,零数值风险;contact() :4864 同式先例）
           //  ★BJ453 并链：crit 源 ‖ timerCritFist（:12928）‖ monkCritFist（:12929-12943）,
-          //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg——单一翻倍,原版序）
+          //  ★S02(BJ723-B):res.crit ×2 已摘（WhipTag 尾）——crit 参单布尔,×2 统一在
+          //  Enemy.hurt 防后（原版 StrikeNPC_Inner :82067 单次翻倍）
           const critFist = res.crit || timerCritFist || monkCritFist;
           // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
           const guardGated = en.dead
             || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
           // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→DV 原序
           const dmgVFist = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-          en.hurt(applyBannerDamageDealt(game, en, critFist && !res.crit ? dmgVFist * 2 : dmgVFist), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, critFist, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
+          en.hurt(applyBannerDamageDealt(game, en, dmgVFist), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, critFist, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,拳盒 623 同面;
           //  受理门=:12600/:12686 dontTakeDamage——拒收拍 num41=0 flag10 整段不可达）
           //  ★BJ455⑤ 门径统一（原版 :13712 `flag10 |= num41>0` 在 StrikeNPC :13702 后
@@ -7721,16 +7742,15 @@ export class MinionProj extends Entity {
               const direct: number[] = [];
               tn.hurtFx = (d: number) => { direct.push(d); };
               const res = resolveWhipTagHit(tn, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1,
-                tn.cx, tn.cy, this.ownerRef());
+                tn.cx, tn.cy, this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05：词缀 tagdmg 透传
               punchDirect = direct;
-              // ★BJ455① settle 归位（BJ445② 同构,contactTown :4996 同式）：res.dmg 已含
-              //  tag-crit 预倍 ×2（resolveWhipTagHit 尾 WhipTag.ts:848 `if (crit) dmg *= 2`）
-              //  → 仅 res.crit 摘半还原防前值,crit=res.crit 传参（TownNPC.hurt 防后×2+色
-              //  一体,NPC.cs:82066;623=minion 非 sentry/SentryShot → 6176 golem 掷不达
-              //  :12962 门,crit 单源）。旧形 dmg=res.dmg+crit 缺=暴击色省略+倍序偏离
-              //  （(值×2−防)≠(值−防)×2）。
+              // ★BJ455① settle 归位（BJ445② 同构,contactTown :4996 同式）。
+              //  ★S02（BJ723-B）：tag-crit 预倍已从 resolveWhipTagHit 尾摘除——res.dmg
+              //  即防前值【直传】,crit=res.crit 传参（TownNPC.hurt 防后×2+色一体,
+              //  NPC.cs:82067;623=minion 非 sentry/SentryShot → 6176 golem 掷不达
+              //  :12962 门,crit 单源）。旧「摘半还原」档随刀退役。
               return {
-                dmg: res.crit ? res.dmg / 2 : res.dmg,
+                dmg: res.dmg,
                 crit: res.crit,
                 kb: Math.sign(tn.cx - this.cx) * this.knockback,
                 // 敌怪环 punch 面 armorPen=0（:4145 第五参）→ 城镇同形
@@ -7986,7 +8006,7 @@ export class MinionProj extends Entity {
       const monkCritContact = monkAuraForcedCrit(this.ownerRef(), this.projId);
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
-        this.ownerRef());
+        this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05：词缀 tagdmg 透传（:12954 tag 项并入）
       // 圣殿骑士背包 6176（accGolemSentryBackpack :12963-12967）：sentry/SentryShot
       // 命中 10% 强制暴击（×2,与 TagCrit 暴击同通道）
       let golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 6176（:12962-12965 1:1,共享掷）
@@ -8018,18 +8038,19 @@ export class MinionProj extends Entity {
       //    吸血蛙 758/雪原精怪 951/阿比盖尔 963 等全族每次命中都开 10t 窗,仆从
       //    连续攻击=窗口近全覆盖 ⇒ 玩家其他武器被 hurt 免疫门整段拒收=BJ436
       //    用户实报「仆从攻击时其他武器无法造成伤害」第一因。
-      // ★BJ445② crit 色补齐（StrikeNPC :13702 第 4 参传 crit——染暴击色;防后 ×2 已由
-      //  调用侧预倍承载,Enemy.hurt crit 参仅染色 :14583 登记偏差）。crit 源 = res.crit
+      // ★BJ445② crit 色补齐（StrikeNPC :13702 第 4 参传 crit——染暴击色）。crit 源 = res.crit
       //  （tag 掷率强制位,WhipTagEffect.cs:70-72）‖ golemCrit（6176 背包 :12962-12965）
       //  ——旧恒 false=暴击色省略（Y2 报告②）。Arrow.ts:9490 whipTagShot 支同式先例。
-      //  ★BJ453 并链：‖ timerCritContact（:12928）‖ monkCritContact（:12929-12943）——
-      //  原版 crit=单布尔单翻倍,新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg,
-      //  不重倍;旧 res.crit∧golemCrit 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）。
+      //  ★BJ453 并链：‖ timerCritContact（:12928）‖ monkCritContact（:12929-12943）。
+      //  ★S02（BJ723-B 2026-10-26）：crit=单布尔单翻倍——×2 统一在 Enemy.hurt 防后
+      //  （原版 StrikeNPC_Inner :82067 单次翻倍）;res.crit ×2 已在 WhipTag 尾摘除,调用
+      //  侧传未翻倍 dmgV（旧「预倍承载/新源补 ×2」形随刀退役;:14583 偏差销账）。
       const critContact = res.crit || timerCritContact || monkCritContact || golemCrit;
       // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→golem→DV 原序;
-      //  掷 res.dmg（tag 乘后基数;res.crit ×2 已嵌=边界舍入微差,登记债①）
+      //  掷 res.dmg（tag 乘后基数;★S02 BJ723-B:res.crit ×2 已摘（WhipTag 尾）,DV
+      //  掷基数复位未翻倍值=BJ716-A 登记债①清偿;crit ×2 统一在 Enemy.hurt 防后）
       const dmgVContact = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-      en.hurt(applyBannerDamageDealt(game, en, critContact && !res.crit ? dmgVContact * 2 : dmgVContact),
+      en.hurt(applyBannerDamageDealt(game, en, dmgVContact),
         kbDir * (this.knockback + mkb), 0, game, pen0, critContact,
         spec === CONTACT_PLAYER_WINDOW ? 0 : -3, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       // ★BJ436 GC1 写方桥接线（近战域 immune 表 npcImmuneByAttacker 同步,原版
@@ -8087,8 +8108,8 @@ export class MinionProj extends Entity {
    *  onAccept 受理拍,:14179 写梯同位）→ AABB（pad 外扩盒同 critter 环形）。
    *  settle = 逐靶结算（tag 乘区/crit/kb 逐靶依赖 tag 态与靶位;banner 在
    *  hitTownNpcs 通道内统一施加,勿在此预套;crit 语义=TownNPC.hurt 防后双精度
-   *  ×2,与敌怪环「调用侧预倍」不同形——★BJ445②：res.crit 摘半+golemCrit 并入
-   *  crit 参防后重倍,暴击色/倍序双归位）。onAccept = 受理拍写梯:usesLocal 主支
+   *  ×2——★S02(BJ723-B):与敌怪环同形（res.dmg 未翻倍直传+crit 参防后单次 ×2,
+   *  旧「敌怪环调用侧预倍/城镇摘半」双形收编为单形））。onAccept = 受理拍写梯:usesLocal 主支
    *  （:14175-14179 私表/idStatic 族=immune[owner]=0 清全局窗不开窗,鞭 W1 同式;
    *  -2 缺省族=TownNPC.hurt 通用档 iframes=10 即 :14182 档,不动）+StatusNPC
    *  （:13634）/SpawnHitVisuals（:13633）/attackFlash。 */
@@ -8158,7 +8179,7 @@ export class MinionProj extends Entity {
         const timerCritTown = tryConsumeTimerCritOf(owner0, game, tn.x, tn.y, tn.w, tn.h);
         const monkCritTown = monkAuraForcedCrit(owner0, this.projId);
         const res = resolveWhipTagHit(tn, dmg, game, (el) => add(el, 'projectiles'),
-          SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, owner0);   // face 5 消费真通道：tag 乘区 + OnHit proc 消费
+          SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, owner0, this.bonusTagDmg);   // face 5 消费真通道：tag 乘区 + OnHit proc 消费;★BJ723-C S05 tagdmg
         pendingDirect = direct;
         const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 6176（:12962-12965）
         const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
@@ -8166,15 +8187,12 @@ export class MinionProj extends Entity {
           : Math.sign(tn.cx - this.cx);   // 方向表族同敌怪环 :4386-4392
         // ★BJ445② crit 色补齐 + 倍序归位：TownHitSettle.crit 语义=TownNPC.hurt 防后
         //  ×2（NPC.cs:82066 原序;hitTownNpcs 约定「传 crit=true 时 dmg 勿预倍」）。
-        //  res.dmg 已含 tag 掷率暴击 ×2（resolveWhipTagHit 尾 :834,Enemy 环预倍习语）
-        //  → 城镇站摘半还原防前值再交 crit 参防后重倍（偶整数,整除精确）。旧形
-        //  golemCrit 防前预倍 + crit 参恒缺 = 暴击色省略 + 倍序偏离（(值×2−防)≠(值−防)×2,
-        //  Y2 报告②）。爆弹臂 :5996 同形先例（raw+crit 参）。
-        //  ★BJ453 并链：‖ timerCritTown（:12928）‖ monkCritTown（:12929-12943）——
-        //  crit 参单布尔承载防后单次 ×2,dmg 摘半面只系 res.crit 不动（新源不落 dmg）。
+        //  ★S02（BJ723-B）：tag 掷率暴击 ×2 已从 resolveWhipTagHit 尾摘除——res.dmg
+        //  即防前值直传,crit 参单布尔承载 TownNPC.hurt 防后单次 ×2（爆弹臂 :5996
+        //  同形先例 raw+crit 参）。旧「摘半还原防前值」档退役（WhipTag 尾不再预倍）。
         const critTown = res.crit || timerCritTown || monkCritTown || golemCrit;
         const settle: TownHitSettle = {
-          dmg: res.crit ? res.dmg / 2 : res.dmg,   // 摘 tag-crit ×2 → 防后重倍（vanilla 序）
+          dmg: res.dmg,   // ★S02:tag-crit ×2 已在 WhipTag 尾摘除——res.dmg 即防前值,勿再摘半
           crit: critTown,
           flatPen: pen0,
           kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477,同敌怪环）
@@ -8233,13 +8251,13 @@ export class MinionProj extends Entity {
         const res = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
           dmg, game,
           (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-          SUMMON_TAG_MUL[644] ?? 1, en.cx, en.cy, this.ownerRef(), 0, 644);
+          SUMMON_TAG_MUL[644] ?? 1, en.cx, en.cy, this.ownerRef(), this.bonusTagDmg, 644);   // ★BJ723-C S05 tagdmg
         const gated = en.dead || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
         const golemCrit = rollGolemSentryCrit(game, 644, false);   // 6176 SentryShot 10%
         const crit = res.crit || timerCrit || monkCrit || golemCrit;
         // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——tag→golem→DV 原序
         const dmgV644 = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-        en.hurt(applyBannerDamageDealt(game, en, crit && !res.crit ? dmgV644 * 2 : dmgV644),
+        en.hurt(applyBannerDamageDealt(game, en, dmgV644),
           Math.sign(en.cx - bx) * this.knockback, -2, game, 0, crit, 1, true);
         // ★C16a-F3① 命中尾 IDStatic 写梯（:14030-14036）：usesIDStatic ∧ penetrate≠1
         //  （引爆拍 =−1）→ immune[owner]=0 清窗（不走 :14182 缺省 10t 写）——敌侧
@@ -8299,11 +8317,11 @@ export class MinionProj extends Entity {
         const monkCritT = monkAuraForcedCrit(this.ownerRef(), 644);
         const res = resolveWhipTagHit(tn, dmg, game,
           (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-          SUMMON_TAG_MUL[644] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, 644);
+          SUMMON_TAG_MUL[644] ?? 1, tn.cx, tn.cy, this.ownerRef(), this.bonusTagDmg, 644);   // ★BJ723-C S05 tagdmg
         pendingDirect = direct;                             // ★BJ662 补缺：汇出发布（settle 位=ModifyHit+OnHit 消费后）
         const golemCritT = rollGolemSentryCrit(game, 644, false);
         return {
-          dmg: res.crit ? res.dmg / 2 : res.dmg,
+          dmg: res.dmg,
           crit: res.crit || timerCritT || monkCritT || golemCritT,
           kb: Math.sign(tn.cx - bx) * this.knockback,
         };
@@ -8330,6 +8348,7 @@ export class MinionProj extends Entity {
     const m = new MinionProj(this.cx, this.cy, projId, damage, this.knockback,
       false, 0, false, () => owner);
     m.noSlot = true;
+    m.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 本体重生弹继承
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(m, 'projectiles');
     return m;
   }
@@ -9165,7 +9184,7 @@ export class MinionProj extends Entity {
             //   抛物线系误植，改显式 grav 0
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               Object.assign(new Arrow(s.x - 8, s.y - 8, vx, vy, dmgOf(), this.knockback, tier.shot, { grav: 0 }),
-                { whipTagShot: true }),
+                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
               'projectiles');
           }
           if (++this.sFireT >= tier.cycle) { this.sFire = 0; this.sCool = tier.cool; } // cycle=num6*num7=24/32/32、cd num8=80/70/60（:69228/:69281 分层）
@@ -9265,7 +9284,7 @@ export class MinionProj extends Entity {
               //   = 侍从 T2 套装「弩车可穿透」——发射点覆写审计批（2026-09-03）补
               Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680,
                 setf134.squireT2 ? { pierce: 7 } : undefined),
-                { whipTagShot: true }),
+                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
               'projectiles');
           }
           if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = ballistraShotDelayOf(game.player); } // num5*num6=25（:69686）
@@ -9384,7 +9403,7 @@ export class MinionProj extends Entity {
             const penPctAura = lightningAuraPenPercent(vAura.vanillaId, vAura.def?.defense);
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-              SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
+              SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05 tagdmg
             // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计。
             // ★6176 圣殿骑士背包（:12962-12965,2026-09-03 收口）：光环场伤=塔本体
             //   （sentry）直伤面 → 10% 强制暴击（此前仅接触面掷,场伤面漏掷）
@@ -9392,7 +9411,7 @@ export class MinionProj extends Entity {
             // ★BJ452 N2 crit 色位（res.crit‖golemCritAura——Enemy.hurt 纯染色;
             //  旧恒 golemCritAura=仅 tag crit 时色缺,contact() :4864 同式先例）
             //  ★BJ453 并链：‖ timerCritAura ‖ monkCritAura——原版 crit=单布尔单翻倍,
-            //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg 不重倍;旧 res.crit∧
+            //  ★S02(BJ723-B):res.crit ×2 已摘（WhipTag 尾）,单布尔 crit 参承载防后 ×2;旧 res.crit∧
             //  golemCrit 同拍 ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）。
             const critAura = res.crit || timerCritAura || monkCritAura || golemCritAura;
             // ★BJ455⑤ 受理前置快照（contact() :4852 mainGated 同式）——ghostHeal 门判据
@@ -9400,7 +9419,7 @@ export class MinionProj extends Entity {
               || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;
             // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——光环场伤面
             const dmgVAura = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-            en.hurt(applyBannerDamageDealt(game, en, critAura && !res.crit ? dmgVAura * 2 : dmgVAura),
+            en.hurt(applyBannerDamageDealt(game, en, dmgVAura),
               0, 0, game, 0, critAura, 1, true, penPctAura);
             // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段,光环场伤载体=
             //  塔本体 688/689/690 的 Damage()——numHits 累计在塔身 pveNumHits 上）
@@ -9464,22 +9483,18 @@ export class MinionProj extends Entity {
                 const monkCritAuraT = monkAuraForcedCrit(this.ownerRef(), this.projId);
                 const res = resolveWhipTagHit(tn, dmgOf(), game,
                   (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-                  SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, this.ownerRef());
+                  SUMMON_TAG_MUL[this.projId] ?? 1, tn.cx, tn.cy, this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05 tagdmg
                 auraDirect = direct;
                 const golemCritAura = rollGolemSentryCrit(game, this.projId, true);   // 6176（:12962-12965）
                 zapped = true;
-                // ★BJ452 N1 倍序归位（×4→×2）+ 色位：res.dmg 已含 tag-crit 预倍 ×2
-                //  （resolveWhipTagHit 尾 WhipTag.ts:848 `if (crit) dmg *= 2`）——旧形
-                //  dmg=res.dmg + crit=golemCritAura,golem 掷中∧tag crit 同拍时 TownNPC.hurt
-                //  防后再倍 = ×4;仅 tag crit 时 crit 参缺=色缺。BJ445② 同构（contactTown
-                //  :4996-4999）：crit=res.crit‖golemCritAura 传参（TownNPC.hurt 防后×2+色
-                //  一体,NPC.cs:82066）;dmg 仅在 res.crit 时摘半还原防前值——golem 预倍本
-                //  就不经 dmg 承载,勿随 golemCritAura 摘（摘之则 golem-only 档腰斩）。
-                //  ★BJ453 并链：‖ timerCritAuraT ‖ monkCritAuraT——crit 参单布尔承载
-                //  防后单次 ×2,dmg 摘半面只系 res.crit 不动（新源不落 dmg）。
+                // ★BJ452 N1 倍序归位（×4→×2）+ 色位。★S02（BJ723-B）：tag-crit 预倍
+                //  已从 resolveWhipTagHit 尾摘除——res.dmg 即防前值【直传】,crit=res.crit‖
+                //  golemCritAura‖timerCritAuraT‖monkCritAuraT 单布尔传参（TownNPC.hurt
+                //  防后×2+色一体,NPC.cs:82067）。旧「仅 res.crit 摘半还原」档随刀退役
+                //  （WhipTag 尾已无预倍,摘半反成腰斩）。
                 const critAuraTown = res.crit || timerCritAuraT || monkCritAuraT || golemCritAura;
                 return {
-                  dmg: res.crit ? res.dmg / 2 : res.dmg,
+                  dmg: res.dmg,
                   crit: critAuraTown,
                   penPercent: lightningAuraPenPercent(tn.vanillaId, 15),
                   kb: 0,                    // 光环场伤零击退（同敌怪环 :5355 kx=ky=0）
@@ -9623,19 +9638,19 @@ export class MinionProj extends Entity {
                 const resBoom = resolveWhipTagHit(en as never as import('./WhipTag').WhipTagged,
                   dmgOf(), game,
                   (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-                  SUMMON_TAG_MUL[boomProj] ?? 1, en.cx, en.cy, this.ownerRef(), 0, boomProj);
+                  SUMMON_TAG_MUL[boomProj] ?? 1, en.cx, en.cy, this.ownerRef(), this.bonusTagDmg, boomProj);   // ★BJ723-C S05 tagdmg
                 const boomGated = en.dead
                   || (en as { dontTakeDamage?: boolean }).dontTakeDamage === true;   // 受理预判（contact :4849 同式）
                 // 单发弹语义;fromPlayer=DPS 计。★6176（:12962-12965,2026-09-03 收口）：
                 //   原版伤害面=爆炸弹 694/695/696 本体（SentryShot）→ 10% 强制暴击
                 const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);
                 // ★BJ453 并链：crit 源 ‖ timerCritBoom（:12928）‖ monkCritBoom（:12929-12943）,
-                //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg;res.crit∧golem 同拍
+                //  ★S02(BJ723-B):res.crit ×2 已摘（WhipTag 尾）,单布尔 crit 参承载防后 ×2;旧 res.crit∧golem 同拍
                 //  ×4 并发归位 ×2=BJ452 N1a 城镇臂同判）
                 const critBoom = resBoom.crit || timerCritBoom || monkCritBoom || golemCritBoom;
                 // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——爆弹 694-696 面
                 const dmgVBoom = damageVarRoll(resBoom.dmg, this.ownerRef()?.luck ?? 0);
-                en.hurt(applyBannerDamageDealt(game, en, critBoom && !resBoom.crit ? dmgVBoom * 2 : dmgVBoom),
+                en.hurt(applyBannerDamageDealt(game, en, dmgVBoom),
                   Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, critBoom, 1, true);   // ★N2 同式 crit 色位（res.crit‖golem）
                 // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——伤害载体=
                 //  爆炸弹 694/695/696（AI_138 :66063-66073 生成的瞬态弹）→ projId 传
@@ -9714,7 +9729,7 @@ export class MinionProj extends Entity {
                 const monkCritBoomT = monkAuraForcedCrit(this.ownerRef(), boomProj);
                 const res = resolveWhipTagHit(tn, dmgOf(), game,
                   (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-                  SUMMON_TAG_MUL[boomProj] ?? 1, tn.cx, tn.cy, this.ownerRef(), 0, boomProj);
+                  SUMMON_TAG_MUL[boomProj] ?? 1, tn.cx, tn.cy, this.ownerRef(), this.bonusTagDmg, boomProj);   // ★BJ723-C S05 tagdmg
                 boomTownDirect = direct;
                 const golemCritBoom = rollGolemSentryCrit(game, boomProj, false);   // 6176（:12962-12965,爆炸弹面）
                 // ★BJ452 N3② BJ445② 同构 settle（crit 参=防后×2+色一体;dmg 仅 res.crit
@@ -9722,7 +9737,7 @@ export class MinionProj extends Entity {
                 //  ★BJ453 并链：crit 源 ‖ timerCritBoomT（:12928）‖ monkCritBoomT
                 //  （:12929-12943）——crit 参单布尔防后单次 ×2,dmg 面不动。
                 return {
-                  dmg: res.crit ? res.dmg / 2 : res.dmg,
+                  dmg: res.dmg,
                   crit: res.crit || timerCritBoomT || monkCritBoomT || golemCritBoom,
                   kb: Math.sign(tn.cx - this.cx) * this.knockback,
                 };
@@ -9845,7 +9860,7 @@ export class MinionProj extends Entity {
           const s53life = sp53?.timeLeft ?? 1200;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - s53hw, my - s53hh, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
-              dmgOf(), this.knockback, s53.shot, { grav: 0, life: s53life }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
+              dmgOf(), this.knockback, s53.shot, { grav: 0, life: s53life }), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）;★BJ723-C S05 :11140 继承
             'projectiles');
         }
         if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
@@ -10006,7 +10021,7 @@ export class MinionProj extends Entity {
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - hw26, my - hh26, ((tgt.cx - mx) / d) * 12, ((tgt.cy - my) / d) * 12,
               dmgOf(), this.knockback, 1026, { grav: 0, life: life26, extraUpdates: 2 }),
-              { whipTagShot: true }),                         // SENTRY_SHOT_SET 吃鞭 tag
+              { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // SENTRY_SHOT_SET 吃鞭 tag;★BJ723-C S05 :11140 继承
             'projectiles');
         }
         return;
@@ -10087,7 +10102,7 @@ export class MinionProj extends Entity {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId), { whipTagShot: true }),
+            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
             'projectiles');
         }
       }
@@ -10308,6 +10323,7 @@ export class MinionProj extends Entity {
           Math.max(1, Math.round(dmg0)), this.knockback, 1120,
           { grav: 0, life: 300, pierce: 2, gem: { fastThenSlow: true } });
         shot.whipTagShot = true;   // MinionShot（ProjectileID.Sets.MinionShot[1120] :291）
+        shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
         this.vx = -dx / d * 0.3 * 32;   // :38276 velocity = −vector5×0.3（vector5=32 速向）
         this.vy = -dy / d * 0.3 * 32;
@@ -12082,6 +12098,9 @@ export function buildEmpressTrailPts(tHist: readonly number[], huePhase: number)
 export class TigerPounce extends Entity {
   w = 132; h = 132;
   dead = false;
+  /** ★BJ723-C S05：词缀 tagdmg（:11140 EntitySource_Parent 从沙漠虎随从继承;
+   *  818 ∈ MinionShot ⇒ 命中走 resolveWhipTagHit 吃 tag 面） */
+  bonusTagDmg = 0;
   rot = 0;
   private damage: number;
   private ivx: number;
@@ -12211,7 +12230,7 @@ export class TigerPounce extends Entity {
       const timerCritPounce = tryConsumeTimerCritOf(this.ownerRef(), game, en.x, en.y, en.w, en.h);
       const monkCritPounce = monkAuraForcedCrit(this.ownerRef(), 818);
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
-        add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
+        add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05 tagdmg
       // ★F10（2026-08-31 蓝队三批）：扑击弹 818 生成侧 knockBack=0（:46470
       //  NewProjectile 尾参 0f）→ 原版 StrikeNPC 的 `knockBack>0f && knockBackResist>0f`
       //  双门（NPC.cs:82144）整段不进——击退/冲量归零。旧 (0,-1) 冲量是自造位移，
@@ -12227,11 +12246,12 @@ export class TigerPounce extends Entity {
       //  :8007-8019,AI_162 :44056-44123 无直伤旁路 → Damage_PVE :13387-91 banner 段
       //  对其照跑;他臂 contact()/光环/爆弹/拳盒均包,本臂漏包=旗下伤 ×1.5 整缺）。
       // ★BJ453 并链：crit 源 ‖ timerCritPounce（:12928）‖ monkCritPounce（:12929-12943）,
-      //  新源强制时补一次 ×2（res.crit 的 ×2 已嵌 res.dmg——单一翻倍,原版序）
+      //  ★S02(BJ723-B):res.crit ×2 已摘（WhipTag 尾）——crit 参单布尔,×2 统一在
+          //  Enemy.hurt 防后（原版 StrikeNPC_Inner :82067 单次翻倍）
       const critPounce = res.crit || timerCritPounce || monkCritPounce;
       // ★BJ716-A（R18-F2）：DamageVar 首掷（:12970,owner luck）——扑击弹 818 面
       const dmgVPounce = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
-      en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? dmgVPounce * 2 : dmgVPounce), 0, 0, game, 0, critPounce, -3, true); // ★BJ452 N2 crit 色位（tag 掷率强制位,Enemy.hurt 纯染色）;kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
+      en.hurt(applyBannerDamageDealt(game, en, dmgVPounce), 0, 0, game, 0, critPounce, -3, true); // ★BJ452 N2 crit 色位+★S02(BJ723-B) 防后 ×2（tag 掷率强制位）;kb=0 ⇒ 原版双门不进;fromPlayer=DPS 计
       // ★Z1/D1② ghostHeal 白耗/治疗面（:13877-84 通用 on-hit 段）——818 为逐段瞬态弹
       //  （TigerSpecialAttack 每 hop NewProjectile）→ numHits=0 每轮独立
       if (!pounceGated) {
@@ -12280,15 +12300,15 @@ export class TigerPounce extends Entity {
           const direct: number[] = [];
           tn.hurtFx = (d: number) => { direct.push(d); };
           const res = resolveWhipTagHit(tn, Math.max(1, Math.round(this.damage * mul)), game,
-            add, SUMMON_TAG_MUL[818] ?? 1, tn.cx, tn.cy, this.ownerRef());
+            add, SUMMON_TAG_MUL[818] ?? 1, tn.cx, tn.cy, this.ownerRef(), this.bonusTagDmg);   // ★BJ723-C S05 tagdmg
           pounceDirect = direct;
-          // ★BJ455② settle 归位（BJ445② 同构,contactTown :4996 同式）：res.dmg 已含
-          //  tag-crit 预倍 ×2（WhipTag.ts:848）→ 仅 res.crit 摘半还原防前值,crit=res.crit
-          //  传参（TownNPC.hurt 防后×2+色一体 NPC.cs:82066;818=MinionShot 非
-          //  SentryShot → 6176 golem 掷不达 :12962 门,crit 单源）。旧形 crit 缺=色缺
-          //  +倍序偏离。kb=0 ⇒ StrikeNPC 双门不进（:82144,同敌怪环 F10）。
+          // ★BJ455② settle 归位（BJ445② 同构,contactTown :4996 同式）。
+          //  ★S02（BJ723-B）：tag-crit 预倍已从 WhipTag 尾摘除——res.dmg 即防前值直传,
+          //  crit=res.crit 传参（TownNPC.hurt 防后×2+色一体 NPC.cs:82067;818=MinionShot
+          //  非 SentryShot → 6176 golem 掷不达 :12962 门,crit 单源）。
+          //  kb=0 ⇒ StrikeNPC 双门不进（:82144,同敌怪环 F10）。
           return {
-            dmg: res.crit ? res.dmg / 2 : res.dmg,
+            dmg: res.dmg,
             crit: res.crit,
             kb: 0,
           };

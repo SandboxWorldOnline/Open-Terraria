@@ -70,14 +70,20 @@ interface FsDirectoryHandleLike {
   /** 删除目录内条目（文件无需 recursive;NotFoundError=条目已不在） */
   removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
-/** 文件句柄最小形状（createWritable=临时文件+close 原子提交;text()=全文读取） */
+/** 文件句柄最小形状（createWritable=临时文件+close 原子提交;getFile()→File=全文读取）。
+ *  ★Issue#25 改判史（2026-10-27）：旧声明 `text(): Promise<string>` 系对标准
+ *  FileSystemFileHandle 的错读——句柄上没有 text()（MDN：getFile()/createWritable()/
+ *  createSyncAccessHandle() 三成员）,text() 在 getFile() 返回的 File（Blob）上。错声明
+ *  让 TS 检查失效+测试夹具照抄幻想接口=测试恒绿而真机 restore 必抛
+ *  TypeError: fh.text is not a function → catch 转 broken,备份永不可恢复。 */
 interface FsFileHandleLike {
   createWritable?(options?: { keepExistingData?: boolean }): Promise<{
     write(data: BlobPart): Promise<void>;
     close(): Promise<void>;
     abort?(reason?: unknown): Promise<void>;
   }>;
-  text(): Promise<string>;
+  /** 标准 API：句柄→File 对象（File 继承 Blob,text() 可用） */
+  getFile(): Promise<{ text(): Promise<string> }>;
 }
 type FsPicker = (options?: FsDirectoryPickerOptions) => Promise<FsDirectoryHandleLike>;
 
@@ -469,7 +475,8 @@ export async function restoreFromBackup(idbKey: string): Promise<FsBackupRestore
     }
     if (!filename) return { ok: false, reason: 'no-backup' };
     const fh = await dir.getFileHandle(filename, { create: false });
-    const text = await fh.text();
+    // ★Issue#25：句柄无 text()——先 getFile() 取 File（Blob）再读全文
+    const text = await (await fh.getFile()).text();
     if (typeof text !== 'string' || text.length === 0) return { ok: false, reason: 'no-backup' };
     const where = await kvSet(idbKey, text);   // 写回 IDB=自愈迁移,下次读直命中原键（存档链同款写入通道,只判 'fail'）
     if (where === 'fail') return { ok: false, reason: 'broken' };

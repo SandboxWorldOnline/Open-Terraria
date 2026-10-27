@@ -266,12 +266,17 @@ export class ChainsawProj extends Entity {
         { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
         | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
       const crit = rollCrit || timerCrit;
-      // ★DamageVar ±15%+luck 重掷（r33-④；Damage_PVE :14719 num=Main.DamageVar(damage,
-      // luck)）→ StrikeNPC 内 crit ×2（:82118 区段）——方差在基伤上掷、暴击翻倍在后,
-      // 与挥击侧 Game.ts 同序
+      // ★W02（BJ723-B 2026-10-26 幸运符号勘误）：玩家弹幕→NPC 面 luck 取【正】——
+      // 原版 Damage_PVE_Inner :12970 `Main.DamageVar(num15, Main.player[owner].luck)`
+      // （luck>0 重掷取大）。旧 `-(luck)` 系从敌弹打玩家族（Projectile.cs:14904
+      // `0f - Main.player[owner].luck`/自伤 :15118 `0f - localPlayer.luck`——受端
+      // 负幸运域）错族移植,链锯/钻头为玩家工具弹全走攻端 :12970 正向。幸运+1 旧
+      // 掷低带（100→85）勘正为高带（→115）。PvP/自伤入口定谳：本类无 hitPlayer/
+      // damagePlayer 面（drill/chainsaw=玩家专属工具弹,原版无受端路径）,零改动面。
+      // ★S02：crit ×2 移 Enemy.hurt 防后（NPC.cs:82067）——DV 掷基伤、翻倍在后,
+      // 与挥击侧 Game.ts 同序。
       const owner = game as unknown as { player?: { luck?: number } };
-      const raw = damageVar(this.damage, -(owner.player?.luck ?? 0));
-      const dmg = crit ? raw * 2 : raw;
+      const dmg = damageVar(this.damage, owner.player?.luck ?? 0);
       // ★F3 接线（蓝队四轮）：链锯/钻头持械弹（509 屠夫链锯/252 叶绿插孔锤，
       // 数据面 melee）→ 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤随暴击并入
       const snapBonusSaw = projectileSnapStrikeBonus(game,
@@ -279,8 +284,8 @@ export class ChainsawProj extends Entity {
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusSaw ? Math.trunc(snapBonusSaw * (crit ? 2 : 1)) : 0),
-        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+        + (snapBonusSaw ? snapBonusSaw : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;★S02 crit ×2=Enemy.hurt 防后;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
     // ---- ★通用湿段（:16903-17113,共享体;溅花尘/音=wetSplashStepShared 弹面 10 粒）----

@@ -499,6 +499,15 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       : Math.random() < (autoCritPct ?? 0));
     const timerCritF11 = ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
     const crit = rollCrit || timerCritF11;
+    // ★W01（BJ723-B 2026-10-26）：DamageVar 首掷（Damage_PVE_Inner :12970,逐靶掷
+    //  ——Inner 为逐 victim 结算;owner luck 正向=Projectile.cs:12970
+    //  `Main.DamageVar(num15, Main.player[owner].luck)`）。原版序=crit 掷(:12915-27)
+    //  →TimerCrit(:12928)→DV(:12970)→型号段(:13088+)/banner(:13388)——回旋镖/长矛/
+    //  链锤/悠悠球四消费族(1221/2015/3134/3724)此前恒平值(±15% 档整缺,与 BJ716-A
+    //  已修的 Arrow 主环同病)。桩面 player 无 luck=??0 零掷差;RNG 位次=掷后即 DV
+    //  =原版同序(型号段/banner/snap 全零掷)。
+    const dmgVarW01 = damageVarRoll(self.damage,
+      ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
     // ★α-H3③④（A3 弹幕侧消费面）：parryDamageBuff ×5 与 Nano ×1.05——原位
     // Projectile.cs:13631-36（门 melee && !DontApplyParryDamageBuff[type]，apply 在
     // DamageVar 之后、StrikeNPC 前逐敌生效）/:13688-96（门 melee||IsAWhip——nano 乘
@@ -520,7 +529,10 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   （例 base×mul=13、scale=0.6：新 trunc(trunc(13.65)×0.6)=trunc(13×0.6)=7,
     //   旧 trunc(13×0.63)=8）。crit×2 = 精确整数倍乘不涉截断位;dmgScale 未传时
     //   与旧式逐位同值（零漂移）。
-    const dmgBase = Math.trunc((crit ? self.damage * 2 : self.damage) * mul);
+    //   ★S02（BJ723-B 2026-10-26）：crit ×2 摘除——原版单布尔单翻倍在
+    //   StrikeNPC_Inner 防后（NPC.cs:82067,Enemy.hurt 承载）,调用侧传未翻倍
+    //   DV 值（dmgVarW01）+crit 参。
+    const dmgBase = Math.trunc(dmgVarW01 * mul);
     // ★刀4-A(2026-10-13):玩家弹幕命中 NPC 伤害修正链(ModifyHitNPCWithProj 形;倍率连乘;
     //  位=dmgScale 段后/banner(内联于 hurt 首参)前=弹侧 ModifyHit 统一位;空 mod=恒等)。
     //  ★红队复查修正:按 !vanillaGated 受理位求值(对齐 onHit 族 BJ393 判据——门拒靶
@@ -583,7 +595,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   ②③原版均=受理（StrikeNPC :13702 照跑,proc/penetrate--/numHits++ :13875-13880/
     //   :14189-14196/:14263 无死亡·active 复查,flag10 锚 num41>0=伤害已实扣）。
     //   故受理面谓词 = !vanillaGated（非门拒即受理）;hurt 返值不再消费（回调判据唯一化）。
-    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放）——hurt 内原版管线;音/飘值=单点
+    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? snapBonusHitEnemies : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放;★S02 crit ×2=Enemy.hurt 防后,snap 加伤随整体吃防后 ×2）——hurt 内原版管线;音/飘值=单点
     // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
     // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
@@ -4255,7 +4267,7 @@ export class YoyoShotProj extends Entity {
         { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
         | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
       const crit = rollCrit || timerCrit;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;   // ★S02:crit ×2 移 Enemy.hurt 防后（NPC.cs:82067）
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
       // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序,
       // F3/F1 收编升级）——悠悠球伴生弹（1125 Cascade 爆裂/1130 EoC 冲撞/1134 晶簇/
@@ -4264,8 +4276,8 @@ export class YoyoShotProj extends Entity {
       const snapBonusYoyoSib = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusYoyoSib ? Math.trunc(snapBonusYoyoSib * (crit ? 2 : 1)) : 0),
-        kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+        + (snapBonusYoyoSib ? snapBonusYoyoSib : 0),
+        kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;★S02 crit ×2=Enemy.hurt 防后;fromPlayer=DPS 计
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 蓝队二轮 F1/F5 裁决：四型 face 不再依赖调用点硬编码——
       //   1125/1130 usesLocalNPCImmunity(cd=-1) → 写 0 清全局窗（:10541/:10610）；
@@ -6333,14 +6345,19 @@ export class GrenadeProj extends Entity {
           // 折入,命中拍动态）——手雷族 30/397/517/588/681 ranged 旗;28/29/37 等炸弹族
           // SetDefaults 无类旗（:1108-1131）=原版零掷;critTotal 出生拍冻结载体退役
           const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-          // ★F3 接线（蓝队四轮）：接触伤害走标准 Damage_PVE 全管线 → 焰爆石/拍击石
-          // 双支（Projectile.cs:13439-13446）随接触生效；手雷族数据面 ranged。
-          // 加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）。
+          // ★R02（BJ723-B 2026-10-26）：接触伤害补全标准 Damage_PVE 管线三件——
+          //  ①DamageVar（:12970 逐靶掷,owner luck 正向;掷位=crit 掷后、snap 触发前
+          //  =原版 :12970<:13439 同序）②攻端旗乘区（:13388 GetBannerBuffEffect→
+          //  effect.DamageDealt.Sample,手雷族 30/397/517/588/681 ranged 旗照吃）
+          //  ③crit ×2 由 Enemy.hurt 防后承载（S02）——旧=掷暴击但传原始 damage
+          //  （零翻倍+零浮动+零旗）。snap 加伤不进旗乘区（F1 迁移注 stats/SnapStrike）。
+          const dmgVGrenade = damageVarRoll(this.damage,
+            ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
           const snapBonusGrenade = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2,
             (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
-          e.hurt?.(this.damage
-            + (snapBonusGrenade ? Math.trunc(snapBonusGrenade * (crit ? 2 : 1)) : 0),
+          e.hurt?.(applyBannerDamageDealt(game, e, dmgVGrenade)
+            + (snapBonusGrenade ? snapBonusGrenade : 0),
             dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
           this.fuse = 3;
           break;
@@ -6783,13 +6800,16 @@ export class GrenadeProj extends Entity {
           const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
           // ★BJ489 def-3：投掷支接触环掷率同发射支——rollVanillaHitCrit 命中拍动态
           const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-          // ★F3 接线（蓝队四轮）：投掷支接触环 = 第二处引爆面（发射支 3906 同款）——
-          // 焰爆石/拍击石双支随标准 Damage_PVE 生效,加伤随暴击并入实伤参
+          // ★R02（BJ723-B）：投掷支接触环同发射支接全管线（DV+旗+crit 防后 ×2）——
+          // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随标准 Damage_PVE 生效,
+          // snap 加伤不进旗乘区
+          const dmgVGrenadeThrow = damageVarRoll(this.damage,
+            ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
           const snapBonusGrenadeThrow = projectileSnapStrikeBonus(game, this,
             e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
-          e.hurt?.(this.damage
-            + (snapBonusGrenadeThrow ? Math.trunc(snapBonusGrenadeThrow * (crit ? 2 : 1)) : 0),
+          e.hurt?.(applyBannerDamageDealt(game, e, dmgVGrenadeThrow)
+            + (snapBonusGrenadeThrow ? snapBonusGrenadeThrow : 0),
             dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
           this.fuse = Math.min(this.fuse, 3);
           break;
@@ -8108,7 +8128,7 @@ export class DaybreakFlare extends Entity {
         plFlare.parryDamageBuffT = 0;                          // ClearBuff(198)
       }
       if (plFlare.buffs?.has(BuffType.ImbueNano)) mulFlare *= 1.05;  // :44790-44792（buffs 缺省=测试 mock 兼容,与 hitEnemies 同法）
-      const dmg = Math.trunc((crit ? this.damage * 2 : this.damage) * mulFlare);
+      const dmg = Math.trunc(this.damage * mulFlare);   // ★S02:crit ×2 移 Enemy.hurt 防后
       // ★焰爆石 kind1+拍击石 kind0 弹幕侧（Projectile.cs:13439-13446 双支同序，
       // F3/F1 收编升级）——镖/标枪附着族首击结算位；门+触发 = projectileSnapStrikeBonus
       // 单源，加伤随暴击并入实伤参（不吃旗乘区）
@@ -8134,8 +8154,8 @@ export class DaybreakFlare extends Entity {
           (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
       }
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusFlare ? Math.trunc(snapBonusFlare * (crit ? 2 : 1)) : 0),
-        (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        + (snapBonusFlare ? snapBonusFlare : 0),
+        (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★S02 crit ×2=Enemy.hurt 防后;fromPlayer=DPS 计
       // ★GC1 写方桥：镖/标枪附着族（598/636/614）走 Projectile.cs:14039-14051 顶层
       //  分派旁路——纯表返回无写档（附着节流全靠 per-javelin 表与上限管理），其余
       //  id（未来扩种）自动落缺省档。

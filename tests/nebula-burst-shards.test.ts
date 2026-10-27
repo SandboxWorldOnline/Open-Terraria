@@ -210,7 +210,12 @@ describe('刀C：死亡爆 AoE 局部免疫门（Damage_PVE :12586 + 命中写�
       (a as unknown as { killNow: (g: GameHooks) => void }).killNow(game);
       expect(victim.hurtCalls.length, '免疫窗内目标不得被爆箱二次结算（Damage_PVE array[i]!=0 → skip）').toBe(0);
       expect(bystander.hurtCalls.length, '窗外敌照吃 AoE').toBe(1);
-      expect(bystander.hurtCalls[0].dmg).toBe(70);     // 爆箱 = 弹体全额伤
+      // ★BJ731 改判史（2026-10-27）：BJ723-B 起爆箱伤走 :12970 DV 掷（±15% 31 档）
+      //   ——钉值改区间。★恒 mock 不可用：killNow 尘盘散布是概率循环
+      //   （rnd()<p 续掷档）,Math.random 恒 0.5 使 p>0.5 的循环永真=无限生尘
+      //   OOM（实测 8G 堆亦炸）;区间断言零 mock 零风险。
+      expect(bystander.hurtCalls[0].dmg).toBeGreaterThanOrEqual(60);   // 70×0.85 下界
+      expect(bystander.hurtCalls[0].dmg).toBeLessThanOrEqual(80);      // 70×1.15 上界
     } finally {
       restore();
     }

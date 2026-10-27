@@ -27,7 +27,14 @@ describe('sw-shell-put-nonfatal 存储失败不吞响应', () => {
   it('getCache 裸 await 禁复潮(doc/shell 两支均降级直通守卫)', () => {
     const src = swSrc();
     expect(src).toMatch(/try \{ cache = await getCache\(\); \} catch \{[^}]*纯网络直通/);
-    expect(src.match(/try \{ cache = await getCache\(\); \} catch/g)?.length ?? 0).toBe(2);
+    // ★锁随刀演化:2→1——第二处 try 形态原在 BJ704-G17 删除的 doc 不可达死支内
+    // (2026-10-21 删码面漏迁本计数,红至今日 BJ724-A 复核定谳;dist/sw.js 2026-10-11
+    // 构建实证当时=2)。现行结构:doc 支守卫=「ver ? caches.open().catch : null」
+    // 自有形态(:399),shell 支守卫=本 try 形态(唯一载体;BJ724-A 刀1b 包进
+    // currentVersion 门,行内容不变)。降级直通语义两支均在位。
+    expect(src.match(/try \{ cache = await getCache\(\); \} catch/g)?.length ?? 0).toBe(1);
+    // doc 支守卫(存储失败→cache=null→纯网络 fetchShell,不整链炸)
+    expect(src).toMatch(/const cache = ver \? await caches\.open\(CACHE_PREFIX \+ ver\)\.catch\(\(\) => null\) : null;/);
   });
 
   it('504 offline 兜底保留(真离线语义不丢)', () => {
@@ -42,7 +49,10 @@ describe('sw-shell-put-nonfatal 存储失败不吞响应', () => {
     expect(src).not.toMatch(/const assetish = [^\n]*isDocPath/);
     expect(src).toContain('文档永不入本早退支');
     // 独立文档支在 assetish 早退支之前(分支序:文档先于资产冷启动兜底)
+    // ★BJ724-A 刀1b 锁随迁:早退支条件串加「!SHELL_RE.test(path)」(shell 路径放行
+    // 到下方 isShellJs 支,入口 JS 不再被折进 serveAsset 单发路)——分支序语义不变。
     expect(src.indexOf('if (isDocPath(req, path)) {')).toBeGreaterThan(-1);
-    expect(src.indexOf('if (isDocPath(req, path)) {')).toBeLessThan(src.indexOf('if (assetish && !currentVersion)'));
+    expect(src.indexOf('if (isDocPath(req, path)) {')).toBeLessThan(
+      src.indexOf('if (assetish && !currentVersion && !SHELL_RE.test(path))'));
   });
 });

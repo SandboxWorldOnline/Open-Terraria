@@ -36,6 +36,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
   const enemies: Enemy[] = [];
   const projectiles: Proj[] = [];
   const sfx: Array<{ t: number; files: string[] }> = [];
+  const oneShots: Array<{ t: number; files: string[]; vol: number; x: number; y: number }> = [];
   let tickN = 0;
   const em = {
     nextId: 1,
@@ -67,9 +68,15 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
     playSfx: () => {},
     playSfxFiles: (files: string[]) => { sfx.push({ t: tickN, files }); },
     showPickupLabel: () => {},
+    // ★BJ728-A（债1）：枯萎兽灵气脉冲一次性跟踪轨记录仪（done=true → 每拍重触发,
+    // 真机节拍=音长 2.3/3.0s——本记录仪只锁调用形制,不锁节拍周期）
+    startTrackedOneShot: (files: string[], vol: number, x: number, y: number) => {
+      oneShots.push({ t: tickN, files, vol, x, y });
+      return { done: true, stop() {}, setPos() {} };
+    },
     entities: em,
   } as unknown as GameHooks;
-  return { hooks, enemies, projectiles, sfx, em, player, get tick() { return tickN; } };
+  return { hooks, enemies, projectiles, sfx, oneShots, em, player, get tick() { return tickN; } };
 }
 
 type Harness = ReturnType<typeof makeHooks>;
@@ -365,7 +372,7 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     expect(jumped).toBe(true);                    // flag4:ai[0]==56 → vy=-13
   });
 
-  it('枯萎兽 569:600px 内进入灵气态（ai[0] 1↔2 驻留）,60t 自疗 lifeMax/20 + 脉冲音（:63861-63935）', () => {
+  it('枯萎兽 569:600px 内进入灵气态（ai[0] 1↔2 驻留）,60t 自疗 lifeMax/20 + 脉冲音（:64050-64138;BJ728-A 债1 一次性跟踪轨 :64084-64094）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 118, y: 118 });
     const e = spawn(h, 569, 100, 118);            // 288px < 600
@@ -373,7 +380,10 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     const hpBefore = e.hp;
     tick(h, 240, [e]);
     expect(e.hp).toBeGreaterThan(hpBefore);       // 自疗生效
-    expect(sfxPlayed(h, 'dd2_wither_beast_aura_pulse')).toBe(true);
+    const pulse = h.oneShots.filter((s) => s.files.some((f) => f.startsWith('dd2_wither_beast_aura_pulse')));
+    expect(pulse.length, '灵气脉冲起振（startTrackedOneShot,旧 playSfxFiles 0.5 单闩形制随 BJ728-A 退役）').toBeGreaterThan(0);
+    expect(pulse.every((s) => s.vol === 1), '音量=CreateTrackable 缺省 1').toBe(true);
+    expect(pulse.length, '重触发链（done 门;记录仪 done=true 每拍,真机=音长 2.3/3.0s 节拍）').toBeGreaterThan(1);
     expect(h.projectiles.length).toBe(0);
   });
 });

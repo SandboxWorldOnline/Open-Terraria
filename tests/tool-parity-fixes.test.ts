@@ -152,6 +152,13 @@ describe('F4｜挖掘冷却下限钳（Player.cs:4221-4226 max(val,1)）', () =>
     g.killTileBreakSound = () => {};
     g.spawnParticles = () => {};
     g.tileAboveProtected = () => false;
+    // ★BJ731 补桩（2026-10-27）：BJ433 起 tryMine 尾接 IntentionGuesser.Track
+    //   （:46102/:46162 节拍窗记录）——读 this.camera.screenToWorld(input.mouseX/Y)
+    //   与 this.intentionGuesser.track。真 Game 恒有;桩缺=TypeError（track 吞参
+    //   =对挖掘冷却断言零扰动,position 域本测不消费）。
+    g.camera = { screenToWorld: (): [number, number] => [0, 0] };
+    g.input = { mouseX: 0, mouseY: 0 };
+    g.intentionGuesser = { track: () => {}, allowTracking: () => false };
     const broken: Array<[number, number]> = [];
     g.breakTile = (x: number, y: number) => { broken.push([x, y]); w.store.setTileSilent(x, y, 0, 0, 0); };
     const tryMine = g.tryMine as (x: number, y: number, p: number, t: 'pick' | 'axe' | 'hammer', s: number, u?: number) => void;

@@ -171,6 +171,7 @@ describe('BJ388 件3: 902 命中转回收（ai[0]=1 :14104-14112;immune 7t）', 
 // ============================================================
 describe('BJ388 件2: dmgScale=DV int 上逐段 (int) 截断（旧单截式 ±1 微差）', () => {
   it('①nano ×1.05（mul 档）与 383 ×0.6（段档）叠加：trunc(trunc(13×1.05)×0.6)=7（旧=8）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★W01(BJ723-B)位移修复:hitEnemies DV 中性档（平值断言复稳,BJ716-A 配方）
     const { hooks, player, enemies } = makeHooks();
     (player as unknown as { buffs: { apply: (t: number, s: number) => void } })
       .buffs.apply(BuffType.ImbueNano, 200);
@@ -184,6 +185,7 @@ describe('BJ388 件2: dmgScale=DV int 上逐段 (int) 截断（旧单截式 ±1 
   });
 
   it('②悠悠球 555 合成段（无视线 ×0.75 → 里程碑 ×2）:trunc(trunc(13×0.75)×2)=18（旧单返式=9）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★W01 位移修复:DV 中性档
     const { hooks, player, enemies, store } = makeHooks();
     store.setTile(51, 90, 1);            // 玩家盒(790-810)与悠悠球盒(838-854)之间的隔墙
     store.setTile(51, 91, 1);
@@ -198,6 +200,7 @@ describe('BJ388 件2: dmgScale=DV int 上逐段 (int) 截断（旧单截式 ±1 
   });
 
   it('③526/546 里程碑 flag8 门：immortal 敌不吃 ×2（:12816 flag8=!immortal）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★W01 位移修复:DV 中性档
     const { hooks, player, enemies } = makeHooks();
     const y = new YoyoProj(PX + 26, PY, 13, 0, 546, 300, () => true,
       () => ({ x: PX + 200, y: PY }), 0);

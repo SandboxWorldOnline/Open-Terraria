@@ -172,6 +172,31 @@ export function hitTownNpcs(
   return any;
 }
 
+/** ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆 AoE 城镇臂单源（盒几何投影）。
+ *  原版 Projectile.Kill 的 Resize(N×N)+penetrate=-1+Damage() 重跑（41/246/312/514/
+ *  617/659/661/1023/79·16·34/167-170/281·162/1044/930 等）victim 循环 = Main.maxNPCs
+ *  全表（:12592），城镇 voodoo 靶（Damage_PVE_Inner :12618-12631 flag 门=22 killGuide/
+ *  54 killClothier/318）同链同掷（DV :12970/crit :12915-27/banner :13388）;本仓 Kill
+ *  爆箱族此前只扫 enemies 桶 = 城镇靶系统性缺面（BJ723-C D4 族登记,BJ725-A 判族另刀）。
+ *  形制 = hitTownNpcs 原语 + 盒心/半宽参数翻译：self = (cx−half, cy−half, 2half, 2half)
+ *  居中方盒，缺省 AABB collide 与中心距 < half+半宽数学恒等（explodeAt 城镇臂
+ *  `Math.abs(tn.cx−cx) < hb+tn.w/2` 同式）。巫毒窄门/TownNPC.hurt 8t 无敌帧/mod 修正
+ *  链/banner/防后 crit ×2（:82067）全走原语既有链。settle 逐靶镜像各面【敌怪臂】
+ *  （DV/crit/kb/penPercent——面内一致优先,敌怪臂缺 DV/crit 的面见 BJ727-A 登记债,
+ *  勿在此单侧补齐）。返回受理布尔（Kill 重跑 penetrate=-1 无穿透经济,消费方仅日志）。 */
+export function hitTownNpcsAoeBox(
+  cx: number, cy: number, half: number,
+  game: GameHooks, dmg: number, projId: number,
+  source: 'playerProj' | 'hostile' = 'playerProj',
+  settle?: (n: { id: number; vanillaId?: number }) => TownHitSettle,
+): boolean {
+  return hitTownNpcs(
+    { x: cx - half, y: cy - half, w: half * 2, h: half * 2 },
+    game, dmg, 0, source, projId,
+    undefined, undefined, undefined, undefined, settle,
+  );
+}
+
 /** ★清偿刀 Y2（2026-10-02）巫毒窄门谓词（hitTownNpcs 内部门的调用方可读形）——
  *  Damage_PVE_Inner :12618-12625 flag 臂 1:1：`type==22 && owner<255 && killGuide`
  *  （向导）/ `type==54 && … && killClothier`（裁缝师）/ 318 臭鸡蛋无条件例外（:12619）。
@@ -599,8 +624,9 @@ function settleCritterHit(
   //  掷/消费全不可达）②免疫窗门 :12635-37 在 crit 段【前】→ 门拒不掷不消费。ownedBySomeone
   //  =!trap（Projectile.cs:580-589）→ trap 弹整 crit 块跳过=零掷零消费（1091 同判例）。
   //  可观测面：critter 一击即死使 crit 伤面不可观测,但 TimerCrit 蓄能节拍（charge→−15
-  //  :28568-71）+NightsEdge 编排照发=消费实证;crit 位只进飘字色/击退 ×1.4（Enemy.hurt
-  //  消费位）——dmg 固定 5 shim（RB10d-D1 登记债）不预倍,债清偿时再接 crit ×2 面。 */
+  //  :28568-71）+NightsEdge 编排照发=消费实证;crit 位进飘字色/击退 ×1.4+防后 ×2
+  //  （Enemy.hurt 消费位——★S02 BJ723-B:crit ×2 已随 Enemy.hurt 防后翻倍自动接通,
+  //  RB10d-D1 登记「债清偿时再接 crit ×2 面」就此清偿;dmg 固定 5 shim 面保持）。 */
   const rejected = vanillaGateRejected(gate);
   let crit = false;
   if (!rejected && ctx?.trap !== true) {

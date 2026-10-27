@@ -132,10 +132,18 @@ describe('BJ273/BJ289/BJ291 单实例槽停旧播新族（slotAction 映射）',
       expect(slotAction(f), f).toBe('skip');
       expect(stopSet().has(f), f).toBe(false);
     }
+    // ★BJ704-G10（R2-F9,2026-10-21）case 66 三重整体忙检（:1185-1195 Zombie_121/
+    // 122/123 任一在播即整支 null）落模清偿——入 SINGLE_INSTANCE（自身在播跳过）
+    // + GROUP_BUSY 群门（组内任一在播跳过,siblingBlocked）→ skip 档。
+    for (const f of ['Zombie_121', 'Zombie_122', 'Zombie_123']) {
+      expect(slotAction(f), f).toBe('skip');
+      expect(stopSet().has(f), f).toBe(false);
+    }
     // 整体忙检族（先查全部槽任一在播即整支 null）≠逐文件槽 → 不入 skip 集=登记近似：
-    // case 46 枭(:1075-1082 查 110/111)/case 65(:1391-1401)/case 66(:1185-1195);
+    // case 46 枭(:1075-1082 查 110/111)/case 65(:1391-1401);
     // case 44 Seagull(:1054-1061)/case 31 青蛙(:1124-1134)原文本就无门
-    for (const f of ['Zombie_110', 'Zombie_115', 'Zombie_121', 'Zombie_106', 'Zombie_13']) {
+    // （★BJ730 改判史：case 66 Zombie_121 原在此 none 组——BJ704-G10 落模后迁出）
+    for (const f of ['Zombie_110', 'Zombie_115', 'Zombie_106', 'Zombie_13']) {
       expect(slotAction(f), f).toBe('none');
       expect(stopSet().has(f), f).toBe(false);
     }

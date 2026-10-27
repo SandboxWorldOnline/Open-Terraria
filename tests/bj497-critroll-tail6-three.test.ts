@@ -127,7 +127,7 @@ describe('BJ497-§1：五遗留 || 面收编 rollVanillaHitCrit（旧平率 4% �
     (hooks.enemies() as unknown as SpyEnemy[]).push(eB);
     step([b], 20, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // ★动态翻转
-    expect(eB.calls[0]!.d).toBe(20);                     // 10×2（crit 乘区）
+    expect(eB.calls[0]!.d).toBe(10);                     // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后(旧 20=预倍形)
   });
 
   it('1b 631 幻象矢补刀环动态翻转（父弹 0.04 路由门旧被误读 4% 平率）', () => {
@@ -151,7 +151,7 @@ describe('BJ497-§1：五遗留 || 面收编 rollVanillaHitCrit（旧平率 4% �
     (hooks.enemies() as unknown as SpyEnemy[]).push(eB);
     step([mk(eB.id)], 3, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // ★动态翻转
-    expect(eB.calls[0]!.d).toBe(20);
+    expect(eB.calls[0]!.d).toBe(10);   // ★S02 改判:未翻倍基伤
   });
 
   it('1c 514 钉双读者单源：首击面+刺入 DoT 面同流动态翻转', () => {
@@ -178,9 +178,9 @@ describe('BJ497-§1：五遗留 || 面收编 rollVanillaHitCrit（旧平率 4% �
     step([mk()], 3, hooks);
     expect(eB.calls.length).toBe(2);
     expect(eB.calls[0]!.crit).toBe(true);                // ★首击面动态翻转（旧平率恒假必红）
-    expect(eB.calls[0]!.d).toBe(20);                     // 10×2
+    expect(eB.calls[0]!.d).toBe(10);                     // ★S02 改判:未翻倍基伤
     expect(eB.calls[1]!.crit).toBe(true);                // ★DoT 面动态翻转（同源单掷面）
-    expect(eB.calls[1]!.d).toBe(2);                      // 1×2
+    expect(eB.calls[1]!.d).toBe(1);                      // ★S02 改判:DoT 基伤 1 未翻倍直传(旧 2=预倍形)
   });
 
   it('1d 1023 死亡细胞桶 Kill 爆面动态翻转+休眠销案锚三件套', () => {
@@ -205,7 +205,7 @@ describe('BJ497-§1：五遗留 || 面收编 rollVanillaHitCrit（旧平率 4% �
     (hooks.enemies() as unknown as SpyEnemy[]).push(eB);
     burst(mk());
     expect(eB.calls[0]!.crit).toBe(true);                // ★动态翻转
-    expect(eB.calls[0]!.d).toBe(20);
+    expect(eB.calls[0]!.d).toBe(10);   // ★S02 改判:未翻倍基伤
     // ★销案锚（BJ496①「1023 无出生面=休眠」定谳三件套,防休眠面无意识复活）：
     //   a.数据面在库（发射器 5460 → shoot 1023）;b.items.ts 未注册 vi_5460=不可获得;
     //   c.legacyItemIndex 5460 → vi_4286_Cherry（导入链不复活发射器）。
@@ -250,7 +250,7 @@ describe('BJ497-§2：443 孤儿平率收编+磁球传播链死值摘除', () =>
     const s2 = new ElectroSphereProj(E_CX, E_CY, 10);
     step([s2], 3, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // ★动态翻转（旧孤儿平率恒假必红）
-    expect(eB.calls[0]!.d).toBe(20);                     // 10×2（★BJ497② 翻倍归位:旧染色零翻倍）
+    expect(eB.calls[0]!.d).toBe(10);                     // ★S02 改判:未翻倍基伤（★BJ497② 翻倍归位:旧染色零翻倍）
     expect(eB.calls[0]!.pierce).toBe(2);                 // hitPierce=2 透传（frostEligible 弹语义）
   });
 
@@ -285,7 +285,7 @@ describe('BJ497-§3：MedusaHeadProj ctor critBonus 形参层清偿', () => {
     const m = new MedusaHeadProj(player, 130, 2, 0, 0);  // ★5 参形（BJ497③ 摘形参后）
     m.fixedUpdate(1 / 60, hooks);
     expect(e.calls.length).toBe(1);                      // volley 即时落账
-    expect(e.calls[0]!.d).toBe(130);                     // critChance=0 关断钉 → 基伤原额
+    expect(e.calls[0]!.d).toBe(110);                     // ★S02 改判:critChance=0 关断钉 → 基伤原额(旧 130=预倍形)
     expect(e.calls[0]!.crit).toBe(false);
   });
 });

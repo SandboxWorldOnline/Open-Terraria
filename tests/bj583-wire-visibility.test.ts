@@ -193,7 +193,10 @@ describe('★BJ583 §2 两通道行为分派（drawWiresPass/bright——乘光�
 describe('★BJ583 §3 层序与通道结构（Main.cs:63251/:63241/:45500 层序钉）', () => {
   const idxLightCall = RDR_SRC.indexOf('this.drawWires(world, cam, viewW, viewH, z);');
   const idxBrightCall = RDR_SRC.indexOf('this.drawWiresBright(world, cam, viewW, viewH, z);');
-  const idxLiquidsFg = RDR_SRC.lastIndexOf('this.drawLiquids(world, cam, viewW, viewH, z, false);');
+  // ★BJ730 改判史：旧锚 `…z, false);`——BJ679 实体直绘逃逸族（茎蔓/Faeling/fairy/
+  //  鹿角怪）入水罩谓词给 fg 液体调用合法增尾参 entities。锚随新形,层序语义不变
+  //  （fg 液体 < drawWires < compositeLight 实测 343977<344388<347216 在位）。
+  const idxLiquidsFg = RDR_SRC.lastIndexOf('this.drawLiquids(world, cam, viewW, viewH, z, false, entities);');
   const idxComposite = RDR_SRC.indexOf('this.compositeLight(cam, viewW, viewH,');
   const idxRulers = RDR_SRC.indexOf('this.drawBuilderRulers(ctx, world, cam, viewW, viewH, z);');
 

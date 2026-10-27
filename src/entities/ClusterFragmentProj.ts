@@ -46,6 +46,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ-C2/F6 掷率单源（proj1457 无反向依赖,无环）
+import { applyBannerDamageDealt } from './projTargets';
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-B D2 清偿（BJ725-A）
 
 /** 父弹（集束火箭/榴弹/感应雷 I/II + 雪人炮集束 I/II）→ 裂片弹型
  *  （P.cs:79803-79814 num52 选择式） */
@@ -139,7 +141,9 @@ export class ClusterFragmentProj extends Entity {
           const snap = projectileSnapStrikeBonus(game, this, e.cx, e.cy,
             (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });
-          e.hurt?.(this.damage + (snap ? Math.trunc(snap * (crit ? 2 : 1)) : 0),
+          // ★BJ723-B D2 清偿（BJ725-A）：接触面补 DV+banner（R02 族邻位——Inner 链序
+          //  DV :12970→banner :13388→snap :13439-46,原版同链同掷;crit 经 S02 已通
+          e.hurt?.(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)) + (snap ? snap : 0),   // ★S02:crit ×2=Enemy.hurt 防后
             dir * 0, 0, game, 0, crit, 0, true);
           this.fuse = 3;
           break;

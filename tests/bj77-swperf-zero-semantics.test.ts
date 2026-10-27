@@ -105,31 +105,43 @@ describe('★BJ77 P1 复位扫守卫(行为面)', () => {
     expect(seqOff.length).toBeGreaterThan(0);   // 序列非空(防夹具哑掉=假绿,H3)
   });
 
-  it('flag 开时 bg 白扫真实被跳过(st.idx 计数:off 两次 P1 / on 一次)+fg 复位扫保留', () => {
+  it('flag 开时 bg 白扫真实被跳过(st.liquid 读计数:off 两次扫 / on 一次)+fg 复位扫保留', () => {
+    // ★BJ730 改判史：旧仪=st.idx 猴补计数（P1 旧承载臂逐格调 st.idx）。liqp2 转正
+    //  （2026-10-08,P1 重排=同表达式换承载机制,直读 typed array）后 P1/复位扫零
+    //  st.idx 调用 → 旧仪双态无差（8474=8474,测的是别的面）=仪器伪影非回归。
+    //  新仪=st.liquid 换 Proxy 计数逐格读（两承载臂均逐格读 st.liquid[si],缺省
+    //  liqp2 臂同样覆盖）;语义不变:证明 swPerf 开时 bg 的复位白扫真实整跳。
     const st = makeStore();
-    const origIdx = st.idx.bind(st);
-    let calls = 0;
-    (st as unknown as { idx: (x: number, y: number) => number }).idx = (x: number, y: number) => { calls++; return origIdx(x, y); };
+    const origLiq = st.liquid;
+    let reads = 0;
+    const proxied = new Proxy(origLiq, {
+      get(t, p, r) {
+        if (typeof p === 'string' && /^\d+$/.test(p)) reads++;
+        return Reflect.get(t, p, r);
+      },
+    });
+    (st as unknown as { liquid: Uint8Array }).liquid = proxied as unknown as Uint8Array;
     const ctx = recordingCtx().ctx;
 
     swPerfSetForTest(false);
-    calls = 0;
+    reads = 0;
     drawVanillaLiquids(ctx, ATLAS, st, 40, 5, 5, 100, 55, 1000, true, 0, 0, undefined, false, undefined, 301);
-    const bgOff = calls;
-    calls = 0;
+    const bgOff = reads;
+    reads = 0;
     drawVanillaLiquids(ctx, ATLAS, st, 40, 5, 5, 100, 55, 1000, false, 0, 0, undefined, false, undefined, 301);
-    const fgOff = calls;
+    const fgOff = reads;
 
     swPerfSetForTest(true);
-    calls = 0;
+    reads = 0;
     drawVanillaLiquids(ctx, ATLAS, st, 40, 5, 5, 100, 55, 1000, true, 0, 0, undefined, false, undefined, 302);
-    const bgOn = calls;
-    calls = 0;
+    const bgOn = reads;
+    reads = 0;
     drawVanillaLiquids(ctx, ATLAS, st, 40, 5, 5, 100, 55, 1000, false, 0, 0, undefined, false, undefined, 302);
-    const fgOn = calls;
+    const fgOn = reads;
 
+    (st as unknown as { liquid: Uint8Array }).liquid = origLiq;   // 仪器归还
     expect(bgOff).toBeGreaterThan(bgOn);   // off=双扫 / on=单扫 → 真实省下一次
-    expect(bgOff - bgOn).toBeGreaterThan(4000);   // 差值 ≈ 一次整网 P1 扫描(pw×ph=5952,越界格不计)
+    expect(bgOff - bgOn).toBeGreaterThan(4000);   // 差值 ≈ 一次整窗扫描(pw×ph,越界格不计)
     expect(fgOn).toBe(fgOff);              // fg 复位扫必须原样保留(语义依赖)
     swPerfSetForTest(false);
   });
@@ -162,7 +174,10 @@ describe('★结构锁(源文本锚)', () => {
   });
 
   it('VanillaLiquidRenderer P1 复位扫=(!swPerf || !needsPrep) 守卫,循环体逐字保留', () => {
-    expect(liquidSrc).toContain('if (!swPerf || !needsPrep) {');
+    // ★BJ730 改判史：守卫文本 C7 复用臂前扩——`!fgReuseHit && (!swPerf || !needsPrep)`
+    //  （2026-10-08 C7 刀:fg 复用命中时复位扫+P3 死算整跳,bg/needsPrep 路径恒
+    //  false=现行链不变）。锁语义同守卫本身:swPerf 双支语义仍在第二合取项。
+    expect(liquidSrc).toContain('if (!fgReuseHit && (!swPerf || !needsPrep)) {');
     expect(liquidSrc).toContain('}   // ★BJ77 P1 复位扫守卫结束');
     // 守卫内的复位循环体关键表达式仍在(复位语义未被剥离)
     expect(liquidSrc).toContain('isSolidA[i] = liquidCacheIsSolid(st.flags[si], st.wire[si],');

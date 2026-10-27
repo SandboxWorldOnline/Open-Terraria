@@ -259,6 +259,32 @@ export function buildEngineSnapshot(cap: EngineCaptureView, tiles: TileSlicePack
   };
 }
 
+/** ★稳态指纹（任务#26 常驻债#1 收口,2026-10-27）：与 buildEngineSnapshot 同源的
+ *  【除恒动面】输入摘要——恒动面 = clock.timeOfDay / flicker 全族 / hourly（振荡器
+ *  与昼夜推进,每 tick 必变,不进门、随实发拍到达;稳态呈现节拍 60→15Hz = 本地引擎
+ *  稳态 4-tick 周期（原版 4 帧节奏）同款口径）。返回确定性 JSON 串（键序=字面量
+ *  构造序恒定）,调用方与上次实发指纹逐位比较。tile 变更不进指纹（engine.dirty/
+ *  liquidDirty/写日志长度由调用点前置判,三源已完备覆盖记账写面——TileStore
+ *  头注「未记账直写面」沿用锚帧自愈,lwbp 判例:跳发=延迟非丢失,锚帧界随发率
+ *  弹性,语义同族）。★新增快照字段【必须】同步入此指纹——漏记=稳态门对已变输入
+ *  误判未变=陈旧光;tests/light-steady-gate 键集锚定防漂移。 */
+export function buildSteadyFingerprint(cap: EngineCaptureView, logLen: number): string {
+  const wc = cap.world.clock as { timeOfDay: number; dayCount: number; eclipse?: boolean; bloodMoon?: boolean; moonPhase?: number; isDay?: boolean };
+  const w = cap.world as { sundialCooldown?: number; moondialCooldown?: number; weather?: { raining?: boolean } };
+  return JSON.stringify({
+    rx: cap.rx, ry: cap.ry, rw: cap.rw, rh: cap.rh,
+    groundLevel: cap.world.groundLevel, lavaLine: cap.world.lavaLine,
+    dayCount: wc.dayCount, eclipse: wc.eclipse === true, bloodMoon: wc.bloodMoon === true,
+    moonPhase: wc.moonPhase ?? 0, isDay: wc.isDay !== false,
+    sundial: w.sundialCooldown ?? 0, moondial: w.moondialCooldown ?? 0,
+    raining: w.weather?.raining === true,
+    sky: getSkyFrameState(),
+    decay: cap.decay,
+    held: cap.heldLight, buffs: cap.buffLights, per: cap.perFrame,
+    logLen,
+  });
+}
+
 // ---- worker 侧驱动（LightWorker.ts 薄壳调用;对拍测试直接调本函数=同一条代码路径） ----
 
 /** worker 侧持久驱动状态（shim 偏移/时钟同步值——每帧消息更新） */

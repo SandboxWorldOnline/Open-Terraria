@@ -4,7 +4,7 @@
 // :77011-77058 + Colliding :15447-15474)。特性位→弹型:121 紫晶 Homing / 124 翡翠
 // FastThenSlow / 597 琥珀 CanBounce / 123 蓝晶 SwirlTwins / 122 黄玉 AoeExplosion /
 // 125 红晶 ArPenSpread / 126 钻石 BiggerHitbox。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ731:vi=DV 恒等档 mock
 import { Arrow } from '../src/entities/Arrow';
 import { TileStore } from '../src/world/TileStore';
 import type { GameHooks } from '../src/entities/types';
@@ -137,7 +137,12 @@ describe('宝石七弹运行时: AoeExplosion(122 黄玉,Kill :77011-77058)', ()
     const far = mkEnemy(2, 940, 795);     // ~435px > 80
     const g = makeHooks([near, far]);
     const a = gemBolt(122, 500, 795, 0, 0, { aoeExplosion: true }, { life: 1, dmg: 100, kb: 2 });
-    a.fixedUpdate(1 / 60, g);
+    // ★BJ731 改判史（2026-10-27）：AoeExplosion Kill 面走 :12970 DV 掷（BJ723-B
+    //   落地面）——0.5 恒等档钉 100→35（未 mock 必漂 29-40）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      a.fixedUpdate(1 / 60, g);
+    } finally { rvi731.mockRestore(); }
     expect(a.dead).toBe(true);            // life 尽走统一消亡口 killNow
     expect(near.hurtLog).toHaveLength(1);
     expect(near.hurtLog[0][0]).toBe(35);              // trunc(100 × 0.35/mult),mult=1
@@ -148,7 +153,11 @@ describe('宝石七弹运行时: AoeExplosion(122 黄玉,Kill :77011-77058)', ()
     const near = mkEnemy(1, 540, 795);
     const g = makeHooks([near]);
     const a = gemBolt(122, 500, 795, 0, 0, { aoeExplosion: true, swirlTwins: true }, { life: 1, dmg: 100, kb: 2 });
-    a.fixedUpdate(1 / 60, g);
+    // ★BJ731 改判史（2026-10-27）：同上——DV 恒等档钉 58。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      a.fixedUpdate(1 / 60, g);
+    } finally { rvi731.mockRestore(); }
     expect(near.hurtLog[0][0]).toBe(58);   // trunc(100 × 0.35/0.6)
   });
 });

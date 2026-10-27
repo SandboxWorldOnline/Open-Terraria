@@ -168,7 +168,14 @@ describe('② 拒放/替换/消耗语义（Player.cs:39911-39946 逐门）', () 
     const { placeWall, consumed } = shell(w, drops);
     placeWall(10, 10, heldDefOf(WALL_STONE_VID));
     expect(st.wall[st.idx(10, 10)]).toBe(1);          // 换成石墙
-    expect(drops.map((d) => d.key)).toContain(VI(WALL_WOOD_VID));   // 掉旧木墙物
+    // ★BJ730 改判史：旧断言 toContain(VI(WALL_WOOD_VID))——id 双域统一后
+    //  VANILLA_ITEM_KEY_BY_ID[93] 指驼峰别名 vi_93_WoodWall（items.ts 别名支
+    //  byKey[ik]=existingIdx+VID 反查指 ik）,而掉落路径读 ITEM_DEFS[vid].key=
+    //  蛇形主键 vi_93_wood_wall——同 def 双拼写,字符串精确比对脆弱（拼写域错域
+    //  判例）。改 vid 域断言：键解析 vid 匹配 + 掉落键必须注册（防幻影键）。
+    const keyVid = (k: string): number => Number(/^vi_(\d+)_/.exec(k)?.[1] ?? -1);
+    expect(drops.map((d) => keyVid(d.key))).toContain(WALL_WOOD_VID);   // 掉旧木墙物（vid 域）
+    expect(drops.every((d) => ITEM_BY_KEY[d.key] !== undefined)).toBe(true);   // 键全注册
     expect(consumed.length).toBe(1);                  // 换墙照消耗
   });
 

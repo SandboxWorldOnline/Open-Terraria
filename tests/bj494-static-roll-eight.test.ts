@@ -25,6 +25,9 @@
 //    §2a/§3a/§4a/§5a/§8a 结构锁（旧静态掷/冻结写位复辟必红）;
 //    §6a/§7a 死面结构锁（死类复活接线/死面被误收编必红;现役面单源钉）;
 //    §0 十四 id 类旗定谳表+flagless 零 RNG（误加类旗必红）。
+//   ★BJ726 改判史（2026-10-27）：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后（NPC.cs:82067
+//    两步式,hurt 收基伤+crit 旗）——§1c/2c/3c/3d/4c/4d/5c/8c/8d 九处 dmg 断言由
+//    【预倍 ×2 值】改【基伤+crit 旗分立】（逐处旧值见各行注）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -196,7 +199,9 @@ describe('BJ494-§1：蘑菇爆爆弹 1044 幻影 4% 摘除→单源零掷+Timer
       if (timerOn) {
         expect(timer.box[0]).toEqual([e.x, e.y, e.w, e.h]);        // ★TimerCrit :12928 消费达（旧整缺必红）
         expect(calls[0].crit).toBe(true);
-        expect(calls[0].dmg).toBe(60);                             // 预倍习语 30×2
+        // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 60,
+        //  现收基伤+crit 旗（30;×2 下游 hurt 内）
+        expect(calls[0].dmg).toBe(30);
       } else {
         expect(calls[0].crit).toBe(false);
         expect(calls[0].dmg).toBe(30);
@@ -235,7 +240,9 @@ describe('BJ494-§2：持械钻锯静态掷退役→rollVanillaHitCrit+冻结注
     for (let t = 0; t < 12 && calls.length < 2; t++) saw.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(2);                                // 10t 免疫窗期满第二跳
     expect(calls[1].crit).toBe(true);                            // ★旧冻结载体（0.04 档恒假）必红
-    expect(calls[1].dmg).toBe(calls[0].dmg * 2);                 // DamageVar 方差在基伤,比值×2 恒定
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍比值 ×2
+    //  （calls[0].dmg×2）,现两跳同基伤+crit 旗分立（比值 ×1 恒定,×2 下游 hurt 内）
+    expect(calls[1].dmg).toBe(calls[0].dmg);
   });
 
   it('2d/2e TimerCrit 消费达（掷不达照强制 ×2）+关断钉掷臂关死', () => {
@@ -291,7 +298,9 @@ describe('BJ494-§3：悠悠球伴生弹静态掷退役→rollVanillaHitCrit（m
     agg.v = 50;                                                  // 命中拍换装配（旧静态载体恒不暴=红）
     shot.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(2);
-    expect(calls[1]).toEqual({ dmg: 100, crit: true });          // ★预倍 ×2+crit 位达
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 位达（50+true;×2 下游 hurt 内）
+    expect(calls[1]).toEqual({ dmg: 50, crit: true });
   });
 
   it('3d 关断钉语义钉：critChance=0 关掷臂,TimerCrit 臂【不受】门限照达 ×2', () => {
@@ -304,7 +313,9 @@ describe('BJ494-§3：悠悠球伴生弹静态掷退役→rollVanillaHitCrit（m
     shot.critChance = 0;
     vi.spyOn(Math, 'random').mockReturnValue(0.0);
     shot.fixedUpdate(1 / 60, g);
-    expect(calls[0]).toEqual({ dmg: 100, crit: true });          // TimerCrit 照达 ×2（零掷≠跳消费;旧整缺必红）
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 旗（TimerCrit 照达,50+true;零掷≠跳消费,旧整缺必红）
+    expect(calls[0]).toEqual({ dmg: 50, crit: true });
   });
 });
 
@@ -334,7 +345,9 @@ describe('BJ494-§4：庆祝烟花弹静态掷退役→rollVanillaHitCrit+小数
     const rk2 = new Celeb2Rocket(715, 0, 1593, 793, 5, 0, 50, 5, false, () => {});
     rk2.fixedUpdate(1 / 60, g);                                  // 命中拍 agg=50 → 暴（旧 0.04 档恒假=红）
     expect(calls.length).toBe(2);
-    expect(calls[1]).toEqual({ dmg: 100, crit: true });
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 旗（50+true;×2 下游 hurt 内）
+    expect(calls[1]).toEqual({ dmg: 50, crit: true });
   });
 
   it('4d TimerCrit 消费达（rnd 0.5 掷不达照强制）', () => {
@@ -347,7 +360,9 @@ describe('BJ494-§4：庆祝烟花弹静态掷退役→rollVanillaHitCrit+小数
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     rk.fixedUpdate(1 / 60, g);
     expect(timer.box[0]).toEqual([e.x, e.y, e.w, e.h]);          // 消费达（旧整缺必红）
-    expect(calls[0]).toEqual({ dmg: 100, crit: true });
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 旗（50+true;×2 下游 hurt 内）
+    expect(calls[0]).toEqual({ dmg: 50, crit: true });
   });
 });
 
@@ -377,7 +392,9 @@ describe('BJ494-§5：圣/邪/血水幻影远程率摘除→单源零掷+TimerCr
         expect(rnd).not.toHaveBeenCalled();                       // ★零掷（旧幻影掷必调 rnd=红）
         if (timerOn) {
           expect(timer.box[0]).toEqual([e.x, e.y, e.w, e.h]);     // TimerCrit 照达（旧整缺必红）
-          expect(calls[0]).toEqual({ dmg: 40, crit: true });
+          // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 40,
+          //  现收基伤+crit 旗（20+true;×2 下游 hurt 内）
+          expect(calls[0]).toEqual({ dmg: 20, crit: true });
         } else {
           expect(calls[0]).toEqual({ dmg: 20, crit: false });
         }
@@ -483,7 +500,9 @@ describe('BJ494-§8：星璇之音静态掷退役→rollVanillaHitCrit（直击/
     g2.critChance = 0.04;                                         // 路由门同模拟
     for (let t = 0; t < 35 && calls.length < 2 && !g2.dead; t++) g2.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(2);
-    expect(calls[1]).toEqual({ dmg: 100, crit: true });           // ★命中拍动态（旧冻结载体恒 0.04 档=红）
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 旗（50+true;★命中拍动态判别不变,旧冻结载体恒 0.04 档=红）
+    expect(calls[1]).toEqual({ dmg: 50, crit: true });
   });
 
   it('8d TimerCrit 消费达（critChance=0 关断钉下掷臂关死,timer 臂照达 ×2）', () => {
@@ -495,7 +514,9 @@ describe('BJ494-§8：星璇之音静态掷退役→rollVanillaHitCrit（直击/
     const g1 = new SparkleGuitarProj(1600, 800, 200, 0, 50, 1700, 800);   // 类缺省 critChance=0
     vi.spyOn(Math, 'random').mockReturnValue(0.0);
     for (let t = 0; t < 35 && calls.length < 1 && !g1.dead; t++) g1.fixedUpdate(1 / 60, g);
-    expect(calls[0]).toEqual({ dmg: 100, crit: true });           // TimerCrit 照达 ×2（旧整缺必红）
+    // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
+    //  现收基伤+crit 旗（TimerCrit 照达,50+true;×2 下游 hurt 内,旧整缺必红）
+    expect(calls[0]).toEqual({ dmg: 50, crit: true });
   });
 });
 

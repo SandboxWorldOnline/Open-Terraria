@@ -51,7 +51,12 @@ describe('packPaths 映射', () => {
   it('其余子目录族 → vanilla/<族前缀>_<展平>', () => {
     expect(mapPackAsset('Images/Misc/water_0.png')).toEqual([{ kind: 'image', file: 'vanilla/Misc_water_0.png' }]);
     expect(mapPackAsset('Images/Accessories/Acc_HandsOn_1.png')).toEqual([{ kind: 'image', file: 'vanilla/Accessories_Acc_HandsOn_1.png' }]);
-    expect(mapPackAsset('Images/TownNPCs/Alchemist.png')).toEqual([{ kind: 'image', file: 'vanilla/TownNPCs_Alchemist.png' }]);
+    // ★BJ731 改判史（2026-10-27）：2026-10-12 工坊包（娘化/Waifu）实测落地的
+    //   TownNPCs 档案族规则——单段 <X>.png → vanilla/ 同名键（消费面
+    //   townNpcProfileSheet 族,如 Guide_Default.png）。旧「族前缀展平
+    //   TownNPCs_Alchemist.png」为该规则落地前旧相（BJ718-A 移交登记的陈旧面）。
+    expect(mapPackAsset('Images/TownNPCs/Alchemist.png')).toEqual([{ kind: 'image', file: 'vanilla/Alchemist.png' }]);
+    expect(mapPackAsset('Images/TownNPCs/Guide_Default.png')).toEqual([{ kind: 'image', file: 'vanilla/Guide_Default.png' }]);
     expect(mapPackAsset('Images/Backgrounds/Forest_Bg_0.png')).toEqual([{ kind: 'image', file: 'vanilla/Backgrounds_Forest_Bg_0.png' }]);
     expect(mapPackAsset('Images/SplashScreens/Splash.png')).toEqual([{ kind: 'image', file: 'vanilla/SplashScreens_Splash.png' }]);
   });
@@ -73,7 +78,10 @@ describe('packPaths 映射', () => {
     expect(mapPackAsset('Images/Tiles_0.rawimg')).toEqual([]);
     expect(mapPackAsset('Cursors/Cursor_0.png')).toEqual([]);   // 1456 无此目录（以反编译为准）
     expect(mapPackAsset('Localization/Game.json')).toEqual([]);
-    expect(mapPackAsset('Sounds/Narration.xnb')).toEqual([]);
+    // ★BJ731 改判史（2026-10-27）：2026-10-12 工坊包实测（Waifu 19 张全 xnb）——
+    //   .xnb 音效=容器内 PCM WAV,保留扩展名入 sound 映射（解码分派在
+    //   parseFromEntries 按后缀判）;旧「→空」为该规则落地前旧相。
+    expect(mapPackAsset('Sounds/Narration.xnb')).toEqual([{ kind: 'sound', file: 'Narration.xnb' }]);
   });
 
   it('Content 根剥离：大小写不敏感、反斜杠归一、目录与无 Content 前缀拒收', () => {

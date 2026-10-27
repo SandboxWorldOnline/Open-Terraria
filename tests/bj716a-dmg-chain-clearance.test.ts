@@ -259,7 +259,11 @@ describe('§5 R18-F2 DamageVar 首掷（:12970 ±15%,31 档离散）', () => {
     const arrow = rd('src/entities/Arrow.ts');
     expect(arrow.split('dmg = damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);').length - 1).toBe(2);
     const dart = rd('src/entities/Dart.ts');
-    expect(dart.split('damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)').length - 1).toBe(4);
+    // ★BJ730 改判史：旧值 4（BJ716-A 时点 Dart 四点:trap 双支/blast 直击/烟花直击）→
+    //  新值 8——BJ727-A C-D4（2026-10-27,炮弹/兔爆/烟花 Kill 爆城镇臂 hitTownNpcsAoeBox
+    //  两掷点）+ BJ729-A B25（friendly 接触面 critter/城镇臂接线两掷点）DV 接面合法扩容。
+    //  锁语义不变:Dart 伤害面 DV 首掷全覆盖计数（防回退漏掷）。
+    expect(dart.split('damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)').length - 1).toBe(8);
   });
 });
 

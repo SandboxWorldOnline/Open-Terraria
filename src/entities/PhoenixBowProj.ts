@@ -37,7 +37,7 @@ import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
 import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B18）：城镇 voodoo 靶
 import { rollVanillaHitCrit } from './proj1457';
 // ★BJ704-G2（2026-10-21,债① 706 员）：残影环接线——706 TrailingMode=0/CacheLen 10
 //  （ProjectileID.cs:385/:387）,通用表 P(9,0,-2,0.5)（Main.cs:31055-31061）+B,G,A/=i
@@ -488,7 +488,7 @@ export class PhoenixBolt extends Entity {
       //  rollVanillaHitCrit:12915-12927——基 4+rangedCrit 聚合+:25712 持械折入
       //  （命中拍动态;静态冻结载体退役）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? Math.round(this.damage) * 2 : Math.round(this.damage);
+      const dmg = Math.round(this.damage);   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // ★F3 接线（蓝队四轮）：凤凰弹 706 数据面 ranged（SetDefaults :7462-7473）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -497,12 +497,23 @@ export class PhoenixBolt extends Entity {
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusPhoenix ? Math.trunc(snapBonusPhoenix * (crit ? 2 : 1)) : 0),
+        + (snapBonusPhoenix ? snapBonusPhoenix : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       // OnFire3 480t（StatusNPC :11376-11379 → vanilla-projstatus.json "706" 表驱动）
       applyProjStatus(this.projId, e as unknown as Record<string, number | undefined>);
       // 每次命中伤 ×0.95 截断（Damage_PVE_Inner :14275-14278——穿透衰减）
       this.damage = Math.trunc(this.damage * 0.95);
+    }
+    // ★BJ729-A（D1 B18,2026-10-27）：城镇 voodoo 靶——friendly 弹 flag 巫毒窄门
+    //  （:12618-12631）;settle 镜像敌怪臂链（crit 掷 ranged/DV=面级既有形态不单侧
+    //  补齐[D6 族登记]/OnFire3 debuff 城镇面不接=近似登记[D8]）;受理吃穿透衰减
+    //  （×0.95 :14275-278 同相）;per-NPC 10t 窗由 TownNPC.hurt iframes 承载。
+    if (hitTownNpcs(this, game, Math.round(this.damage),
+      Math.sign(this.vx) * this.knockback, 'playerProj', this.projId,
+      undefined, undefined, undefined, undefined,
+      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.armorPen }))) {
+      this.damage = Math.trunc(this.damage * 0.95);      // 穿透衰减（受理同相）
     }
   }
 

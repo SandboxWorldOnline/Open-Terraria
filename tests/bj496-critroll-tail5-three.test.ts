@@ -142,7 +142,7 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     (hooks.enemies() as unknown as SpyEnemy[]).push(eB);
     step([shotAt(189, 0.04)], 20, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // 0.5<0.64 真——动态读现值
-    expect(eB.calls[0]!.d).toBe(20);                     // 10×2（crit 乘区）
+    expect(eB.calls[0]!.d).toBe(10);                     // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——spy 收基伤(旧 20=预倍形)
   });
 
   it('1b :25712 持械折入命中拍现值：held 键刃 671（crit16）+词缀 61（crt+5）→ 阈值抬至 0.25', () => {
@@ -157,7 +157,7 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     let d1b = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d1b++ === 0 ? 0.22 : 0.5));   // 首掷=crit 阈值(0.04/0.20 档假/0.25 档真);后续=★BJ716-A DV 中性档(×1.0)
     step([shotAt(189, 0.04)], 20, hooks);
     expect(e.calls[0]!.crit).toBe(true);                 // 命中拍折入 item.crit+crt
-    expect(e.calls[0]!.d).toBe(20);
+    expect(e.calls[0]!.d).toBe(10);   // ★S02(BJ723-B)改判:crit ×2=Enemy.hurt 防后——spy 收未翻倍基伤(旧 20=预倍形)
   });
 
   /** 617 星璇秘术死亡爆面（arcanumDeathBurst）直驱：盒 R=88,敌心距 <107 必入环 */
@@ -185,7 +185,7 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     e.calls.length = 0;
     burst(centered617(), hooks);
     expect(e.calls[0]!.crit).toBe(true);                 // ★动态翻转（旧平率面恒假）
-    expect(e.calls[0]!.d).toBe(20);
+    expect(e.calls[0]!.d).toBe(9);    // ★S02 改判:DV(10,0.05 掷 −14 档)=9 未翻倍直传(旧 20=预倍形)
   });
 
   it('1d 659 flame 爆面同构收编（R=40 盒）', () => {
@@ -204,7 +204,10 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     b659.critChance = 0.04;
     flameBurst(b659, hooks);
     expect(e.calls[0]!.crit).toBe(true);
-    expect(e.calls[0]!.d).toBe(20);
+    // ★BJ729-A（2026-10-27,D2 残差清偿）随刀改判：659 Kill 重跑 DV（:12970）补齐
+    //  （1c/617 同构先例形）——mock 0.3 → tier −6 → 10×0.94=9.4 → toEven 9
+    //  （旧期望 10=DV 接线前基伤形,crit ×2=Enemy.hurt 防后不变）。
+    expect(e.calls[0]!.d).toBe(9);
   });
 
   it('1f 蜂族 spawn 位类别旗覆写通道（181 数据面零旗+projClass=magic → magic 臂动态掷）', () => {
@@ -227,7 +230,7 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     bee2.projClass = 'magic';
     step([bee2], 20, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // ★override 通道开:magic 臂 0.64 档真
-    expect(eB.calls[0]!.d).toBe(20);
+    expect(eB.calls[0]!.d).toBe(10);   // ★S02 改判:未翻倍基伤
   });
 
   it('1e 结构锁：Game.ts 11 位 magic 写位+通用路径 critBonus 载体=零残留,0.04 路由门在位', () => {
@@ -303,7 +306,7 @@ describe('BJ496-§2：melee 混合兜底收编（307 eater 动态掷+shotArrow d
     b307.friendly307 = true;
     step([b307], 20, hooks);
     expect(eB.calls[0]!.crit).toBe(true);                // ★melee 臂折入（旧冻结面无从承载）
-    expect(eB.calls[0]!.d).toBe(20);
+    expect(eB.calls[0]!.d).toBe(10);   // ★S02 改判:未翻倍基伤
   });
 
   it('2b 结构锁：eater/shotArrow 冻结写位零残留+0.04 路由门在位', () => {
@@ -374,7 +377,7 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
     step([a], 20, hooks);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.crit).toBe(true);                 // TimerCrit 强制（旧支恒 false 必红）
-    expect(e.calls[0]!.d).toBe(20);                      // ★翻倍归位（新源补一次 ×2）
+    expect(e.calls[0]!.d).toBe(10);   // ★S02(BJ723-B)改判:crit ×2=Enemy.hurt 防后——spy 收未翻倍基伤(旧 20=预倍形)                      // ★翻倍归位（新源补一次 ×2）
     expect(player.accTimerCritCharge).toBe(-15);         // ★消费（旧整缺恒 1000 必红）
   });
 
@@ -389,7 +392,7 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
     step([a], 20, hooks);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.crit).toBe(true);                 // golem 强制（旧同相=回归锚）
-    expect(e.calls[0]!.d).toBe(18);                      // ★主判别:翻倍（旧 10 必红）;DV(10,−14 档)=9×2（BJ716-A R18-F2）
+    expect(e.calls[0]!.d).toBe(9);    // ★S02(BJ723-B)改判:DV(10,−14 档)=9 未翻倍直传(旧 18=预倍形)                      // ★主判别:翻倍（旧 10 必红）;DV(10,−14 档)=9×2（BJ716-A R18-F2）
   });
 
   it('3d MinionProj contact 锚（BJ453 分立形回归位）：tag crit 命中拍 TimerCrit 照消费', () => {
@@ -406,7 +409,7 @@ describe('BJ496-§3：TimerCrit 掷中照消费+golem 掷独立化（主面/whip
       .contact(hooks, 30, 5);
     expect(src.calls.length).toBe(1);
     expect(src.calls[0]!.crit).toBe(true);               // tag crit（res.crit）
-    expect(src.calls[0]!.d).toBe(76);                    // (30+8)×2 已嵌 res.dmg 单翻倍
+    expect(src.calls[0]!.d).toBe(38);                    // ★S02 改判:30+8=38 未翻倍直传(旧 76=WhipTag 尾预倍形,已摘)
     expect(player.accTimerCritCharge).toBe(-15);         // ★锚:TimerCrit 照消费（懒惰变异必红）
   });
 });

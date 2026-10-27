@@ -129,7 +129,9 @@ describe('SW-BJ60 ③:两路一致性单源 tripwire', () => {
     const rd = srcOf('src/render/Renderer.ts');
     expect(rd).toContain("from '../data/vanillaItemColor'");
     expect(rd).toContain('private itemColorSprite(');
-    const dd = rd.slice(rd.indexOf('private drawDrop('), rd.indexOf('private drawDrop(') + 2000);
+    // ★BJ730 改判史：窗口旧 2000——drawDrop 体合法增重（光罩/烘焙支扩面）,
+    //  itemColorSprite 调用现偏移 5426;窗口随文本放宽（增重破窗判例）。
+    const dd = rd.slice(rd.indexOf('private drawDrop('), rd.indexOf('private drawDrop(') + 6000);
     expect(dd).toContain('itemColorSprite(');
     // 旧两步组合(destination-out 挖底+lighter 叠乘色)在 A<255 时漏底图残量项,
     // 不等价于 XNA 两遍——代码面守卫(注释里的文字记述不匹配此带引号形态)

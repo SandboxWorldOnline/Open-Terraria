@@ -185,8 +185,16 @@ describe('C 组 AI 数值/条件', () => {
     const h = makeHooks();
     const hornet = makeEnemy(h, 42, { hp: 100000 });
     hornet.fixedUpdate(1 / 60, h.hooks);
-    // 1456 乘 0 = 速度恒 0 悬停;1457 accel 0.021/t 正常起步
-    expect(Math.abs(hornet.vx)).toBeGreaterThan(0);
+    // ★BJ731 改判史（2026-10-27）：BJ703-C D6（2026-10-21）落地原版 |vx|<0.005
+    //   清零（NPC.cs:91588-91591,AI 后无条件）——首拍 vx=osc(−0.023)+accel(+0.021)
+    //   =−0.002 被 :91588 清零,旧「单拍 |vx|>0」断言在【已修复】代码上恰红;
+    //   而 1456 档 ×(1−scale)=0（accel=0）留下纯 osc −0.023 不入清零带=旧断言
+    //   反而绿——单拍 |vx| 无判别力,判别面改 vy：
+    //   1457 档首拍 vy=osc(+0.023)+accel(+0.021)=0.044;1456 档 accel=0 且
+    //   sy=maxSpd×0=0 → vy=0.023。0.03 阈值双面判别。
+    expect(hornet.vy).toBeGreaterThan(0.03);
+    for (let t = 0; t < 119; t++) hornet.fixedUpdate(1 / 60, h.hooks);
+    expect(Math.abs(hornet.vx)).toBeGreaterThan(0.1);   // t101 起 osc 翻 +,vx 持续起步（模拟 t130≈0.86）
   });
 });
 

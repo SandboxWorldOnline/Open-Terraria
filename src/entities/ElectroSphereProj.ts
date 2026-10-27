@@ -18,7 +18,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A（D1 B17）：城镇 voodoo 靶 + critter 臂
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ497② 掷率单源（443 ranged 旗命中拍动态）
 
@@ -137,13 +137,26 @@ export class ElectroSphereProj extends Entity {
         { projId: ELECTROSPHERE_PROJ }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
-      // ★BJ497② 翻倍归位（BJ496③ 同族缺口）：原版 StrikeNPC :12811 crit → num×2——
-      //  旧面染 crit 色零翻倍（本仓 Enemy.hurt 不内部翻倍,调用侧负责=Arrow 主环同式）。
-      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)) * (crit ? 2 : 1))
-        + (snapBonusSphere ? Math.trunc(snapBonusSphere * (crit ? 2 : 1)) : 0),
+      // ★BJ497② 翻倍归位（BJ496③ 同族缺口）+★S02(BJ723-B):crit ×2 统一移
+      //  Enemy.hurt 防后(NPC.cs:82067)——旧面染 crit 色零翻倍,后随「调用侧预倍」
+      //  惯例,现单布尔承载。
+      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)))
+        + (snapBonusSphere ? snapBonusSphere : 0),
         0, 0, game, this.armorPen, crit, 2, true);
       e.iframes = ELECTROSPHERE_IFRAMES;                 //（:14072-14074，覆写通用档 10）
     }
+    // ★BJ729-A（D1 B17,2026-10-27）：critter 臂——原版 Damage_PVE victim 循环
+    //  （:12592）对小动物同链（443 非 minion/sentry → CanNPCBeHit :20675 放行）;
+    //  penetrate=-1 持续脉冲多靶 → hitCrittersAll（受理数走 numHits 账 :14263）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: ELECTROSPHERE_PROJ }, game);
+    // ★BJ729-A（D1 B17）：城镇 voodoo 靶——friendly 弹走 flag 巫毒窄门（:12618-
+    //  12631,22 killGuide/54 killClothier）;settle 镜像敌怪臂链（crit 掷 :12915-27
+    //  ranged 旗;穿甲 armorPen;DV=敌怪臂面级既有形态不单侧补齐[D6 族登记]）。
+    //  immune[owner]=8 档对城镇靶由 TownNPC.hurt iframes 近似承载（D3 族口径）。
+    hitTownNpcs(this, game, Math.max(1, Math.trunc(this.damage)), 0, 'playerProj',
+      ELECTROSPHERE_PROJ, undefined, undefined, undefined, undefined,
+      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(ELECTROSPHERE_PROJ, game),
+        penPercent: this.armorPen }));
   }
 
   /** 消亡口（无 Kill 特效——vanilla 443 Kill 无专属分支；dead 旗交 EntityManager 剔除） */

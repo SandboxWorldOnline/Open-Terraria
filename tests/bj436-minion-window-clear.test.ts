@@ -174,7 +174,7 @@ describe('BJ436 §E 818 扑击弹（usesLocal cd=-1）：窗拒拍 hitSet 不记
     // ★BJ455③（2026-10-03）：banner 乘区包入 applyBannerDamageDealt（Damage_PVE :13387-91
     //   对 818 标准管线照跑,他臂同式）;★BJ453 并链 critPounce 源保持
     // ★BJ716-A（R18-F2）锁随刀走:818 臂补 DamageVar 首掷（dmgVPounce）——窗门/hitSet/-3 写梯语义不变
-    expect(enemyArm).toContain("en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? dmgVPounce * 2 : dmgVPounce), 0, 0, game, 0, critPounce, -3, true)");
+    expect(enemyArm).toContain("en.hurt(applyBannerDamageDealt(game, en, dmgVPounce), 0, 0, game, 0, critPounce, -3, true)");
     expect(enemyArm).toContain('noteVanillaProjImmune(game, 818, en.id, { penetrate: -1, localFace: true })');
   });
 });

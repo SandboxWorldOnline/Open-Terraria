@@ -89,9 +89,10 @@ function fakeDirHandle(name: string, opts: {
             abort: async () => {},
           };
         },
-        text: async () => {
+        // ★Issue#25 改判史：标准 FileSystemFileHandle 形状——无 text() 成员,getFile()→File
+        getFile: async () => {
           if (!files.has(n)) { const e = new Error('NotFoundError'); (e as { name?: string }).name = 'NotFoundError'; throw e; }
-          return f!.content;
+          return { text: async () => f!.content };
         },
       };
     },
@@ -439,6 +440,41 @@ describe.skipIf(EXT_MISSING)('BJ614 G组：读档自愈恢复链', () => {
     expect(await mod.restoreFromBackup('sandboxworld.worlds.index')).toMatchObject({ ok: true, text: '[{"id":7}]' });
     expect(await mod.restoreFromBackup('sandboxworld.players.index')).toMatchObject({ ok: true, text: '[{"id":3}]' });
     expect(kvMock.values.get('sandboxworld.players.index')).toBe('[{"id":3}]');
+  });
+
+  // ★Issue#25 回归锁（2026-10-27）：标准 FileSystemFileHandle 形状——只有 getFile()/
+  // createWritable()（无句柄级 text()）。旧代码 fh.text() 在真机必抛
+  // TypeError: fh.text is not a function → catch 转 broken = 备份永不可恢复;旧夹具
+  // 照错误接口造 {text} 反而恒绿（幻想接口掩蔽判例）。本用例用最小标准形状钉死。
+  it('Issue#25 标准句柄形状恢复：仅 getFile() 的句柄 → 恢复成功（旧码必 broken）', async () => {
+    // 最小标准形状：getFileHandle 返回的句柄【只有 getFile】,text() 在 File 上
+    const stdDir = {
+      kind: 'directory' as const,
+      name: 'StdBackups',
+      queryPermission: async () => 'granted' as const,
+      keys: async function* () { yield 'W_9_20261027_120000.json'; },
+      getFileHandle: async (n: string) => ({
+        getFile: async () => ({ text: async () => `std-shape:${n}` }),
+        // ★刻意不设 text/createWritable——真机形状
+      }),
+      removeEntry: async () => {},
+    };
+    kvMock.values.set('sandboxworld.fsBackup.dir', stdDir);
+    kvMock.values.delete('sandboxworld.world.9');
+    const mod = await freshMod();
+    await new Promise((r) => setTimeout(r, 0));
+    const r = await mod.restoreFromBackup('sandboxworld.world.9');
+    expect(r).toEqual({ ok: true, text: 'std-shape:W_9_20261027_120000.json', file: 'W_9_20261027_120000.json' });
+    expect(kvMock.values.get('sandboxworld.world.9')).toBe('std-shape:W_9_20261027_120000.json');
+  });
+
+  it('Issue#25 结构锁：FsBackup 源码经 getFile() 取 File 读全文,禁句柄级 text() 复活', () => {
+    const src = readFileSync(resolve(__dirname, '..', 'src', 'save', 'FsBackup.ts'), 'utf8');
+    expect(src).toContain('await fh.getFile()).text()');
+    expect(src).not.toMatch(/fh\.text\(/);
+    // 接口面锁：句柄形状声明必须是 getFile 而非 text
+    expect(src).toContain('getFile(): Promise<{ text(): Promise<string> }>');
+    expect(src).not.toMatch(/^\s*text\(\): Promise<string>;/m);
   });
 
   it('备份无该键档 → no-backup（原错误文案路径）;句柄目录枚举失败 → broken', async () => {

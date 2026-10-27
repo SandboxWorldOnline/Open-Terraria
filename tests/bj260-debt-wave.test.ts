@@ -205,7 +205,12 @@ describe.skipIf(EXT_MISSING)('BJ260-③ F1 湿链 jumpSpd 残项（覆写后补 
     expect(p.jumpHold).toBe(30);
     for (let i = 0; i < 5; i++) {                        // 按住跳平台段（松键=断 sustain）
       p.fixedUpdate(1 / 60, poolHooks(w, p));
-      expect(p.vy).toBeCloseTo(-7.81, 5);               // sustain 钉速=覆写+加成终值
+      // ★BJ730 改判史：旧值 −7.81（BJ717-A 前旧序=重力后钉,钉覆写重力=恒终值）→
+      //  新值 −7.61——BJ717-A F1+F8（2026-10-25,R13 P0 清偿）钉序翻正为原版序
+      //  （JumpMovement 钉 :20831 → 重力 :27556 → 积分 :28385）,平台拍净速 =
+      //  −js+grav = −(6.01+1.8)+0.2 = −7.61（oracle 双证:vanilla-headless S1
+      //  逐拍 vy=−js+grav,apex 98.07 吻合;湿档 grav=0.2 同式）。
+      expect(p.vy).toBeCloseTo(-7.61, 5);               // sustain 钉后同拍重力=净 −js+grav
     }
     p.inputJump = false;
   });

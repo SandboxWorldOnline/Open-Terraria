@@ -44,6 +44,7 @@ import { projSprite } from './Arrow';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { roundCSf32Mul, truncCSf32MulBias } from '../stats/ScaleStats';   // ★BJ640 词缀烘定（(int)Math.Round f32 银行家）+★BJ651 站④②GetWeaponDamage 截断
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C S03：鞭本体 DV 首掷（Damage_PVE_Inner :12970,单源同 BJ716-A Dart/Arrow 链）
 import { wetCollision, lavaCollision } from './npcLiquid';
 import { meleeThirdOf, ZAPPING_JELLYFISH } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
@@ -253,7 +254,7 @@ export class WhipProj extends Entity {
     //  minionDamage）——Game 鞭支 NewProjectile Damage 实参同位。第一乘区=词缀烘定
     //  （Game 鞭支 :19796 roundCSf32Mul,ctor 形参即烘定基）。旧 f64 Math.round 无偏置
     //  =中点档差 1（鞭 4678 裸词缀×summon 1.1: 55→60.5 原版 60/旧 61）
-    this.dmgNow = Math.max(1, truncCSf32MulBias(o ? o.summonDamageMult : 1, damage)); // ⑥ pen 移 hurt 参
+    this.dmgNow = truncCSf32MulBias(o ? o.summonDamageMult : 1, damage);   // ⑥ pen 移 hurt 参（★BJ723-C D3 清偿（BJ725-A）：去 Math.max(1) 出生钳——月主鞭 1035 子鞭伤=母鞭 dmgNow 现值（:48596-48610 NewProjectile 读现值）,母鞭衰减至 0 时原版子鞭 0 伤（Damage_PVE :12577 门零受理,本仓 :622 dmgNow<=0 门同构）;正常挥鞭 damage≥1 钳恒等式无影响;bj651 M5 变异靶串保留在钳内式——变异恰红不失效）
   }
 
   /** GetWhipSettings（:45683-45761） */
@@ -611,6 +612,14 @@ export class WhipProj extends Entity {
       buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has?.(BuffType.ImbueNano)) === true;
     const whipImbuParty = ((game.player as unknown as {
       buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has?.(BuffType.ImbueParty)) === true;
+    // ★BJ723-C S04（2026-10-26）：Damage_PVE 头门 `if (damage <= 0) return;`
+    //  （Projectile.cs:12577-12580）——衰减链改 (int) 截断（:13503 case 841
+    //  `damage = (int)((double)damage * 0.5)` 等,无 Math.Max 下限）后 damage 字段
+    //  可达 0（皮鞭 15→7→3→1→0）;0 伤鞭对【一切】受害靶整跳：不 DV/不 tag/
+    //  不 falloff/不 debuff/不写 minionTarget/不占 hitSet（Damage_PVE 在 victim
+    //  循环前整退,城镇敌怪同门）。dmgNow=damage 字段镜像（召唤乘区出生+逐靶
+    //  衰减,whip projSpecificDamageMultiplier=1,:14501 起无一适用 aiStyle165）。
+    if (this.dmgNow <= 0) return;
     for (const p of pts) {
       // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
       // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)
@@ -651,6 +660,8 @@ export class WhipProj extends Entity {
       //  GetArmorPenetration(melee=false)=玩家通用 armorPen,同敌怪环 :778 形）。
       //  banner 乘区（:13387-91）在 hitTownNpcs 通道内施加（城镇 NPC 无 banner 档,
       //  结构恒等值）。
+      // townDmg 入参=无 settle 兜底位（★BJ723-C S03：DV+nano 已上置 settle 逐靶掷,
+      //  本值不再被消费——hitTownNpcs :143 `st?.dmg ?? dmg` 恒取 settle 返回值）
       const townDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05) : this.dmgNow;
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, townDmg,
         Math.sign(p.x - this.x) * 2, 'playerProj', this.projId,
@@ -672,8 +683,10 @@ export class WhipProj extends Entity {
           this.hitSet.add(tn.id);       // 写梯 :14179 immuneArray[victim]=-1 占位
           const preHits = this.pveNumHits;
           this.pveNumHits++;            // :14263（proc 读自增前值,同敌怪环习语）
-          // 衰减链（:13453-13550 switch）：受理拍鞭 damage 字段 ×falloff,城镇靶同耗
-          this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
+          // 衰减链（:13453-13560 switch）：受理拍鞭 damage 字段 ×falloff,城镇靶同耗
+          //  ★BJ723-C S04：(int) 截断同敌怪环（:13503 case 841 等——无 round 无
+          //  Math.Max 下限,Damage_PVE :12577 damage<=0 整退门已上置 tryHit 头）
+          this.dmgNow = Math.trunc(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1));
           // ---- ★清偿刀 X1（2026-10-01）城镇受理面家族收编（六面落刀位）----
           //  原文 Damage_PVE_Inner 受理梯（逐行号）：:13633 SpawnHitVisuals →
           //  :13634 StatusNPC（内含 ApplyWhipDebuffs :11067 与浸剂/meleeEnchant
@@ -756,7 +769,7 @@ export class WhipProj extends Entity {
             && owner.tagEffectStack.canProcOnNPC(5479, tn.id)) {
             this.localAI0 = 1;
             owner.tagEffectStack.removeAllProcs(5479);                          // :14006
-            const starDmg = Math.max(1, Math.trunc(this.dmgNow * 2 * 0.22));    // :14005 + :15016-15017
+            const starDmg = Math.trunc(this.dmgNow * 2 * 0.22);    // :14005 + :15016-15017  // ★BJ723-C D2 清偿（BJ725-A）::15016 (int)(calcDamage×0.22f) 无下限——dmgNow≤2 出 0 伤星（Arrow damage<=0 门 :12576 零受理）,旧 max1 钳出 1 伤星
             for (let i = 2; i < pts.length - 1; i += 3) {
               const a = pts[i], b = pts[i + 1];
               const dx = b.x - a.x, dy = b.y - a.y;
@@ -790,7 +803,16 @@ export class WhipProj extends Entity {
           const timerCritTown = owner?.tryConsumingTimerCrit?.(game, tn.x, tn.y, tn.w, tn.h) ?? false;
           const flatPen = owner ? ((owner as unknown as { equipStats?: { armorPen?: number } })
             .equipStats?.armorPen ?? 0) : 0;
-          return timerCritTown ? { flatPen, crit: true } : { flatPen };
+          // ★BJ723-C S03：城镇靶 DV 同掷（:12970 对 Damage_PVE_Inner 单遍历城镇受害
+          //  靶同链同达——settle 位=巫毒窄门后/hurt 前 :12947 ModifyHit 原位,逐靶
+          //  独立掷;nano ×1.05 在 DV 后同敌怪环序）。dmg 返回值覆盖入参 dmg
+          //  （hitTownNpcs :143 st?.dmg ?? dmg）,入参仅无 settle 兜底位。
+          const townRolled = damageVarRoll(this.dmgNow, ((owner as unknown as { luck?: number } | null)?.luck) ?? 0);
+          return {
+            flatPen,
+            crit: timerCritTown || undefined,
+            dmg: whipImbuNano ? Math.trunc(townRolled * 1.05) : townRolled,
+          };
         });
       // ★2026-10-21 用户实报「万花筒打不到小动物（猫头鹰等）」定谳修复:本扫只扫
       //  enemies 桶=小动物（EntityManager 独立 critters 桶）对鞭不可见。原版 Colliding
@@ -856,8 +878,18 @@ export class WhipProj extends Entity {
         //     与 WeaponProj 弹幕侧同通道,不造第二出口）。
         //   鞭无类旗 → 原版 crit 三连掷(:12906-12912)轮不到鞭（repo hurt 恒 crit=false
         //   同源,勿补掷）;parry ×5 门 = melee&&!DontApplyParry（:13631）鞭不在门内。
-        const whipDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05)   // (int)(dmg×1.05f)
-          : this.dmgNow;                                                // 当前鞭伤（衰减链前）
+        // ★BJ723-C S03（2026-10-26）：Damage_PVE_Inner :12970 `int dmg =
+        //  Main.DamageVar(num15, Main.player[owner].luck)`——鞭本体【每受理靶】对
+        //  衰减态基伤独立掷 ±15%（31 档离散/f32 逐级/银行家舍入/owner luck 重掷
+        //  取极值——damageVarRoll 单源,Main.cs:67103;BJ716-A Dart/Arrow 同式）。
+        //  num15=num7=tag 前基伤（鞭自体 CanRunHitEffects 恒假,WhipTagEffect.cs
+        //  :95-105 → changes.AddProjectileTagDamage 不置,无 tag 面）⇒ 直接掷
+        //  dmgNow。原序=DV(:12970)→…→nano ×1.05(:13687-96)→banner(:13388)→
+        //  StrikeNPC 内 crit ×2——nano/banner/TimerCrit 均在 DV 之后消费掷值。
+        //  旧形态无 DV=输入 100 恒 100（85-115 整缺）+luck 重掷无效。
+        const whipRolled = damageVarRoll(this.dmgNow, ((owner as unknown as { luck?: number } | null)?.luck) ?? 0);
+        const whipDmg = whipImbuNano ? Math.trunc(whipRolled * 1.05)     // (int)(dmg×1.05f)——掷后值
+          : whipRolled;                                                  // 当前鞭伤（衰减链前,DV 掷值）
         if (whipImbuParty) {
           game.spawnFriendlyProj?.(new ConfettiBurstProj(
             e.x + e.w / 2, e.y + e.h / 2,
@@ -890,7 +922,8 @@ export class WhipProj extends Entity {
         //  全局窗（多鞭回声/蛇环补挥/后到他弹被自造窗拒 10t=鞭→随从连携核心机制反向
         //  砍伤）;pierce=-3 档（Enemy.ts :14427/:14541 BJ398 约定）=门照走（:14235
         //  pierce!==1 臂,flag3=false 同鞭）+命中写清零。局部节流已由 hitSet 承载。
-        e.hurt(applyBannerDamageDealt(game, e, whipDmg) * (timerCritWhip ? 2 : 1), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, timerCritWhip, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）; ★BJ467① TimerCrit 强制 ×2+crit 色位
+        // ★S02(BJ723-B):crit ×2 摘除——TimerCrit 单布尔传 Enemy.hurt 防后翻倍(NPC.cs:82067)
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, timerCritWhip, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）; ★BJ467① TimerCrit crit 色位
         // ★Z1/D1④（2026-10-02）GC1 写方桥对称补接线（BJ436 在 MinionProj 接桥,鞭两面
         //  缺=近战域 immune 表单域记账不对称）。写梯真值=usesLocal 主支清零档
         //  （:14175-14179 `immune[owner]=0`;DefaultToWhip usesLocal+cd=-1 penetrate=-1
@@ -937,8 +970,12 @@ export class WhipProj extends Entity {
           e as unknown as Record<string, number>,
           () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
             ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
-        // 衰减链（:13453-13550）：每次命中后鞭 damage 字段 ×falloff
-        this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
+        // 衰减链（:13453-13560 switch）：每次命中后鞭 damage 字段 ×falloff
+        //  ★BJ723-C S04：(int) 截断（case 841 :13503 `damage = (int)((double)damage
+        //  * 0.5)` 等 18 鞭型全 (int) 截断,无四舍五入无 Math.Max 下限——皮鞭 15 打
+        //  三目标 15→7→3,旧 round+floor1=15→8→4 两向偏差;双字面量域 (double)
+        //  ×0.5 直算=JS double 逐位同）;城镇靶同耗（见下方城镇臂同式）
+        this.dmgNow = Math.trunc(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1));
         // tag（TryApplyTagToNPC :13635-13638 → TagEffectStack :80-87）：tag 态入玩家
         // MRU 栈（时长 = TagDuration × tagEffectDuration,1457 表 5479=480 其余 240;
         // ImmuneToWhips 11 种敌门内跳过）;自 buff（AddTheBuff :53-60）随 tag 施加,
@@ -968,7 +1005,7 @@ export class WhipProj extends Entity {
           && owner.tagEffectStack.canProcOnNPC(5479, e.id)) {
           this.localAI0 = 1;
           owner.tagEffectStack.removeAllProcs(5479);                          // :14006
-          const starDmg = Math.max(1, Math.trunc(this.dmgNow * 2 * 0.22));    // :14005 + :15016-15017
+          const starDmg = Math.trunc(this.dmgNow * 2 * 0.22);    // :14005 + :15016-15017  // ★BJ723-C D2 清偿（BJ725-A）::15016 (int)(calcDamage×0.22f) 无下限——dmgNow≤2 出 0 伤星（Arrow damage<=0 门 :12576 零受理）,旧 max1 钳出 1 伤星
           const add = (el: unknown, b: string) =>
             (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(el, b);
           for (let i = 2; i < pts.length - 1; i += 3) {

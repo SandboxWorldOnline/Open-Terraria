@@ -231,7 +231,7 @@ describe('★A3 projClass 数据面与消费面', () => {
     try { hitEnemies(s.me, s.game, s.cd, 9999, 1); } finally { rand.mockRestore(); }
     expect(s.hits.length).toBe(1);
     expect(s.hits[0].crit).toBe(true);
-    expect(s.hits[0].dmg).toBe(200);                // trunc(100×2)
+    expect(s.hits[0].dmg).toBe(85);                 // ★W01(BJ723-B)改判:DV(100,0.01→−15 档)=85 未翻倍直传(旧 200=预倍形)
   });
 
   it("①' 无类弹（908 钛金碎片族）/summon 不掷 auto-crit（Projectile.cs:12898 只列三类）", () => {
@@ -239,21 +239,21 @@ describe('★A3 projClass 数据面与消费面', () => {
     const rand = vi.spyOn(Math, 'random').mockReturnValue(0.01);     // 若掷必暴——证其未掷
     try { hitEnemies(s.me, s.game, s.cd, 9999, 1); } finally { rand.mockRestore(); }
     expect(s.hits[0].crit).toBe(false);
-    expect(s.hits[0].dmg).toBe(100);
+    expect(s.hits[0].dmg).toBe(85);                 // ★W01 改判:DV −15 档 85(旧 100=无 DV 平值)
   });
 
   it('③ parryDamageBuff ×5：melee 清 buff 并乘 5；排除族 524 不消费不清除', () => {
     const a = hitStub(1111, { parry: true });       // random 高钉 ⇒ 无 crit 纯净面
     const rA = vi.spyOn(Math, 'random').mockReturnValue(0.99);
     try { hitEnemies(a.me, a.game, a.cd, 9999, 1); } finally { rA.mockRestore(); }
-    expect(a.hits[0].dmg).toBe(500);                // 100×5（无 crit）
+    expect(a.hits[0].dmg).toBe(575);                // ★W01 改判:DV(100,0.99→+15 档)=115×5(旧 500=无 DV)
     expect(a.hits[0].crit).toBe(false);
     expect((a.game as never as { player: { parryDamageBuff: boolean } }).player.parryDamageBuff).toBe(false);
 
     const b = hitStub(524, { parry: true });        // Bladetongue 血舌∈DontApply
     const rB = vi.spyOn(Math, 'random').mockReturnValue(0.99);
     try { hitEnemies(b.me, b.game, b.cd, 9999, 1); } finally { rB.mockRestore(); }
-    expect(b.hits[0].dmg).toBe(100);
+    expect(b.hits[0].dmg).toBe(115);                // ★W01 改判:DV(100,0.99→+15 档)=115(旧 100=无 DV)
     expect((b.game as never as { player: { parryDamageBuff: boolean } }).player.parryDamageBuff).toBe(true);
   });
 
@@ -263,12 +263,12 @@ describe('★A3 projClass 数据面与消费面', () => {
     try {
       const a = hitStub(1111, { imbuNano: true, imbuParty: true });
       hitEnemies(a.me, a.game, a.cd, 9999, 1);
-      expect(a.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
+      expect(a.hits[0].dmg).toBe(Math.trunc(115 * 1.05));   // ★W01 改判:DV +15 档 115×1.05(旧 105=无 DV)
       expect(a.spawned.length).toBe(1);
 
       const whip = hitStub(1034, { imbuNano: true }); // IsAWhip 臂：无类也吃门
       hitEnemies(whip.me, whip.game, whip.cd, 9999, 1);
-      expect(whip.hits[0].dmg).toBe(Math.trunc(100 * 1.05));
+      expect(whip.hits[0].dmg).toBe(Math.trunc(115 * 1.05));   // ★W01 改判:DV +15 档
 
       const none = hitStub(1111);
       hitEnemies(none.me, none.game, none.cd, 9999, 1);

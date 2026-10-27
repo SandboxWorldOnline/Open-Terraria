@@ -25,7 +25,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B21）：城镇 voodoo 靶
 import { tintedTex } from '../render/StringLine';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
@@ -34,6 +34,7 @@ import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate,
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
+import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C M02：632 光棱/461 光束 DV 首掷（:12970）
 
 // ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
 //  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
@@ -224,8 +225,16 @@ export class PrismProng extends Entity {
           // ★BJ489 def-3：632 光棱掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+
           //  :25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
           const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-          let dmg = crit ? this.damage * 2 : this.damage;
-          if (charge >= 180) dmg *= 3;                     // 满充 ×3（:30379-30381）
+          // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——632 光棱
+          //  每受理靶 ±15% 31 档离散+luck 重掷,BJ716-A Arrow 主环同式;满充 ×3 不能
+          //  替代 DV=两乘区独立）。原版序=AI :32022-32026 先写 damage 字段（=
+          //  父晶体 damage;满充 ×3 在【字段】上）→ DV 掷字段值（:12970）→
+          //  banner(:13388)→StrikeNPC 内 crit ×2 ⇒ DV 基数=×3 后值（DV(300)≠
+          //  DV(100)×3 中点档差 1）,×3 折入 DV 基、crit ×2 后置。
+          let dmg = damageVarRoll(charge >= 180 ? this.damage * 3 : this.damage,
+            ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+          // ★S02(BJ723-B):crit ×2 摘除——移 Enemy.hurt 防后(NPC.cs:82067)
+          // （旧形 `if (charge>=180) dmg *= 3` 已折入上方 DV 基——满充 ×3 :30379-30381）
           // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
           //  632 数据面 magic ⇒ 原版棱镜光棱本就吸血,本仓漏接）——受理位挂接,
           //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
@@ -719,7 +728,10 @@ export class BlasterBeam extends Entity {
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
         // ★BJ489 def-3：461 光束掷率=rollVanillaHitCrit（magic 旗,命中拍动态;冻结载体退役）
         const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-        const dmg = crit ? this.damage * 2 : this.damage;
+        // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（:12970——461 光束每受理靶
+        //  ±15% 31 档离散+luck 重掷,Arrow 主环同式;crit ×2 后置=StrikeNPC 内序）
+        const dmgB461 = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+        const dmg = dmgB461;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
         // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
         //  461 数据面 magic ⇒ 原版充能爆破炮光束本就吸血,本仓漏接）——受理位挂接,
         //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
@@ -762,6 +774,24 @@ export class BlasterBeam extends Entity {
         break;
       }
     }
+    // ★BJ729-A（D1 B21,2026-10-27）：城镇 voodoo 靶——461 friendly 光束巫毒窄门
+    //  （:12618-12631,22 killGuide/54 killClothier）;collide 镜像敌怪臂束线几何
+    //  （厚 22 步进盒,与 critter 臂 hitCrittersAll 同构）;settle 镜像（DV :12970+
+    //  crit 掷 magic/穿甲 armorPen;kb=敌臂向量 X 分量,ky=0 降维=近似登记[D8]）;
+    //  5t 窗由 TownNPC.hurt iframes 承载（D3 族口径）。
+    hitTownNpcs(this, game, this.damage, this.vx * this.knockback, 'playerProj', this.projId,
+      (tn) => {
+        for (let s2 = 1; s2 <= steps; s2++) {
+          const d = s2 * 12;
+          if (d > this.beamLen) break;
+          const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
+          if (bx < tn.x + tn.w && bx + thick > tn.x && by < tn.y + tn.h && by + thick > tn.y) return true;
+        }
+        return false;
+      }, undefined, undefined, undefined,
+      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.armorPen }));
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {

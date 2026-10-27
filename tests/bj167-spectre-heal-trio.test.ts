@@ -12,7 +12,15 @@
 //     治疗弹 298 从受害者位置起飞）——旧码传弹体左上 this.x,y,起飞原点差几像素。
 // 单源习语 = MagicProj BJ157-①（spectreVictimEligible + lastStrikeDealt + 受害者
 // Center）;numHits 实参沿 BJ157-②（Arrow=pveNumHits,MissileProc=pierceInit−pierce）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+// ★BJ730 改判史：本套件期望值（60−22=38 / 80−22=58 等）写于 BJ716-A R18-F2 DV
+//  首掷接入（2026-10-25,:12970 ±15% 31 档）【之前】——Arrow/MissileProj 伤害面
+//  现每次命中 DV 掷,未钉掷时期望值在 31 档内随机漂移（42=64−22/30=52−22 等红
+//  皆掷面漂移非回归;ghost 支传参 lastStrikeDealt/Center 已复核 vanilla 等位）。
+//  按 BJ716-A「DV 接入测试位移配方」钉 Math.random=0.5（tier 0 → ×1.0 中性档,
+//  crit 0.5≥0.04 恒不中）,期望值回归确定。
+beforeEach(() => { vi.spyOn(Math, 'random').mockReturnValue(0.5); });
+afterEach(() => { vi.restoreAllMocks(); });
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';

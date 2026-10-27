@@ -12,7 +12,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B28）：城镇 voodoo 靶
 import { rollVanillaHitCrit } from './proj1457';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
@@ -160,7 +160,7 @@ export class TideSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,451 melee 旗）。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // ★F3 接线（蓝队四轮）：波涌之刃弹 451 数据面 melee（SetDefaults 类旗投影）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -172,11 +172,19 @@ export class TideSlash extends Entity {
       const dmgHooked = runModModifyHitNpcByProj(game.player, game, this.projId,
         (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg, crit);
             e.hurt(applyBannerDamageDealt(game, e, dmgHooked)
-        + (snapBonusTide ? Math.trunc(snapBonusTide * (crit ? 2 : 1)) : 0),
+        + (snapBonusTide ? snapBonusTide : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitSet.add(e.id);
       this.hitCd.set(e.id, 10);
     }
+    // ★BJ729-A（D1 B28,2026-10-27）：城镇 voodoo 靶——451 friendly 弹巫毒窄门
+    //  （:12618-12631,projId=451 亲核 melee）;AABB 自盒;settle 镜像敌怪臂链
+    //  （crit 掷 melee/mod 修正链=hitTownNpcs 原语内置/DV=面级既有形态[D6 族登记]/
+    //  穿甲 armorPen）;hitSet/hitCd 单跳由 TownNPC.hurt iframes 承载。
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
+      'playerProj', 451, undefined, undefined, undefined, undefined,
+      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(451, game),
+        penPercent: this.armorPen }));
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {

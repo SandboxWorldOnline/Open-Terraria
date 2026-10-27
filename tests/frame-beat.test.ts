@@ -654,9 +654,9 @@ describe('★估计器诊断面锁(v9.5 清退态原样保留;est 只喂 F5/snap
 // ═══════════════════════════════════════════════════════════════════════
 describe('锁帧档语义锁(源锚)', () => {
   it('Game.start():beat 调用面接线(observeVsync/shouldRender/beginRender/endRender/hold);v9.12 分支语义(cap=锁帧档)', () => {
-    expect(GAME).toContain("import { FrameBeat } from './FrameBeat';");
+    expect(GAME).toContain("import { FrameBeat, frameCapUrl } from './FrameBeat';");   // ★?framecap=N URL 覆写口(2026-10-27)
     expect(GAME).toContain('this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil)');
-    expect(GAME).toContain('this.beat.observeVsync(now, options.data.frameCap)');
+    expect(GAME).toContain('this.beat.observeVsync(now, frameCapUrl ?? options.data.frameCap)');
     expect(GAME).toContain('if (!this.beat.shouldRender(now))');
     expect(GAME).toContain('this.beat.beginRender(now)');
     expect(GAME).toContain('this.beat.endRender(performance.now())');
@@ -799,7 +799,7 @@ describe('锁帧档语义锁(源锚)', () => {
     expect(iHoldBlock).toBeLessThan(iMachine);
     // Game 侧接线:paused 单源+入场冻结窗+传送幕帘,且先于 observeVsync
     const iWire = GAME.indexOf('this.beat.hold(');
-    const iObs = GAME.indexOf('this.beat.observeVsync(now, options.data.frameCap)');
+    const iObs = GAME.indexOf('this.beat.observeVsync(now, frameCapUrl ?? options.data.frameCap)');
     expect(iWire).toBeGreaterThan(-1);
     expect(iWire).toBeLessThan(iObs);
     // 诊断面:snapshot().hold

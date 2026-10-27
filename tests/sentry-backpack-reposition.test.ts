@@ -255,7 +255,11 @@ describe('③ 6176 accGolemSentryBackpack：sentry/SentryShot 命中 1/10 强制
     const s = new MinionProj(player.cx - 8, player.cy - 8, 691, 10, 1, true, 0, false, () => player);
     s.fixedUpdate(1 / 60, hooks);
     rnd.mockRestore();
-    expect(en.hurtLog).toEqual([18]);                  // 10×2;DV(10,−14 档)=9（BJ716-A R18-F2 首掷）                      // dmgOf=10 → crit ×2
+    // ★BJ731 改判史（2026-10-27）：BJ723-B S02 起 crit ×2 移入 Enemy.hurt 防后
+    //   （NPC.cs:82067 两步式）——调用侧传【未翻倍】DV 掷值+crit 旗。mock 0.05 →
+    //   DV(10,−14 档)=9（BJ716-A R18-F2 首掷）;×2=18 由真 Enemy.hurt 承载（本
+    //   stub hurt 不翻倍）。旧期望 [18]=S02 前调用侧预翻倍形,改判 [9]。
+    expect(en.hurtLog).toEqual([9]);                   // dmgOf=10 → DV 掷 9,crit ×2 归 Enemy.hurt
     expect(en.critLog).toEqual([true]);
   });
   it('挂件+掷未中（mock 0.95 → 9）→ 不强制（crit=false、伤原值）', () => {

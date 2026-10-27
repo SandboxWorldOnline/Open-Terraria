@@ -218,7 +218,7 @@ describe('BJ-C2/F3：天降三剑 503 掷率（类缺省门闭=永不暴击必�
     step([star], 20, hooks);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.crit).toBe(true);                  // ★主判别（旧门闭必红）
-    expect(e.calls[0]!.d).toBe(20);                       // 10×2（crit 乘区）
+    expect(e.calls[0]!.d).toBe(10);                       // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——DV 中性基伤(旧 20=预倍形)
   });
   it('3c 聚合命中拍动态：critChance(60) → rnd 0.5 照暴（0.5<0.64）', () => {
     const e = mkEnemy(5, 600, 600);
@@ -360,7 +360,7 @@ describe('BJ-C2/F7：村正斩波 977（旧「155 无类旗不掷」定谳错必
     step([cut], 1, hooks);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.crit).toBe(true);
-    expect(e.calls[0]!.d).toBeGreaterThanOrEqual(90);     // 50×DamageVar(±15%)×2 ≥ 85 档
+    expect(e.calls[0]!.d).toBeGreaterThanOrEqual(42);     // ★S02 改判:DV(50,0.4→−13 档…)≥42 未翻倍直传(旧 ≥90=预倍形)
   });
 });
 
@@ -434,9 +434,9 @@ describe('BJ-C2/F11：冲撞掷面=meleeCrit 字段值（旧缺基 4/缺折入�
     player.vx = 14.5;                                     // dash2 触发速（盒随速度外扩）
     driveEoC(player, hooks, e);
     expect(e.calls.length).toBe(1);                       // 夹具自证（冲撞结算照达）
-    // ★主判别（hurt 惯例=调用侧预倍,crit 位恒 false → 以伤值判）：30×2=60
-    // （旧 this.critChance 式=0 档 → 不暴 → 30 必红）
-    expect(e.calls[0]!.d).toBe(60);
+    // ★S02(BJ723-B)改判:crit 直传 hurt（防后 ×2+色）——spy 收未翻倍基伤 30
+    // （旧判别以预倍伤值 60 锁 crit;旧 this.critChance 式=0 档 → 不暴 → 30 必红）
+    expect(e.calls[0]!.d).toBe(30);
   });
   it('11b 克盾冲撞折入：持械 671+61（+21） → rnd 0.2 照暴（旧 0.2<0 必红）', () => {
     const id671 = ITEM_DEFS.findIndex((d) => d?.vid === 671);
@@ -450,7 +450,7 @@ describe('BJ-C2/F11：冲撞掷面=meleeCrit 字段值（旧缺基 4/缺折入�
     player.vx = 14.5;
     driveEoC(player, hooks, e);
     expect(e.calls.length).toBe(1);
-    expect(e.calls[0]!.d).toBe(60);                       // ★词缀+def 折入（旧→30 必红）
+    expect(e.calls[0]!.d).toBe(30);                       // ★S02 改判:未翻倍基伤（旧→30 必红判据保持;crit 位=calls[0].crit）
   });
   it('11c 日曜冲撞：裸装 rnd 0.03 照暴（:21328 同式）', () => {
     const e = mkEnemy(18, 975, 1450, 20, 20);
@@ -466,7 +466,7 @@ describe('BJ-C2/F11：冲撞掷面=meleeCrit 字段值（旧缺基 4/缺折入�
     (player as unknown as { dashMovement: (g: GameHooks, eq: unknown, ix: number, spd: number, db: boolean, slow: number) => void })
       .dashMovement(hooks, { dash: 0, runSlowMul: 1, moveMult: 1 }, 0, 1, false, 1);
     expect(e.calls.length).toBe(1);
-    expect(e.calls[0]!.d).toBe(300);                      // ★150×2（旧→150 必红）
+    expect(e.calls[0]!.d).toBe(150);                      // ★S02 改判:未翻倍基伤 150(旧→150 必红判据经 crit 位保持)
   });
 });
 

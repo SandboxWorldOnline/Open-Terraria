@@ -146,8 +146,9 @@ function stellarStrike(
   //  「仓内调用侧预倍」习语）+原版 StrikeNPC crit ×2（:81990）——旧 stellar crit 掷中
   //  仅翻 kb（:82179 ×1.4）伤值恒 ×1=真缺口,本刀随掷率收编一并落位;BJ492① MinionProj
   //  预倍同形）。snap 加伤随暴击并入（既有）。
-  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage) * (critGuitar ? 2 : 1))
-    + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
+  // ★S02(BJ723-B):crit ×2 摘除——Enemy.hurt 防后承载(NPC.cs:82067,旧预倍习语退役)
+  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
+    + (snapBonusGuitar ? snapBonusGuitar : 0),
     kx, 0, game, armorPen,
     critGuitar, -3, true);          // StrikeNPC 单点（Enemy.hurt 同构）
 }

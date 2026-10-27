@@ -112,7 +112,7 @@ describe('BJ486-①：StormLightning 自建环 TimerCrit :12928 消费（BJ467�
     expect(timer[0]).toEqual([e.x, e.y, e.w, e.h] as unknown as [number, number, number, number]);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);              // ref crit 强制翻转 → hurt crit 位
-    expect(calls[0].dmg).toBe(120);                // ×2（60 magic 弹满蓄暴击档）
+    expect(calls[0].dmg).toBe(60);                 // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——spy 收未翻倍基伤(旧 120=预倍形)
   });
 
   it('1b 1122 无 6170（消费返回假）→ 无强制 crit（消费≠恒真）', () => {
@@ -229,7 +229,7 @@ describe('BJ486-③：弧子代弹掷率=rollVanillaHitCrit（owner 装配,含 :
     arc.fixedUpdate(1, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);
-    expect(calls[0].dmg).toBe(80);                  // 40×2
+    expect(calls[0].dmg).toBe(40);                  // ★S02 改判:未翻倍基伤(旧 80=预倍形)
   });
 
   it('3b LightsBaneSlash(974) 面掷=同口径（Birth 拍 ai0 折叠+Damage 面掷=原版双掷面并存）', () => {
@@ -241,7 +241,7 @@ describe('BJ486-③：弧子代弹掷率=rollVanillaHitCrit（owner 装配,含 :
     lb.fixedUpdate(1, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);
-    expect(calls[0].dmg).toBe(60);
+    expect(calls[0].dmg).toBe(30);                 // ★S02 改判:未翻倍基伤(旧 60=预倍形)
   });
 
   it('3c GrassSlash(976) 面掷=同口径', () => {
@@ -282,7 +282,7 @@ describe('BJ486-③：弧子代弹掷率=rollVanillaHitCrit（owner 装配,含 :
     expect(SRC('entities/TideSlash.ts')).toContain('readonly projId = 451;');
     const solar = SRC('entities/SolarEruption.ts');
     expect(solar).toContain('readonly projId = 611;');
-    expect(solar.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(1);   // 仅 611 面;612 无类旗保持原样
+    expect(solar.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(2);   // 611 敌怪面+BJ729-A 城镇 settle 面（D1 B19,2026-10-27,1→2——锁语义=面存在性非清单冻结,BJ725-A 判例 3）;612 无类旗保持原样
     const missile = SRC('entities/MissileProj.ts');
     expect(missile).toContain('rollVanillaHitCrit(this.projId, game)');               // StarfuryStar(9)
     expect(missile).toContain('readonly projId = 9;');
@@ -320,7 +320,7 @@ describe('BJ486-④：bonusCritChance num13 形参化（:12912-12914）', () => 
     slam.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);
-    expect(calls[0].dmg).toBe(100);
+    expect(calls[0].dmg).toBe(50);                  // ★S02 改判:未翻倍基伤(旧 100=预倍形)
     const fury = SRC('entities/MonkStaffFury.ts');
     expect(fury).toContain('rollVanillaHitCrit(this.projId, game, 25)');
     const gameTs = SRC('core/Game.ts');

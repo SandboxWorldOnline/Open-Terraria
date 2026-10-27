@@ -308,7 +308,7 @@ describe('三批结构锚', () => {
     //  清窗档 :14175-14179）+BJ452 N2 crit 色位+BJ455③ banner 乘区包入三刀改形
     //  （MinionProj 818 臂现役行），引语随现役定谳面刷新——kb=0 双门不进意图不变。
     // ★BJ716-A（R18-F2）锁随刀走:818 臂补 DamageVar 首掷（dmgVPounce）——kb=0 双门不进意图不变
-    expect(m.includes('en.hurt(applyBannerDamageDealt(game, en, critPounce && !res.crit ? dmgVPounce * 2 : dmgVPounce), 0, 0, game, 0, critPounce, -3, true)')).toBe(true);
+    expect(m.includes('en.hurt(applyBannerDamageDealt(game, en, dmgVPounce), 0, 0, game, 0, critPounce, -3, true)')).toBe(true);   // ★S02(BJ723-B)锁随刀走:预倍摘除（×2=Enemy.hurt 防后）
   });
 
   it('F14：PvP 两伴生支就位（血舌球 3211 ×0.7 / 蜂王 1123 num/3）', () => {

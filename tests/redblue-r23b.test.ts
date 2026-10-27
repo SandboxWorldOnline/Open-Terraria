@@ -95,8 +95,15 @@ describe('R23b-L1 lunar_misc solidRect 参数序(R23b 必修2)', () => {
     // 签名 = 区间序(对拍 CultistRitual.cs:102-131 / NPC.cs 石碑落点)
     expect(src).toContain('function solidRect(game: GameHooks, x0: number, x1: number, y0: number, y1: number)');
     // 石碑仪式四柱净空(:429-432)与碑侧落点(:491)按区间序传参——签名修正后语义归正
-    expect(src).toContain('!solidRect(game, x - 1, x + 1, y - 3, y - 1)');
+    // ★BJ731 改判史（2026-10-27）：BJ715-A-③（2026-10-25）四柱净空收编单源
+    //   RuntimeEvents.cultistCheckFloorPts（谓词域勘正 isSolidStrict+isPlatformsType）
+    //   ——lunar_misc 内联 `!solidRect(game, x-1, x+1, y-3, y-1)` 站已撤,改
+    //   ritualCheckFloor 委托;区间序实参锁随迁 RuntimeEvents（bj715a 件3 承接
+    //   行为面,本锁只钉实参序）。
     expect(src).toContain('!solidRect(game, tx - 1, tx + 1, y - 3, y - 1)');
+    expect(src).toContain('return cultistCheckFloorPts(game.world.store, cx, cy);');
+    const rts = readFileSync('src/world/evolution/RuntimeEvents.ts', 'utf8');
+    expect(rts).toContain('!solidRect(st, x - 1, x + 1, y - 3, y - 1)');
     // 旧角点序调用(findTeleportSpot 3×3 净空)必须已改写为区间序
     expect(src).toContain('solidRect(game, tx - 1, tx + 1, ty - 1, ty + 1)');
     expect(src).not.toContain('solidRect(game, tx - 1, ty - 1, tx + 1, ty + 1)');

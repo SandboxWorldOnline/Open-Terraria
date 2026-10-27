@@ -16,7 +16,7 @@
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
 import { GorePiece } from './GorePiece';
-import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs, townVoodooGateOpen } from './projTargets';   // ★BJ729-A（D1 B27）：1045 城镇 voodoo 靶（townVoodooGateOpen=collide 位窄门谓词）
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -659,6 +659,33 @@ export class MoonLordWhipProc extends Entity {
       this.dead = true;
       return;
     }
+    // ★BJ729-A（D1 B27a,2026-10-27）：城镇 voodoo 靶——1045 friendly 鞭 proc 巫毒
+    //  窄门（:12618-12631,22 killGuide/54 killClothier）;AABB 自盒;settle 镜像敌怪
+    //  臂链（kb=0/armorPenetration=50 :9910/DV=面级既有形态[D6 族登记]）;collide 位
+    //  窄门谓词=受害体捕获（链式补发 :14015-14018 victim 无关,城镇靶同发）;
+    //  penetrate=1 受理即亡。★darkHarvestChain 链电城镇臂销案：原版
+    //  FindTargetWithinRange :45925 走 CanBeChasedBy（NPC.cs:91141 `!friendly` 硬门）
+    //  =城镇 NPC 永不入链,仓内 canBeChasedBy 同门 1:1（census B27 链电半句误登）。
+    let townVictim1045: { x: number; y: number; w: number; h: number; vx?: number; vy?: number } | null = null;
+    if (hitTownNpcs(this, game, this.damage, 0, 'playerProj', 1045,
+      (tn) => {
+        const t2 = tn as unknown as { vanillaId?: number; vx?: number; vy?: number };
+        if (!townVoodooGateOpen(game, t2.vanillaId, 1045)) return false;
+        if (!(this.x < tn.x + tn.w && this.x + this.w > tn.x
+          && this.y < tn.y + tn.h && this.y + this.h > tn.y)) return false;
+        townVictim1045 = { x: tn.x, y: tn.y, w: tn.w, h: tn.h, vx: t2.vx, vy: t2.vy };
+        return true;
+      }, undefined, undefined, undefined,
+      () => ({ penPercent: 50 }))) {
+      const tv1045 = townVictim1045 as { x: number; y: number; w: number; h: number; vx?: number; vy?: number } | null;
+      if (this.gen < 2 && tv1045) {
+        MoonLordWhipProc.spawn(game,
+          (el) => (game as unknown as { entities: { add: (x: unknown, b?: string) => void } }).entities.add(el, 'projectiles'),
+          tv1045, { x: tv1045.vx ?? 0, y: tv1045.vy ?? 0 }, this.gen + 1);
+      }
+      this.dead = true;
+      return;
+    }
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
@@ -861,11 +888,12 @@ export function darkHarvestChain(
  * 管线（:12947-12962）：num15 = base;
  *   changes 聚合 → num15 += (int)((Σtag + bonusTagDamage) × SummonTagDamageMultiplier)
  *   → += AddedFlatDamage → num15 = (int)(num15 × TotalDamageMultiplier)
- *   → changes.Crit 有值即强制 crit;暴击 ×2 在本函数尾（原版在 Damage 外层）。
+ *   → changes.Crit 有值即强制 crit;★S02(BJ723-B):暴击 ×2 全链不在此——在
+ *   StrikeNPC_Inner 防后(NPC.cs:82067,Enemy.hurt/TownNPC.hurt 承载)。
  * OnHit 阶段（:13711 → TagEffectState.OnHit）：黑收成 916 / 星鞭 proc 启用 /
  * proc 首跳（火鞭 918 爆炸 ×2.75 / 星陨 1037 ×1.33 / 花瓣 1038 / 月主 1045 三连 /
  * 剑鞭 +30 / 电鳗链电）——伤害基数 = calcDamage（原版传 num7 = tag 前基础伤）。
- * 返回最终伤害（含暴击 ×2）与是否暴击。
+ * 返回最终伤害（未含暴击 ×2——★S02 后由受击 hurt 防后统一翻倍）与是否暴击。
  * 兼容签名：前 7 参与旧版一致（Arrow.ts whipTagShot 路径未迁移仍走此形态,
  * owner 缺省 game.player——单机语义;MP 远端随从按本端玩家栈近似,与旧版一致）。
  */
@@ -921,8 +949,14 @@ export function resolveWhipTagHit(
     snapBonusKind2 = trySnapStrike(game, owner, 2, hx, hy, en.id,
       { victimBox: { w: vw, h: vh, cx: vx0 + vw / 2, cy: vy0 + vh / 2 } });   // R4-33 victim 自脉冲
   }
-  if (crit) dmg *= 2;
-  if (snapBonusKind2 > 0) dmg += Math.trunc(snapBonusKind2 * (crit ? 2 : 1));
+  // ★S02（BJ723-B 2026-10-26）：tag-crit 预倍 ×2 摘除——原版 crit 翻倍在
+  // StrikeNPC_Inner 防后（NPC.cs:82067,Enemy.hurt 承载），Damage 管线内（含
+  // tag 并入位 :12946-12962/DamageVar :12970）一律不翻倍。消费者改传 res.dmg
+  // 原值+crit 参（敌怪面 Enemy.hurt 防后 ×2；城镇面 TownNPC.hurt 同式——旧
+  // 「res.crit 摘半还原」档随之退役）。snapBonusKind2 同摘 crit 倍（原版
+  // num14 加伤随 dmg 整体进 StrikeNPC 吃防后 ×2）。DV 掷基数复位未翻倍值
+  // =BJ716-A 登记债①（tag-crit 拍 DV 掷已翻倍基数）就此清偿。
+  if (snapBonusKind2 > 0) dmg += snapBonusKind2;
   return { dmg: Math.max(1, Math.round(dmg)), crit };
 }
 

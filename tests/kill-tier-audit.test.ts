@@ -149,7 +149,12 @@ describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
     const beyond = mkEnemy(700); // 三段全不覆盖
     const game = makeGame(emptyWorld(), dusts, [], [seg0, mid, beyond]);
     const a = new Arrow(400, 300, 6, 0, 30, 1, 283, { grav: 0 });
-    kill(a, game);
+    // ★BJ731 改判史（2026-10-27）：三段 Damage 重结算各掷 :12970 DV（BJ723-B
+    //   落地面）——等价断言须恒等档 0.5 钉（未 mock 三段各漂,等价必红）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      kill(a, game);
+    } finally { rvi731.mockRestore(); }
     expect(seg0.rec.hits).toHaveLength(1);
     expect(mid.rec.hits).toHaveLength(2);
     expect(beyond.rec.hits).toHaveLength(0);

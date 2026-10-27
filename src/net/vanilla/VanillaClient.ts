@@ -1368,13 +1368,13 @@ export class VanillaClient {
    *  [u8 槽][u8 代际][i16 伤害][f32 击退模][u8 向+1][u8 暴击]。★代际必携——服务器
    *  校验代际错=静默丢（傀儡槽已换主）。击退组件→模+向。服务器结算后 msg23 回流
    *  权威 hp + msg162 DamageNPCAck（本端无挂起伤害,纯吃 ack 无动作）。 */
-  sendStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
+  sendStrike(netId: number, rawDmg: number, kbx: number, kby: number, crit?: boolean) {
     if (!this.active || !this.worldDelivered) return;
     const kb = Math.hypot(kbx, kby);
     const dir = (Math.sign(kbx) || 1) + 1;
     this.send(new VWriter()
       .u8(netId).u8(this.npcGenerations.get(netId) ?? 0)
-      .i16(rawDmg).f32(kb).u8(dir).u8(0)
+      .i16(rawDmg).f32(kb).u8(dir).u8(crit ? 1 : 0)   // BJ723-B D5 清偿（BJ725-A）：msg28 暴击位——原版服务器 StrikeNPC crit ×2,旧恒 0=权威 hp 恒不翻倍
       .finish(28));
   }
   /** PvP 命中上报（msg117 PlayerHurtV2 攻端向——Player.cs:44490 近战/Projectile.cs:14757

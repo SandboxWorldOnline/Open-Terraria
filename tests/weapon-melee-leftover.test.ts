@@ -295,14 +295,14 @@ describe('④ 997 命中召南瓜弹 321（HorsemansBlade_SpawnPumpkin :42444-42
     p.fixedUpdate(1, hooks);
     expect(e.hits).toEqual([[50, 6.5]]);               // sign(vx)×kb
     expect(p.dead).toBe(true);
-    // 暴击档：rand=0 → ×2
+    // 暴击档：rand=0 → crit 强制（★S02:×2 移 Enemy.hurt 防后——spy 收未翻倍基伤）
     const e3 = mkEnemy(100 * TILE, 100 * TILE, 8);
     const { hooks: h3 } = arcHooks(e3, []);
     vi.restoreAllMocks();
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const q = new HorsemansPumpkin(e3.cx - 20, e3.cy, 8, 0, 50, 6.5, 8);
     q.fixedUpdate(1, h3);
-    expect(e3.hits).toEqual([[100, 6.5]]);
+    expect(e3.hits).toEqual([[50, 6.5]]);            // ★S02(BJ723-B)改判:未翻倍基伤(旧 100=预倍形)
   });
 
   it('spawnHorsemansPumpkin 直调：入 projectiles 桶（NewProjectile :42462）', () => {

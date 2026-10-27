@@ -17,7 +17,7 @@
 //  判别力：夹具用【真 Enemy.fromVanilla】（门/写支在真 hurt 内部,非 spy 桩,debt-L 同法）。
 //    旧码下：§A 残窗敌照挂 tag/照吃 falloff/占 hitSet（§A3 同拍次敌被衰减连坐）;
 //    §B 命中写 iframes=10（后到他弹/第二鞭被拒）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -105,6 +105,10 @@ describe('S3b-§A：前置全局免疫窗门（:12635-12639）——门拒拍整
   });
 
   it('A2 门拒不跑 falloff（:13453-13550 门后）：同拍残窗敌A+活敌B,B 吃满伤（旧码 B 被衰减连坐必红）', () => {
+    // ★BJ723-C S03：鞭本体 DV（:12970）后满伤基准含逐受理靶独立掷——本测比 B 与
+    //  参照的【同值】,mock Math.random=0.5（tier 0 档,DV 恒等）恢复确定性;
+    //  判别语义不变（B 满伤=衰减未被 A 拍吃掉）。
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const list: Enemy[] = [];
     const { hooks, player } = makeGame(list);
     const a = tankEnemy(hooks, 400, 600);
@@ -120,6 +124,7 @@ describe('S3b-§A：前置全局免疫窗门（:12635-12639）——门拒拍整
     expect(hitFull).toBeGreaterThan(0);
     expect(a.hp).toBe(hpA0);                          // A 整跳
     expect(hpB0 - b.hp).toBe(hitFull);                // ★主判别:B 满伤=衰减未被 A 拍吃掉
+    rnd.mockRestore();
   });
 
   it('A3 门拒不跑 debuff（StatusNPC :13634 门后）：912 酷鞭残窗敌 frostburn2T 不写,窗期满照写', () => {

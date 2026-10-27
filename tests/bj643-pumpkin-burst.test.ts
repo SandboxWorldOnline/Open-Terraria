@@ -426,7 +426,10 @@ describe('§6 接线源锚', () => {
   const arrowSrc = readFileSync(join(GAME, 'src/entities/Arrow.ts'), 'utf8');
   const whipSrc = readFileSync(join(GAME, 'src/entities/WhipTag.ts'), 'utf8');
   it('1001 入 PROJ_ROT_RIGHT 速度角族（AI_194 :42055-42056 rotation/spriteDirection 面）', () => {
-    expect(arrowSrc).toContain('new Set([16, 34, 190, 837, 1023, 485, 1026, 1001])');
+    // ★BJ730 改判史：旧锁闭口 `…, 1001])` 全表文本——BJ703-B D2（408/435/682）+
+    //  BJ704-G2（459）合法扩员后闭口文本必然破窗（发射位增重破窗第三例同族）;
+    //  按判例改锁前缀开窗（成员序首八员含 1001）,扩员免碎、缩员/移位仍红。
+    expect(arrowSrc).toContain('new Set([16, 34, 190, 837, 1023, 485, 1026, 1001');
   });
   it('PROJ_ALPHA0[1001]=255（SetDefaults :9520）+ AI_194 支在 subStepAI', () => {
     expect(arrowSrc).toContain('1001: 255,');

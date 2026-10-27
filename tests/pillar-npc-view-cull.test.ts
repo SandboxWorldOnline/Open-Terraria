@@ -88,7 +88,7 @@ describe('四柱掉帧批②：原版 NPC 视域剔除（Main.cs:22534/:22653 �
   it('结构锁：behindTiles 段+实体主段两调用点均挂门;白名单/逃生门/原版行号锚在场', () => {
     const src = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
     expect(src).toContain("this.isBehindTilesEnemy(e) && !this.npcOffscreen(e, cam, z, viewW, viewH)");
-    expect(src).toContain('if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);');
+    expect(src).toContain('if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities, cam);');   // ★BJ731 改判史:drawEnemy 增 cam 参(b782696c v0.1.70)——锁随签名
     expect(src).toContain('const NPC_MUST_ALWAYS_DRAW = new Set([113, 114, 115, 116, 125, 126]);');
     expect(src).toContain("new URLSearchParams(location.search).get('npccull') !== '0'");
     expect(src).toContain('Main.cs:22534');

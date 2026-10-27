@@ -6,7 +6,7 @@
 //   CutTiles 先行（:12516→:12576 序）/damage<=0 整退/192 盒逐敌/idStatic 1t 共享桶
 //   （167-170 SetDefaults :2568-2570）/iframes 门（:12635-12637）/crit 0.04 路由门。
 //   修前红：B1 hurt 零记录（爆面整缺）;变异恰红=摘 blast 块全组红（/tmp/bj704g24-mutations.mjs）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ729-A：vi（DV 中性档钉值 mock）
 import { readFileSync } from 'fs';
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
@@ -60,6 +60,10 @@ const mkFw = (projId: number, damage = 50, vx = 8): Arrow => {
 
 describe('§1 发射器烟花 Kill 192² Damage()（:78549-78556）', () => {
   it('B1 爆面结算：盒内敌 hurt 恰一次,伤=damage,critChance 缺省 0=零掷确定性,kb 向=sign(vx),fromPlayer=true', () => {
+    // ★BJ729-A（2026-10-27,D2 残差清偿）DV 中性档钉值：烟花 Kill 重跑 Damage()
+    //  逐靶 DV（:12970）补齐后未 mock 期望 50 必漂（43-57）——0.5 → tier 0 →
+    //  ×1.0 恒等档（BJ716-A 同款修法）;crit 掷 0.5<0.04+agg 恒 false 同钉。
+    const rviFw = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     pinGameTimeTicks(10_000);
     // Arrow 167 w=14（json width）→ cx=407,cy=307;盒=[311,503]×[211,403]
     const e1 = mkEnemy(9101, 380, 250);
@@ -71,6 +75,7 @@ describe('§1 发射器烟花 Kill 192² Damage()（:78549-78556）', () => {
     expect(recs[0]!.fromPlayer).toBe(true);
     expect(recs[0]!.crit).toBe(false);      // critChance=0 → 0.04 路由门关=零 RNG
     expect(recs[0]!.pierce).toBe(0);        // penetrate=-1 语义（Kill 尾 :78555）
+    rviFw.mockRestore();
   });
 
   it('B2 盒外敌不结算（右缘 503 外一格）', () => {
@@ -82,6 +87,8 @@ describe('§1 发射器烟花 Kill 192² Damage()（:78549-78556）', () => {
   });
 
   it('B3 四型 167-170 各自爆面结算（idStatic 键=type 逐型分桶）', () => {
+    // ★BJ729-A DV 中性档钉值（同 B1,D2 补 DV 后未 mock 期望 40 必漂）。
+    const rviFw3 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     pinGameTimeTicks(10_002);
     for (const t of [167, 168, 169, 170]) {
       const e = mkEnemy(9100 + t, 380, 250);
@@ -91,6 +98,7 @@ describe('§1 发射器烟花 Kill 192² Damage()（:78549-78556）', () => {
       expect(recs[0]!.d).toBe(40);
       recs = [];
     }
+    rviFw3.mockRestore();
   });
 
   it('B4 idStatic 1t 共享桶：同 tick 同型第二发对同敌不二结算（SetDefaults :2568-2570 cd=1）', () => {

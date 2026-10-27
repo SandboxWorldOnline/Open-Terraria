@@ -6,7 +6,7 @@
 //   · party（meleeEnchant==7）：出弹 289 彩带于目标 Center、速=目标速度（:13693-95），
 //     本仓经 GameHooks.spawnFriendlyProj 口 = WeaponProj 弹幕侧同通道。
 //  此前只在 WeaponProj.hitEnemies 接过，真鞭伤害走 WhipProj.tryHit 自有命中环=漏接。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -69,6 +69,7 @@ const mkWhip = (player: Player, dmg: number): WhipProj =>
 
 describe('F2：鞭命中环 nano ×1.05 / party 彩带 289', () => {
   it('ImbueNano → 命中伤 = (int)(dmg×1.05)（40→42）；无浸剂对照组 = 全额 40', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C S03 位移修复:鞭 DV(:12970) 中性档——平值断言复稳（BJ716-A 配方）
     const eCtl = mkEnemy(1, 400, 600);
     const ctl = makeHooks([eCtl]);
     landOneHit(mkWhip(ctl.player, 40), ctl.hooks, eCtl);
@@ -106,6 +107,7 @@ describe('F2：鞭命中环 nano ×1.05 / party 彩带 289', () => {
   });
 
   it('两浸剂同挂 → 乘区与出弹并行生效（门同支不互斥）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C S03 位移修复:DV 中性档
     const e = mkEnemy(5, 400, 600);
     const h = makeHooks([e]);
     h.player.buffs.apply(BuffType.ImbueNano, 30);

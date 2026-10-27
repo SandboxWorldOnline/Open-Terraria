@@ -65,6 +65,76 @@
       } catch (e) { /* 环境异常不阻断加载 */ }
     })();
   </script>
+  <!-- ★BJ724-A 刀2(2026-10-26 弱网实报:入口 JS 下载 69.7s ERR_ABORTED 后向日葵
+       幕布永转、无任何提示与自动重试):主包独立启动看门狗。置于 head(先于入口
+       script 标签解析注册监听——资源 error 不冒泡,须 capture,且要在标签创建前
+       就位);零外部依赖(纯静态内联,不依赖主包 CSS/JS),三层:
+       ①入口 script 标签 error 监听——模块图任一环节(入口/静态 import 的 chunk)
+         下载失败都 fire 在入口标签上(求值错误 target=window,被 SCRIPT 过滤排除);
+       ②自动重试一次:动态注入带 cache-busting 查询串(swbootretry)的新模块标签
+         ——新 URL 强制新 fetch/新连接,绕开可能已断的 HTTP/2 流;二次失败才出
+         失败提示(SW 侧另有 fetchShell 单次重试+正文看门狗=BJ724-A 刀1,两层互补:
+         SW 重试在 respondWith 内对页面透明,本层兜 SW 两连败/无 SW 直连的残余窗);
+       ③60s 启动握手超时:主模块执行尾置 window.__swBooted=true(src/main.ts 模块
+         执行尾)——超时未见信号=下载/求值挂死→失败提示+重载按钮。慢网预算:实报
+         HTML 16.5s/主包 70s 级;60s+迟到自愈(信号后到即撤提示层)兜住慢网假阳性。
+       提示层 z=10010:静态向日葵幕(9998)/启动幕(10000)/音频门(10001)之上。
+       入口 src 特征过滤:dev=/src/main.ts、构建=/assets/<hash>.js;@vite/client
+       等 dev 注入模块与 mod 后注入的 /assets/* 标签失败不消耗重试预算(已启动后
+       __swBooted 门再拦一道)。 -->
+  <script>
+    // #sw-boot-watchdog
+    (function () {
+      var TIMEOUT_MS = 60000;
+      var ENTRY_RE = /(?:^|\/)(?:src\/main\.ts|assets\/[a-zA-Z0-9_-]+\.js)(?:\?|$)/;
+      var retried = false, failed = false, healTimer = 0, bootTimer = 0;
+      window.__swBooted = false;
+      function removeFail() { var el = document.getElementById('sw-boot-fail'); if (el) el.remove(); }
+      function fail() {
+        if (failed || window.__swBooted) return;
+        failed = true;
+        var d = document.createElement('div');
+        d.id = 'sw-boot-fail';
+        d.setAttribute('style', 'position:fixed;inset:0;z-index:10010;background:rgba(10,12,16,.95);'
+          + 'display:flex;align-items:center;justify-content:center;');
+        d.innerHTML = '<div style="max-width:520px;margin:0 24px;padding:28px 32px;color:#e8e4f0;'
+          + 'background:#1a2440;border:1px solid #2e3a5e;border-radius:12px;'
+          + "font:14px/1.8 'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;text-align:center;\">"
+          + '<div style="font-size:18px;color:#ffe8a0;margin-bottom:12px;">游戏加载失败</div>'
+          + '<div style="color:#8a90b8;margin-bottom:20px;">网络状况不佳,游戏主程序未能完成加载。<br>'
+          + '请检查网络后点击下方按钮重试。</div>'
+          + '<button id="sw-boot-reload" style="padding:10px 28px;font-size:15px;color:#0a0c10;'
+          + 'background:#59c8ff;border:0;border-radius:8px;cursor:pointer;">重新加载</button></div>';
+        (document.body || document.documentElement).appendChild(d);
+        var b = document.getElementById('sw-boot-reload');
+        if (b) b.onclick = function () { location.reload(); };
+        healTimer = setInterval(function () {   // 迟到自愈:慢网假阳性窗内主包最终就绪→撤提示层
+          if (window.__swBooted) { clearInterval(healTimer); removeFail(); }
+        }, 2000);
+      }
+      function armBootTimer() {                 // 握手窗(可重臂):重试注入=有进展,给重试发全新 60s
+        clearTimeout(bootTimer);
+        bootTimer = setTimeout(function () { if (!window.__swBooted) fail(); }, TIMEOUT_MS);
+      }
+      function retryOnce(src) {
+        if (window.__swBooted) return;          // 已启动=入口早已完好,该 error 属旁支(mod 注入标签等)
+        if (retried) { fail(); return; }        // 重试预算已耗:二次失败→失败提示
+        retried = true;
+        var s = document.createElement('script');
+        s.type = 'module';
+        s.src = src + (src.indexOf('?') < 0 ? '?' : '&') + 'swbootretry=' + Date.now();
+        s.onerror = function () { fail(); };
+        (document.head || document.documentElement).appendChild(s);
+        armBootTimer();                         // 重试在途不出假超时提示(总上界 120s:60s×两窗)
+      }
+      window.addEventListener('error', function (e) {
+        var t = e.target;
+        if (!t || t.tagName !== 'SCRIPT' || !t.src) return;
+        if (ENTRY_RE.test(t.src)) retryOnce(t.src);
+      }, true);
+      armBootTimer();
+    })();
+  </script>
   <style>
     html, body {
       margin: 0; padding: 0; width: 100%; height: 100%;

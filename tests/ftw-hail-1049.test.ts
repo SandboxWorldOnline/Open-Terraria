@@ -89,7 +89,12 @@ describe('冰雹弹 1049（TrapShot hail）', () => {
     }];
     const b = new TrapShot(60 * TILE, 20 * TILE, 0, 8, 70, 'hail');
     let ticks = 0;
-    while (!b.dead && ticks < 200) { b.fixedUpdate(1 / 60, game); ticks++; }
+    // ★BJ731 改判史（2026-10-27）：Kill 爆箱伤走 :12970 DV 掷（BJ723-B 落地面）
+    //   ——0.5 恒等档钉 70（未 mock 必漂 59-80）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      while (!b.dead && ticks < 200) { b.fixedUpdate(1 / 60, game); ticks++; }
+    } finally { rvi731.mockRestore(); }
     expect(b.dead).toBe(true);
     expect(hurtCalls.length).toBeGreaterThan(0);
     expect(hurtCalls[0]!.dmg).toBe(70);

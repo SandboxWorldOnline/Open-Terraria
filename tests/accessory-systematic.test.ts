@@ -389,12 +389,28 @@ describe('配饰系统性③：翅膀横移加速倍率消费（WingAirLogicTwea
       p.inputJump = true;
       p.inputX = 1;
     }
-    for (let t = 0; t < 40; t++) {
+    // ★BJ731 改判史（2026-10-27）：原版分带（HorizontalMovement :20091-20101/
+    //   :20121-20131）= |vx|<maxRunSpeed(3) 全加速;maxRunSpeed..accRunSpeed 带
+    //   `vx += runAcceleration×0.2 + (wingsLogic>0 再 ×0.2)`——翼档全加速上界
+    //   是 maxRunSpeed 非 accSpeed。实测本夹具:鱼龙 19t 过 3 → 0.16×0.4=0.064/t,
+    //   天使 37.5t 过 3 → 0.08×0.4=0.032/t;40t 终值 鱼≈4.4>天≈3.10（比率 1.42
+    //   非 ×2）=原版分带本相。旧「全程 ≈×2（未到 accSpeed 上限前）」期望把
+    //   accRunSpeed 误当全加速上界=错锁。断言改两段：早段全带 ×2 档比 ≈2;
+    //   40t 终值按分带预测。
+    for (let t = 0; t < 10; t++) {
       a.p.fixedUpdate(1 / 60, a.hooks);
       f.p.fixedUpdate(1 / 60, f.hooks);
     }
-    // 两翼均未到 accSpeed 上限（6.25/8）前，×2 档速度增益 ≈×2
-    expect(f.p.vx).toBeGreaterThan(a.p.vx * 1.5);
+    expect(f.p.vx).toBeGreaterThan(a.p.vx * 1.7);   // 全加速带（两翼 vx<3）×2 档
+    expect(f.p.vx).toBeLessThan(a.p.vx * 2.1);
+    for (let t = 10; t < 40; t++) {
+      a.p.fixedUpdate(1 / 60, a.hooks);
+      f.p.fixedUpdate(1 / 60, f.hooks);
+    }
+    // 分带后增益保持:鱼≈4.36（3+21×0.064）仍显著快于天≈3.10
+    expect(f.p.vx).toBeGreaterThan(a.p.vx);
+    expect(f.p.vx).toBeGreaterThan(4.2);
+    expect(f.p.vx).toBeLessThan(4.6);
     expect(a.p.vx).toBeGreaterThan(0.5);   // 天使之翼确有横移（防两边都趴地假绿）
   });
 });

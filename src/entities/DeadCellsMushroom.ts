@@ -23,7 +23,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcsAoeBox } from './projTargets';
 import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
 
 /** 敌怪桶最小形状（Enemy.hurt 单点结算） */
@@ -123,10 +123,24 @@ export class MushroomBoiExplosionProj extends Entity {
           { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
           | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
         const crit = rollCrit || timerCrit;
-        const dmg = crit ? this.damage * 2 : this.damage;
+        const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
         const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;   // 默认弹体相对向（1044 不在 num40 特列）
         e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);
       }
+      // ★BJ727-A（C-D4 族刀,2026-10-27）：1044 爆城镇臂——原版 ai[0]==1 拍判定盒
+      //  （52×scale=104）+Damage() victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;
+      //  单源 hitTownNpcsAoeBox,敌怪臂链镜像（critChance>0 门+TimerCrit 消费;1044
+      //  flagless 数据面=三类掷臂零掷,TimerCrit :12928 消费照达——与敌怪臂同式）。
+      //  localNPCHitCooldown=-1（每敌至多一次）→TownNPC.hurt 8t iframes 近似承载。
+      // ★BJ729-A（D4 销案,2026-10-27）：critter 臂【不接】——1044 ∈ ProjectileID.
+      //  Sets.MinionShot（ProjectileID.cs:291 亲读 `Factory.CreateBoolSet(...,1044,
+      //  ...)`）→ CanNPCBeHitByPlayerOrPlayerProjectile :20675 `MinionShot[type]||
+      //  SentryShot[type]` 对普通小动物恒拒收=原版 1044 爆对小动物零受击,销案锁死
+      //  防再登记（勿接 hitCrittersAll——critterRejectFlag 同表恒拒,接=死码）。
+      hitTownNpcsAoeBox(this.cx, this.cy, box / 2, game, this.damage, this.projId, 'playerProj',
+        () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+          penPercent: this.armorPen,
+        }));
     }
     if (this.ai0 >= 3) this.dead = true;            // 3×projFrames(=1) Kill 门（:35105-35108）
   }

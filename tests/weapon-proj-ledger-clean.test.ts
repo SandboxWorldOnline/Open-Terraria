@@ -4,7 +4,9 @@
 //   A③ Chain Guillotines 481 出程撞块截停（tileCollide 出程真值）
 //   A④ 光刃再掷召回门（recallGate）
 //   B⑤ 彩虹棒 X 钳符号/Y 缓降特例（P.cs:19798-19821）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+afterEach(() => vi.restoreAllMocks());   // ★BJ716-A 判例:防 mock 泄漏（0.5 钉死尘面掷）
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -116,6 +118,7 @@ describe('A① Daybreak 953 爆炸 AoE（AI_117 扩盒 Damage :35095-35212）', 
   });
 
   it('附着镖死亡 → Kill 掷 953（伤满额/kb10）→ 首拍扩盒对盒内敌单次结算', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C M02 位移修复:953 爆面 DV 中性档（平值断言复稳）
     const t = mkHooks();
     const px = t.player.cx, py = t.player.cy;
     // 敌摆在飞行线上（vx=6/tick×2 子步,大盒宽 60 必然捕获）

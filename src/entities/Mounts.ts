@@ -29,7 +29,7 @@ import { TILE_DEFS, FORBIDS_SLOPING_IDS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
-import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt, hitTownNpcsAoeBox, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A：hitTownNpcs（D1 B26 接触面）+hitCrittersAll（930 爆散 D4 critter 臂）
 import { projectileData } from '../data/vanillaProjectiles';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { canHitLine } from '../physics/LineOfSight';
@@ -3491,6 +3491,14 @@ export class MountShot extends TownShot {
         return;
       }
     }
+    // ★BJ729-A（D1 B26a,2026-10-27）：城镇 voodoo 靶——MountShot 玩家骑乘施放
+    //  （owner=本地玩家）friendly 弹巫毒窄门（:12618-12631）;AABB 自盒;settle 镜像
+    //  敌怪臂链（无 crit 掷/DV=面级既有形态[D6 族登记]）;penetrate 1 受理即消散。
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
+      'playerProj', this.projId)) {
+      this.dead = true;
+      return;
+    }
   }
 }
 
@@ -3588,6 +3596,19 @@ export class SantankShellProj extends TownShot {
       const dmg = Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0));
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.x + e.w / 2 - this.cx) * 8, 0, game, 0, false, 0, true); // kb=8(PrepareBombToBlow :47683)
     }
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：圣坦炮弹 930 Kill 爆城镇臂——原版
+    //  PrepareBombToBlow→Resize(128)+Damage() 重跑 victim 循环（:12592）含城镇
+    //  voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,敌怪臂链镜像（DV :12970
+    //  luck 正向;crit=false 敌怪臂同相）。圣坦=玩家骑乘施放 owner=本地玩家。
+    // ★BJ729-A（D4,2026-10-27）：critter 臂——原版 PrepareBombToBlow→Resize(128)+
+    //  Damage() 重跑 victim 循环（:12592）对小动物同链（930 非 minion/sentry →
+    //  CanNPCBeHit :20675 放行）;penetrate=-1 多靶 → hitCrittersAll。
+    hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+    hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
+      (tn) => ({
+        dmg: Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0)),
+        kb: Math.sign((tn as unknown as { x: number }).x + 8 - this.cx) * 8,
+      }));
     // SelfHurtPlayers（Kill→friendly&&owner==myPlayer 分支 :71788-71795）：重盒相交伤主人
     const p = game.player;
     if (p && !p.dead && !(p as unknown as { immune?: boolean }).immune
@@ -3705,6 +3726,13 @@ export class SantankShellProj extends TownShot {
         this.hitCd.set(e.id, 10);
       }
     }
+    // ★BJ729-A（D1 B26b,2026-10-27）：城镇 voodoo 靶——930 friendly 弹巫毒窄门
+    //  （:12618-12631）;AABB 自盒;settle 镜像敌怪臂链（DV :12970 luck 正向;crit=
+    //  面级既有形态不单侧补齐[D6 族登记]）;per-target 10t 窗由 TownNPC.hurt
+    //  iframes 承载;penetrate=-1 无消亡位。
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
+      'playerProj', this.projId, undefined, undefined, undefined, undefined,
+      () => ({ dmg: Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0)) }));
     if (--this.life <= 0) { this.explode(game); }  // timeLeft 尽 → Kill 爆散（3600s 档罕至）
   }
 

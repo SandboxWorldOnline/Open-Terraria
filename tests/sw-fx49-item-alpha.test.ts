@@ -253,7 +253,10 @@ describe('SW-FX49 ⑤:两路一致性+范围纪律 tripwire', () => {
 
   it('Renderer.drawDrop 消费 d.alpha 且合成命中只画烘焙件(禁裸底图叠画双计)', () => {
     const rd = srcOf('src/render/Renderer.ts');
-    const dd = rd.slice(rd.indexOf('private drawDrop('), rd.indexOf('private drawDrop(') + 2600);
+    // ★BJ730 改判史：窗口旧 2600——drawDrop 体合法增重（光罩/烘焙支扩面）,
+    //  itemColorSprite 调用/`d.color ?? null, d.alpha ?? 0` 现偏移 5426/5465;
+    //  窗口随文本放宽（增重破窗判例）。
+    const dd = rd.slice(rd.indexOf('private drawDrop('), rd.indexOf('private drawDrop(') + 6000);
     expect(dd).toContain('itemColorSprite(');
     expect(dd).toContain('d.alpha');
     // ★双计守卫:烘焙命中后不得再无条件画裸底图(半透明 texel 会被叠成过浓)

@@ -332,7 +332,14 @@ describe.skipIf(EXT_MISSING)('SW-AZ1 结构锁', () => {
     //  （:6347/:14997/:15291/:28181/:35054,皆非调用面）。统一入口纪律判据=
     //  下两行 not 断言+加宽残留检测（removeAt(selected) 任意书写形态恒零）,锁数
     //  仅拍照对齐盘上实况。
-    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(56);
+    // ★BJ730 重锚（2026-10-27）:56→57——BJ704-G11（件2②）1338 爆炸兔手持直放特支
+    //  （Player.cs:44400-44405 玩家位 Center.X/Bottom.Y 直放,Game.ts:16986 段
+    //  p614.inv.removeHeld(1) 消耗位,标记+vanilla 锚在案;早支 return 无双消耗）。
+    //  对拍证：dist-release 10-26 12:13 构建快照（无 git 仓唯一历史证人判例）包内
+    //  removeHeld(1)=57 与盘上一致 → 57 站于 10-26 前落地（BJ694 锚 56=10-19,
+    //  BJ704 波 10-20/21 落地窗口吻合）。拍照重锚协议=BJ536/BJ600/BJ644/BJ690/
+    //  BJ694 判例同式。
+    expect(game.match(/inv\.removeHeld\(1\)/g)?.length).toBe(57);
     expect(game).not.toContain('removeAt(this.player.inv.selected, 1)');
     expect(game).not.toContain('p.inv.removeAt(p.inv.selected, 1)');
     // ★SW-RB4a 2026-09-06 残留检测面加宽：任意书写形态的 removeAt(selected)/

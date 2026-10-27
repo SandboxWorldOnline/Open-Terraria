@@ -129,7 +129,7 @@ describe('BJ453-①：TimerCrit 满蓄强制 crit（光环塔 688 场伤面）',
     const { m, e } = auraEnemyScenario(player, list);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(60);            // ★主判别①:30×2（旧 30 必红）
+    expect(spy.mock.calls[0]![0]).toBe(30);            // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——未翻倍基伤(旧 60=预倍形;旧 30=零翻倍)
     expect(spy.mock.calls[0]![5]).toBe(true);          // ★主判别②:crit 参（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);       // ★主判别③:消费位（:28568-28571）
   });
@@ -173,7 +173,7 @@ describe('BJ453-①：TimerCrit 满蓄强制 crit（光环塔 688 场伤面）',
     const m = ravenAt(player, 400, 600);
     const spy = vi.spyOn(e, 'hurt');
     contactDirect(m, hooks, 30, 10);
-    expect(spy.mock.calls[0]![0]).toBe(60);            // ★主判别:30×2（旧 30 必红）
+    expect(spy.mock.calls[0]![0]).toBe(30);            // ★S02 改判:未翻倍基伤(旧 60=预倍形)
     expect(spy.mock.calls[0]![5]).toBe(true);
     expect(player.accTimerCritCharge).toBe(-15);
   });
@@ -208,7 +208,7 @@ describe('BJ453-②：武僧 T3 1/4 vs T2 1/6 强制 crit（688-690 光环塔）
     const m = new MinionProj(392, 1584, 688, 30, 0, true, 0, false, () => player);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(52);            // ★主判别:DV(30,−15 档)=26（30×0.85=25.5→ToEven 26,BJ716-A）×2（旧 30 必红）
+    expect(spy.mock.calls[0]![0]).toBe(26);            // ★S02 改判:DV(30,−15 档)=26 未翻倍直传(旧 52=预倍形;旧 30=零翻倍)
     expect(spy.mock.calls[0]![5]).toBe(true);
   });
 
@@ -223,7 +223,7 @@ describe('BJ453-②：武僧 T3 1/4 vs T2 1/6 强制 crit（688-690 光环塔）
     const m = new MinionProj(392, 1584, 688, 30, 0, true, 0, false, () => player);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(52);            // DV(30,−15 档)=26×2（BJ716-A）
+    expect(spy.mock.calls[0]![0]).toBe(26);            // ★S02 改判:DV(30,−15 档)=26 未翻倍(旧 52=预倍形)
     expect(spy.mock.calls[0]![5]).toBe(true);
   });
 
@@ -301,7 +301,7 @@ describe('BJ453-③：crit 源并链（res.crit‖TimerCrit‖武僧‖6176）',
     const { m, e } = auraEnemyScenario(player, list);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(52);            // DV(30,−15 档)=26×2（BJ716-A）
+    expect(spy.mock.calls[0]![0]).toBe(26);            // ★S02 改判:DV(30,−15 档)=26 未翻倍直传(旧 52=预倍形)
     expect(spy.mock.calls[0]![5]).toBe(true);
   });
 
@@ -316,7 +316,7 @@ describe('BJ453-③：crit 源并链（res.crit‖TimerCrit‖武僧‖6176）',
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
     expect(spy.mock.calls[0]![5]).toBe(true);          // 并链真（任一源即真）
-    expect(spy.mock.calls[0]![0]).toBe(52);            // 单一翻倍（非 ×4）;DV(30,−15 档)=26×2（BJ716-A）
+    expect(spy.mock.calls[0]![0]).toBe(26);            // ★S02 改判:单一 crit 参防后 ×2(非 ×4);DV=26 未翻倍(旧 52=预倍形)
     expect(player.accTimerCritCharge).toBe(-15);       // TimerCrit 源照消费（:12928 无条件）
   });
 
@@ -330,7 +330,7 @@ describe('BJ453-③：crit 源并链（res.crit‖TimerCrit‖武僧‖6176）',
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);   // tagDamage 20/critChance 10
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(85);            // ★主判别:单一翻倍 res.dmg(100)（res.crit ×2 已嵌）;DV(100,−15 档)=85（BJ716-A）
+    expect(spy.mock.calls[0]![0]).toBe(42);            // ★S02 改判:res.dmg=50(WhipTag 尾预倍已摘);DV(50,−15 档)=42.5→ToEven 42(旧 85=预倍+DV 双重形)
     expect(spy.mock.calls[0]![5]).toBe(true);
     expect(player.accTimerCritCharge).toBe(-15);
   });
@@ -344,7 +344,7 @@ describe('BJ453-③：crit 源并链（res.crit‖TimerCrit‖武僧‖6176）',
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(85);            // ★主判别:×4 归位 ×2（旧 200 必红）;DV(100,−15 档)=85（BJ716-A）
+    expect(spy.mock.calls[0]![0]).toBe(42);            // ★S02 改判:单 crit 参防后 ×2（×4 归位保持);DV(50)=42(旧 85=预倍形)
     expect(spy.mock.calls[0]![5]).toBe(true);
   });
 
@@ -356,7 +356,7 @@ describe('BJ453-③：crit 源并链（res.crit‖TimerCrit‖武僧‖6176）',
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(85);             // DV(100,−15 档)=85（BJ716-A;tag crit 单源 ×2 保持）
+    expect(spy.mock.calls[0]![0]).toBe(42);             // ★S02 改判:DV(50,−15 档)=42 未翻倍(旧 85=预倍形;tag crit 单源保持)
     expect(spy.mock.calls[0]![5]).toBe(true);
   });
 });

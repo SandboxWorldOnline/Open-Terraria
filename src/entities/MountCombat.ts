@@ -228,9 +228,9 @@ export function minecartNpcRampage(cart: {
     crit = crit || forced;
     const ratio = spd / cart.runSpeed;                            // :27790 循环内读 velocity.Length()
     const { damage, knockback } = getMinecartDamage(ratio, ctx, p.luck, rnd);   // :27791
-    // ★本仓暴击惯例=调用侧预倍（Enemy.hurt 不内部翻倍，见 Enemy.ts hurt() 偏差登记——
-    //   原版 StrikeNPC :81990 在减防后 ×2，仓内旧矿车内联版同式 Math.round(dmg*2)）
-    const dmgOut = crit ? damage * 2 : damage;
+    // ★S02(BJ723-B):暴击 ×2 统一由 Enemy.hurt 防后承载（原版 StrikeNPC_Inner
+    //   :82067——旧「调用侧预倍」惯例全域退役;矿车 dmgOut 直传未翻倍值）
+    const dmgOut = damage;
     // 0<knockBackResist<1 预除抗性（:27807-27810——hurt 管线内部再乘回，净效果击退
     // 不随抗性衰减；resist>=1 或 ==0 不动）
     const resist = e.def?.knockBackResist ?? 1;

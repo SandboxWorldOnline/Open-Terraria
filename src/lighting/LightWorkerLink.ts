@@ -61,6 +61,22 @@ export let lwbpFlag = (() => {
 })();
 export function setLwbpEnabled(v: boolean): void { lwbpFlag = v; }
 
+/** ★稳态门旗（任务#26 常驻债#1 收口,2026-10-27）：?lightsteady=1 灰度开（缺省关=
+ *  逐位现状）。稳态=快照输入面（除恒动面 clock.timeOfDay/flicker/hourly）与上次
+ *  实发全等 ∧ !dirty ∧ !liquidDirty ∧ 写日志空 → 跳发,最多连跳 3 拍（1/4 率,
+ *  idle 60→15 发/s;主线程 ~60µs/发 + worker 全周期光照计算 4× 削减——Windows
+ *  每 op IPC 税 10-20× 面收益更大,lwbp 注 Trace-225221 判例族）。跳发语义与 lwbp
+ *  同族（跳=结果暂陈旧非丢失;本地引擎稳态本就 4-tick 周期=原版 4 帧节奏,呈现
+ *  节拍 15Hz 与本地/原版同款）。灰度验收点=火把闪烁/昼夜过渡/迪斯科灯观感无差,
+ *  转正后翻转缺省。 */
+export let lightSteadyFlag = (() => {
+  try {
+    if (typeof document === 'undefined') return false;
+    return new URLSearchParams(location.search).get('lightsteady') === '1';
+  } catch { return false; }
+})();
+export function setLightSteadyEnabled(v: boolean): void { lightSteadyFlag = v; }
+
 /** 引擎公共面回填目标（结构最小面,避免与 LightingEngine 运行时互相导入） */
 export interface LightTarget {
   rx: number; ry: number; rw: number; rh: number;
@@ -86,16 +102,20 @@ const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0, skipped: 0,
   fallsBy: newFallsBy(), respawns: 0,
   // ★lwbp（2026-10-11 刀②）:bpSkips=在飞门跳发 tick 数（F5/探针对账面——跳发率=
   //  worker 消化压力直读;恒 0=worker 不慢,门无感）。
-  bpSkips: 0 };
+  // ★稳态门（任务#26,2026-10-27）:steadySkips=稳态跳发 tick 数（灰度 ?lightsteady=1;
+  //  idle 稳态应≈45/s(60→15);恒 0=旗关或输入面恒变——探针/验收对账面）。
+  bpSkips: 0, steadySkips: 0 };
 /** ★R1b-1:引擎侧世代校验丢弃一个晚到结果时登记（探针/F5 对账面） */
 export function noteLightResultSkipped(): void { lwStat.skipped++; }
+/** ★稳态门（任务#26）:引擎稳态跳发登记（对账面,见 lwStat.steadySkips） */
+export function noteLightSteadySkip(): void { lwStat.steadySkips++; }
 /** ★看门狗治理:引擎阶梯重生分派时登记（F5 respawns 消费面） */
 export function noteLightWorkerRespawn(): void { lwStat.respawns++; }
 export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number; lagMs: number; skipped: number;
   tileBytes: number; fmt: { full: number; delta: number }; poolHits: number; poolMisses: number; resyncs: number;
   lastFullReason: string;
   retSent: number; retDropped: number; resPoolTakes: number; resPoolMisses: number; deltaPoolHits: number; deltaPoolMisses: number;
-  fallsBy: Record<WorkerFallReason, number>; respawns: number; bpSkips: number } {
+  fallsBy: Record<WorkerFallReason, number>; respawns: number; bpSkips: number; steadySkips: number } {
   return { on: lightWorkerFlag, ...lwStat, fmt: { ...lwStat.fmt }, fallsBy: { ...lwStat.fallsBy } };
 }
 

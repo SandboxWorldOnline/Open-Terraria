@@ -181,7 +181,7 @@ describe('BJ493-§2：Arrow 主环掷率=rollVanillaHitCrit 命中拍动态（�
     let d2b = 0; vi.spyOn(Math, 'random').mockImplementation(() => (d2b++ === 0 ? 0.22 : 0.5));   // 首掷=crit 阈值(0.04/0.20 档假/0.25 档真);后续=★BJ716-A DV 中性档(×1.0)
     step([shotAt(0.04)], 20, hooks);
     expect(e.calls[0]!.crit).toBe(true);                 // 命中拍折入 item.crit+crt
-    expect(e.calls[0]!.d).toBe(20);                      // 10×2（crit 乘区）
+    expect(e.calls[0]!.d).toBe(10);                      // ★S02(BJ723-B)改判:crit ×2=Enemy.hurt 防后——spy 收 DV 中性基伤(旧 20=预倍形)
   });
 
   it('2c 裸实例零漂移：类缺省 critChance=0 走旧 ?? 路径（关断钉/RNG 消费形不变）', () => {
@@ -242,7 +242,14 @@ describe('BJ493-§3：ranged critBonus 族 13 位迁移（冻结写位零残留+
     // ★BJ497① 五遗留面收编（1023 barrel/631/514 双面/190）→ 10 处;
     // ★BJ704-G24 烟花 167-170 爆面 AoE 掷率（critFw）10→11——该计数锚曾漏改,
     //   BJ716-A 顺手清记账（源注「BJ708-G28 顺手清」未落,现补）
-    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(11);
+    // ★BJ727-A 改判史注（2026-10-27,C-D4 族刀）：Kill 爆城镇臂接线 +5 掷位
+    //   （617/659/661/1023/烟花 blast 城镇 victim 敌怪臂同链同掷;gem/283 面敌怪臂
+    //   无 crit 掷故不加）11→16——锁语义=面存在性非清单冻结（BJ725-A 判例 3）。
+    // ★BJ729-A 改判史注（2026-10-27,D2 残差清偿）：gem/283 两面敌怪臂+城镇臂
+    //   同批补齐 crit 掷（gem 121-126/597 数据面 magic=true[SetDefaults :2111
+    //   ApplyGemStaffStats 段亲读,BJ727-A「宝石族无类旗」判语勘误];283 ranged=
+    //   true[P.cs:3713 亲读]）——+4 掷位 16→20,锁语义同上（面存在性非清单冻结）。
+    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(20);
     expect(s).toContain('const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);');   // 爆面
   });
 

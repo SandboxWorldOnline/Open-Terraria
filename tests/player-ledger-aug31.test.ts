@@ -230,6 +230,10 @@ describe('⑨aggro 潜行链优先序翻转（psycho > shroomite > vortex，:259
   });
   it('仅星璇套：-1200 档不变；仅持变态刀：-750 档不变（双向回归）', () => {
     const a = withGear(undefined, [2757, 2758, 2759]).p;
+    // ★BJ731 改判史（2026-10-27）：BJ725-A D2 起 vortex aggro 臂补齐
+    //   vortexStealthActive 开关门（原版 :26027-26052 块内三加成,
+    //   :26044 aggro 行亲读确认）——星璇档须同时开开关（实机=双击下键）。
+    a.vortexStealthActive = true;
     expect(a.aggro).toBe(Math.round(-1200 * 0.5));
     const b = withGear(3106).p;
     expect(b.aggro).toBe(Math.round(-750 * 0.5));

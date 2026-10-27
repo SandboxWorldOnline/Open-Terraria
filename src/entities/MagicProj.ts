@@ -185,6 +185,9 @@ export class MagicProj extends Entity {
         //  rollVanillaHitCrit+TimerCrit 口径整体收编（BJ494 报告登记）。静态掷=旧 GetWeaponCrit
         //  合并值注入时代的残留（P:52512 注=历史锚）,生产无读者。
         const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
+        // ★S02(BJ723-B) 死面豁免注：BJ494 定谳本命中环生产不可达（net 傀儡早退/
+        //  projId=0 零掷），crit 预倍形按死面不动刀保留（hurt 传 false 字面=行为零变）；
+        //  接活线时随 BJ494 登记口径整体收编（rollVanillaHitCrit+TimerCrit+去预倍）。
         // 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):manaCloak 装备
         // + 冷却 300t → 法力星 723(ai2=1)落地掉 4143 法力斗篷之星
         (game as unknown as { tryManaCloakStarOnMagicHit?: (x: number, y: number) => void })

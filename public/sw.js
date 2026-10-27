@@ -256,17 +256,75 @@ async function serveAsset(req, path) {
 //   cache-first miss（新版本部署=全量新名冷缓存）→ respondWith 内 fetch 挂死
 //   （无超时无重试，无 onerror）→ 调用方只能干等自身超时（worker=3s 握手窗）。
 //   本包装只加在 shell 支的 fetch 调用上,缓存策略结构零变化:
-//   · 8s AbortController 超时——仅约束到响应头（finally 即清 timer,不碰 body 流）;
+//   · 8s AbortController 超时——约束到响应头（finally 即清 timer）;
+//     ★BJ724-A 起头表之后另起正文看门狗（见下,不再「头到即放任正文」）;
 //   · 单次重试——仅网络层失败/超时才走 catch（throw 才重试;404 等明确应答不重试）;
 //   · 两连败落回原 504 offline 路径。瞬断窗内重试成功 → 响应照常回填缓存:即便
 //     调用方已死（如被握手超时 terminate 的 worker）,脚本落缓存 ⇒ 下次 spawn
 //     cache-first 秒开,BJ702「刷新即好」的恢复面不再依赖刷新。
+// ★BJ724-A 刀1（2026-10-26 用户实报:弱网 HTML 16.5s 完成后,入口 JS 正文下载
+//   69.7s ERR_ABORTED,向日葵幕布永转、2 分钟无自动重试）:头表看门狗只守到
+//   响应头——fetch 返回头即清计时器,正文卡死/中途断流既不超时也不触发既有
+//   单次重试（BJ703-E 形态的结构性盲区）。修=头到达后另起【正文看门狗】:
+//   整读 body,逐 chunk idle 检测（30s 无新字节=stall→abort 同一 AbortController
+//   →read 拒绝→attempt 整体 throw→落 .catch(attempt) 既有单次重试,重发完整
+//   fetch）;正文自然断流（连接 RST,read 直接 reject）同路。读全后【重建
+//   Response】返回——调用方（cache.put 的 clone/浏览器 script 消费）拿到的恒为
+//   已完整落地的正文:cache.put 不再可能吃到半截流（BJ702 put-catch 是吸收噪声,
+//   这是消灭来源）。重建时滤 content-length/content-encoding（body 已解压,原头
+//   长度与新体不符,保留会毒化缓存条目/消费端）。阈值=idle 而非总预算:慢而活的
+//   下载（13MB 主包极慢网合法数十秒）只要在出字节就永不误杀。
+//   ★fetchAsset 分级维持（本刀评估,不加正文看门狗）三证:
+//   ① 消费方自有恢复面（Image onerror 退避链/warm ×3/Lang 门,BJ704-G8 域分档
+//      依据原样成立）;
+//   ② serveAsset/主路判 res.type==='basic'——重建 Response 的 type='default',
+//      一致化会把全部资产 miss 误判成 404（结构性破坏,非风格选择）;
+//   ③ zip 分片 20MiB 整读=双份内存拷贝,warm 千文件吞吐面不值得。
+//   入口路径（导航+shell）消费方是 <script>/document,无任何自身恢复面——
+//   正文看门狗只加在 fetchShell。页面侧兜底=index.html 内联启动看门狗（BJ724-A
+//   刀2,script error 自动重注一发+60s 握手超时）,两层互补。
+const SHELL_BODY_IDLE_MS = 30_000;   // 正文 idle 看门狗:头已到（连接已建）,30s 零新字节=stall
+/** fetchShell 正文看门狗:整读 body（idle 检测）+重建 Response（见 BJ724-A 注） */
+async function shellBody(res, ctl) {
+  if (res.status < 200 || res.status > 599) return res;   // 非常规态（opaque 0 等）不重建
+  if (!res.body) return res;                              // 无正文（204/304 等）=原样
+  const reader = res.body.getReader();
+  const chunks = [];
+  let idle = setTimeout(() => ctl.abort(), SHELL_BODY_IDLE_MS);
+  try {
+    for (;;) {
+      const r = await reader.read();
+      if (r.done) break;
+      chunks.push(r.value);
+      clearTimeout(idle);                                 // 出字节即重置（idle 语义,非总预算）
+      idle = setTimeout(() => ctl.abort(), SHELL_BODY_IDLE_MS);
+    }
+  } finally { clearTimeout(idle); }
+  const headers = new Headers(res.headers);
+  headers.delete('content-length');      // 原值=压缩传输长度,与解压后新体不符
+  headers.delete('content-encoding');    // 正文已解压,保留会令消费端二次解压
+  if (res.status === 204 || res.status === 205 || res.status === 304) {
+    return new Response(null, { status: res.status, statusText: res.statusText, headers });
+  }
+  let body = new Uint8Array(0);
+  if (chunks.length === 1) body = chunks[0];
+  else if (chunks.length > 1) {
+    let n = 0;
+    for (const c of chunks) n += c.byteLength;
+    body = new Uint8Array(n);
+    let o = 0;
+    for (const c of chunks) { body.set(c, o); o += c.byteLength; }
+  }
+  return new Response(body, { status: res.status, statusText: res.statusText, headers });
+}
 function fetchShell(req) {
   const attempt = () => {
     if (typeof AbortController === 'undefined') return fetch(req);   // 老内核退化=原行为
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 8000);
-    return fetch(req, { signal: ctl.signal }).finally(() => clearTimeout(t));
+    return fetch(req, { signal: ctl.signal })
+      .finally(() => clearTimeout(t))          // 头到达即清头表计时器（8s 只守到头）
+      .then((res) => shellBody(res, ctl));     // ★BJ724-A 刀1:正文看门狗（idle→abort→重试）
   };
   return attempt().catch(attempt);
 }
@@ -353,7 +411,14 @@ self.addEventListener('fetch', (e) => {
     })());
     return;
   }
-  if (assetish && !currentVersion) {
+  // ★BJ724-A 刀1b（2026-10-26 定谳勘正,入口 JS 实流量路径）:shell 路径从本早退
+  //   支排除。旧行为:SW 重启/冷启窗(currentVersion='')的 /assets/*.js 请求被
+  //   assetish 折进本支 → serveAsset/fetchAsset【单发无重试、头表超时】——而入口
+  //   JS 恰恰永远在这个窗内到达（script 标签先于页面 init 消息）,BJ703-E 的
+  //   fetchShell 重试对入口路径实际不可达（假修盲区,弱网正文断流=单发即败）。
+  //   修=shell 路径放行到下方 isShellJs 支:先 recoverVersion 再 cache-first+
+  //   fetchShell（超时+单次重试+正文看门狗）。非 shell 资产路径本支语义不变。
+  if (assetish && !currentVersion && !SHELL_RE.test(path)) {
     e.respondWith((async () => {
       const ver = await recoverVersion();
       if (!ver) return fetchAsset(req);            // 无任何版本缓存(真首访)→ 网络(超时兜底)
@@ -381,8 +446,16 @@ self.addEventListener('fetch', (e) => {
       //   (QuotaExceeded 等)不得吞掉已 fetch 到的响应(旧代码 await put 在返回
       //   路径 try 内,put 炸→好响应被 catch 吞→504,缓存命中面新资产全灭)。
       //   put 改 fire-and-forget(.catch 吸收),与其他回填位点(:227/:316/:341)同款。
+      // ★BJ724-A 刀1b:本支现也从上方早退支接手 currentVersion='' 窗的 shell 请求
+      //   ——先恢复版本（唯一 sw-assets-v* 名=当前版本不变式）;不可恢复（真首访）
+      //   =纯网络 fetchShell【不落任何缓存】:版本未知时 getCache 会打开裸名
+      //   'sw-assets-v'（caches.open 即创建）,既毒化 recoverVersion 的单版本
+      //   判据又产孤儿缓存,故 cache 恒 null（put 守卫既有 `&& cache` 门,零改动）。
+      if (!currentVersion) await recoverVersion();
       let cache = null;
-      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通 */ }
+      if (currentVersion) {
+        try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通 */ }
+      }
       if (cache) {
         const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
         if (hit) return hit;

@@ -56,16 +56,21 @@ describe('水中跳跃原版对齐（JumpMovement :20405-20496）', () => {
     p.inputJump = false;
   });
 
-  it('按住跳平台段：后续 30t vy 恒钉 -6.01（:20391 每 tick 重置；2026-08-16 前水下丢平台段）', () => {
+  it('按住跳平台段：后续 30t vy 恒 -5.81（钉→重力→积分序,:20391 每 tick 重置）', () => {
     const w = poolWorld();
     const p = new Player(40 * 16, 65 * 16, new Inventory());
     p.inputJump = false;
     sink(w, p, 400);
     p.inputJump = true;
     p.fixedUpdate(1 / 60, hooks(w, p));   // 起跳帧
+    // ★BJ731 改判史（2026-10-27）：BJ713-R13 P0/BJ717-A F1（vanilla-headless
+    //   oracle 逐位认证）翻正持跳平台段序=钉(:26945/:20391)→重力(:27556)→积分
+    //   (:28385)——逐拍末态 vy=−js+grav=−6.01+0.2=−5.81 恒;旧期望 −6.01「钉胜
+    //   重力（重力加完再钉）」为 P0 前旧序。恒 −5.81 本身即钉位证明（无钉则
+    //   每拍再 −0.2 持续衰减）。同款判语见 bj717a-movement-r13 F1（−4.61 恒）。
     for (let i = 0; i < 30; i++) {
       p.fixedUpdate(1 / 60, hooks(w, p));
-      expect(p.vy).toBeCloseTo(-6.01, 5); // 钉速不衰减（重力加完再钉）
+      expect(p.vy).toBeCloseTo(-5.81, 5); // 钉速不衰减（每拍钉 -6.01 后重力 +0.2）
     }
     expect(p.jumpHold).toBe(0);           // 30 sustain 帧耗尽
     p.inputJump = false;

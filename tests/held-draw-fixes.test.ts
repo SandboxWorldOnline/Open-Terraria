@@ -361,8 +361,13 @@ describe('⑤ Kill 三件（Projectile.cs Kill 段）', () => {
     const inside = mkEnemy(1005, 2005);
     const outside = mkEnemy(1005 + 120, 2005);
     const sh = killShell([inside, outside]);
-    (sh.g as unknown as { onProjectileDeath: (...a: unknown[]) => void })
-      .onProjectileDeath(41, 1000, 2000, 10, 10, 3, 0, 30, { kb: 2, hostile: false, arpen: 5 });
+    // ★BJ731 改判史（2026-10-27）：41 爆箱伤走 :12970 DV 掷（BJ723-B 落地面）
+    //   ——0.5 恒等档钉 30（未 mock 必漂 25-34）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      (sh.g as unknown as { onProjectileDeath: (...a: unknown[]) => void })
+        .onProjectileDeath(41, 1000, 2000, 10, 10, 3, 0, 30, { kb: 2, hostile: false, arpen: 5 });
+    } finally { rvi731.mockRestore(); }
     expect(sh.sfx).toEqual(['Item_14']);
     expect(sh.dusts.length).toBe(20);              // 31×10 + 6×(2.5+1.5)×5
     expect(sh.dusts.filter((d) => d.type === 31).length).toBe(10);

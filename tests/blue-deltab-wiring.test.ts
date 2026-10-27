@@ -317,12 +317,23 @@ describe('δB B13 BestReforge 顶级词缀发光（Main.ReforgeItemInReforgeSlot
     // ① BestReforge 三连掷 × Spawn_BestReforge 八粒 Research_Spark = 24 粒
     const sparks = parts.filter((q) => q.color === '#FFE98A');
     expect(sparks).toHaveLength(24);
-    // ② RainbowRodHit 两掷直驱（每掷彩色六 + 白核六 = 12 粒白 'rgba(255,255,255,0.85)'
-    //    +12 粒彩虹色）——两掷位置 = MountedCenter+(0,−16×gravDir)
-    const whites = parts.filter((q) => q.color === 'rgba(255,255,255,0.85)');
-    expect(whites).toHaveLength(12);
+    // ② RainbowRodHit 两掷直驱（每掷彩色六 + 白核六 = 12 白核）——两掷位置 =
+    //    MountedCenter+(0,−16×gravDir)
+    // ★BJ731 改判史（2026-10-27）：BJ704-G24（件4,G2 族一致性清偿）起双层
+    //    sparkle 自 spawnParticles 单标量方块退役 → spawnDust prettySparkle
+    //    专用档（白核 tint {255,255,255,0}、scale×0.6、perfect 直装）——白核
+    //    断言自 parts(color='rgba(255,255,255,0.85)') 改读 dustCalls 第 9 参
+    //    白 tint（彩色层/d267 族 tint 均非全白 a=0,判别唯一）。每掷 6 白核
+    //    ×2 掷 = 12。
+    const whitesD = dustCalls.filter((a) => {
+      const t = (a as unknown[])[8] as { r: number; g: number; b: number; a: number } | undefined;
+      return !!t && t.r === 255 && t.g === 255 && t.b === 255 && t.a === 0;
+    });
+    expect(whitesD).toHaveLength(12);
     const gy = mc.y - 16 * player.gravDir;
-    for (const q of whites) expect(Math.abs(q.y - gy)).toBeLessThanOrEqual(12);
+    for (const a of whitesD) {
+      expect(Math.abs(((a as unknown[])[1] as number) - gy)).toBeLessThanOrEqual(12);
+    }
     // clientOnly:true 面 = 全部本地直驱,module8 上行零调用
     expect(broadcasts).toHaveLength(0);
   });

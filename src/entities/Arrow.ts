@@ -13,7 +13,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, rollGolemSentryCrit } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
+import { canBeChasedBy, hitCritters, hitCrittersAll, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, rollGolemSentryCrit, hitTownNpcsAoeBox } from './projTargets';   // ★BJ729-A：hitCrittersAll（D4 爆面 critter 臂）   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2）：主环 DamageVar 首掷（:12970）
 import { spawnNpcHitDust } from './NpcHitDust';   // ★BJ704-G10（R2-F5）：614 stuck 每 30t HitEffect(0,1.0) 血尘脉冲（type-only Enemy 依赖,无运行时环）
 import type { Enemy } from './Enemy';
@@ -1908,6 +1908,12 @@ export class Arrow extends Entity {
   bannerNpcId: number | null = null;
   /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
   whipTagShot = false;
+  /** ★BJ723-C S05：随从弹自带词缀 tagdmg（Projectile.bonusTagDamage——
+   *  ApplyStatsFromSource :11140 EntitySource_Parent 从母随从继承;母体出生时
+   *  经 :11129 从召唤物 item.bonusTagDamage（Item.cs:586 前缀 tagdmg）继承）。
+   *  消费=resolveWhipTagHit 第 8 参（:12954 (num18+bonusTagDamage)×SummonTagMul）。
+   *  MinionProj 出弹位赋值;缺省 0=无词缀/非召唤链出生。 */
+  bonusTagDmg = 0;
   /** ★Z-F1（2026-08-31 蓝队三批）运行时类别旗覆写槽（原版 spawn 位
    *  `Main.projectile[i].melee = true` 显式赋值的仓内形态——蜂 181/566 家族：
    *  Player.cs:43977/:44479/:44873 + Projectile.cs:13759）。SetDefaults 数据面
@@ -2232,9 +2238,24 @@ export class Arrow extends Entity {
         const snapBonusGemAoe = projectileSnapStrikeBonus(game,
           { projId: this.projId }, cx, cy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx, cy } });
-        e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusGemAoe ? Math.trunc(snapBonusGemAoe * 1) : 0), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
+        // ★BJ729-A（D2 残差清偿,2026-10-27）：Kill 重跑 Damage() 逐 victim DV
+        //  （:12970 无条件,luck 正向）+crit 三类掷（121-126/597 数据面 magic=true,
+        //  P.cs:2111 ApplyGemStaffStats 段亲读——BJ727-A「宝石族无类旗零掷」判语勘误）。
+        //  旧臂无 DV/静态 false crit=BJ727-A 登记债 D2 本体。
+        const critGemAoe = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)) + (snapBonusGemAoe ? Math.trunc(snapBonusGemAoe * 1) : 0), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, critGemAoe, this.pierceInit, true);
       }
     }
+    // ★BJ729-A（D4）：critter 臂——原版 victim 循环（:12592）对小动物同链（宝石族
+    //  非 minion/sentry → CanNPCBeHit :20675 放行）;Kill 重跑 penetrate=-1 多靶
+    //  → hitCrittersAll 全结算（受理数入 pveNumHits 与主环同账）。
+    this.pveNumHits += hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+    //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
+    //  ★BJ729-A（D2）：settle 同扩 DV+crit（与敌怪臂同链同掷,D2 债清偿条款）。
+    hitTownNpcsAoeBox(this.cx, this.cy, R, game, dmg, this.projId, 'playerProj',
+      () => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game), penPercent: this.settlePen }));
     // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
     const aSpd = Math.hypot(this.vx, this.vy);
     const adx = aSpd < 1 ? 0 : this.vx / aSpd;
@@ -2283,11 +2304,29 @@ export class Arrow extends Entity {
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
-          + (snapBonusDeath ? Math.trunc(snapBonusDeath * (crit ? 2 : 1)) : 0),
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+        // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——617 星云
+        //  奥秘死亡爆逐受害靶 ±15% 31 档离散+luck 重掷,BJ716-A Arrow 主环同式;
+        //  crit ×2 由 Enemy.hurt 防后承载（S02）⇒ 此处掷纯基伤;snap 加伤 :13447-50
+        //  原序在 DV 后=加在掷值外）
+        const dmgB617 = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+        e.hurt(applyBannerDamageDealt(game, e, dmgB617)
+          + (snapBonusDeath ? snapBonusDeath : 0),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;★S02 crit ×2 移 Enemy.hurt 防后;fromPlayer=DPS 计
       }
     }
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+    //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。（敌怪臂 M02 链:DV+crit 逐靶掷镜像）
+    // ★BJ729-A（D4,2026-10-27）：critter 臂——victim 循环（:12592）对小动物同链
+    //  （617 非 minion/sentry → CanNPCBeHit :20675 放行）;Kill 重跑 penetrate=-1
+    //  多靶 → hitCrittersAll 全结算（受理数入 pveNumHits 与主环同账）。
+    this.pveNumHits += hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+    hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
+      () => ({
+        dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.armorPen,
+      }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     // 爆尘散布（:73561-73594 逐尘 position = Center + 半盘向×rand×88 覆写）：UnitY 盘 =
     //   UnitY.RotatedByRandom(π)（θ∈±π/2 → (−sinθ,cosθ) 下半盘）；速度轴盘 = UnitX.
@@ -2403,11 +2442,23 @@ export class Arrow extends Entity {
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
-          + (snapBonusDeath ? Math.trunc(snapBonusDeath * (crit ? 2 : 1)) : 0),
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+        // ★BJ729-A（D2 残差清偿）：Kill 重跑 DV（:12970 无条件逐靶）——659 敌臂
+        //  原无 DV（BJ727-A 登记债 D2）。
+        e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))
+          + (snapBonusDeath ? snapBonusDeath : 0),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;★S02 crit ×2 移 Enemy.hurt 防后;fromPlayer=DPS 计
       }
     }
+    // ★BJ729-A（D4）：critter 臂——victim 循环对小动物同链（659 非 minion/sentry）;
+    //  Kill 重跑 penetrate=-1 多靶 → hitCrittersAll。
+    this.pveNumHits += hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+    //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
+    //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
+    hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
+      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.armorPen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 30; i++) {
       const sc = 2 + Math.random() * 0.5;
@@ -2448,11 +2499,23 @@ export class Arrow extends Entity {
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
-          + (snapBonusBurst ? Math.trunc(snapBonusBurst * (crit ? 2 : 1)) : 0),
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+        // ★BJ729-A（D2 残差清偿）：Kill 重跑 DV（:12970 无条件逐靶）——661 敌臂
+        //  原无 DV（BJ727-A 登记债 D2）。
+        e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))
+          + (snapBonusBurst ? snapBonusBurst : 0),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;★S02 crit ×2 移 Enemy.hurt 防后;fromPlayer=DPS 计
       }
     }
+    // ★BJ729-A（D4）：critter 臂——victim 循环对小动物同链（661 非 minion/sentry）;
+    //  Kill 重跑 penetrate=-1 多靶 → hitCrittersAll。
+    this.pveNumHits += hitCrittersAll({ x: this.cx - R661, y: this.cy - R661, w: R661 * 2, h: R661 * 2, projId: this.projId }, game);
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+    //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
+    //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
+    hitTownNpcsAoeBox(this.cx, this.cy, R661, game, this.damage, this.projId, 'playerProj',
+      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.settlePen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 4; i++) {                          // 4×d240（UnitY.RotByRandom 盘内）
       const th = Math.random() * Math.PI * 2, rr = Math.random() * R661 / 2;
@@ -2516,11 +2579,23 @@ export class Arrow extends Entity {
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
-          + (snapBonusBurst ? Math.trunc(snapBonusBurst * (crit ? 2 : 1)) : 0),
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+        // ★BJ729-A（D2 残差清偿）：Kill 重跑 DV（:12970 无条件逐靶）——1023 敌臂
+        //  原无 DV（BJ727-A 登记债 D2;休眠面随族收编）。
+        e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))
+          + (snapBonusBurst ? snapBonusBurst : 0),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;★S02 crit ×2 移 Enemy.hurt 防后;fromPlayer=DPS 计
       }
     }
+    // ★BJ729-A（D4）：critter 臂——victim 循环对小动物同链（1023 非 minion/sentry）;
+    //  Kill 重跑 penetrate=-1 多靶 → hitCrittersAll（休眠面随族,接线即活）。
+    this.pveNumHits += hitCrittersAll({ x: this.cx - R23, y: this.cy - R23, w: R23 * 2, h: R23 * 2, projId: this.projId }, game);
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：Kill 爆城镇臂——原版 Resize+Damage() 重跑
+    //  victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源 hitTownNpcsAoeBox,
+    //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
+    //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷;休眠面随族接线）。
+    hitTownNpcsAoeBox(this.cx, this.cy, R23, game, this.damage, this.projId, 'playerProj',
+      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        penPercent: this.settlePen }));
     deadCellsBarrelExplosionFx(game, this.cx, this.cy);
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBarrelExplosion,
       this.cx, this.cy);
@@ -5212,10 +5287,25 @@ export class Arrow extends Entity {
           if (((ent as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
           if (!idStaticCheck(this.projId, e.id ?? -1, fwCd)) continue;
           const critFw = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-          e.hurt(applyBannerDamageDealt(game, e, critFw ? this.damage * 2 : this.damage),
+          // ★BJ729-A（D2 残差清偿）：Kill 重跑 DV（:12970 无条件逐靶）——烟花敌臂
+          //  原无 DV（BJ727-A 登记债 D2）。
+          e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
             Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, critFw, 0, true);
         }
+        // ★BJ729-A（D4）：critter 臂——victim 循环对小动物同链（167-170 非
+        //  minion/sentry,Damage 头 damage>0 门内）;penetrate=-1 多靶 → hitCrittersAll。
+        //  perIDStaticNPCImmunity 1t 共享桶对 critter = iframes 近似（同 D3 族登记）。
+        this.pveNumHits += hitCrittersAll({ x: this.cx - 96, y: this.cy - 96, w: 192, h: 192, projId: this.projId }, game);
       }
+      // ★BJ727-A（C-D4 族刀,2026-10-27）：烟花 Kill 爆城镇臂——原版 192² Damage() 重跑
+      //  （:78549-78556）victim 循环含城镇 voodoo 靶;单源 hitTownNpcsAoeBox,敌怪臂
+      //  G24 链（crit 掷镜像）。idStatic
+      //  1t 共享桶→TownNPC.hurt 10t iframes 近似（vanilla perIDStaticNPCImmunity[type]
+      //  逐型 1t,同拍异色双发边角差,登记 D3）。
+      //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷,D2 债清偿条款）。
+      hitTownNpcsAoeBox(this.cx, this.cy, 96, game, this.damage, this.projId, 'playerProj',
+        () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+          penPercent: this.settlePen }));
     }
     if (this.projId === 617 && !this.dead) this.arcanumDeathBurst(game);
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
@@ -5350,8 +5440,13 @@ export class Arrow extends Entity {
           const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
           for (const seg of segs283) {                           // 每段独立命中判定
             if (Math.abs(ecx - seg.cx) < R283 + e.w / 2 && Math.abs(ecy - seg.cy) < R283 + e.h / 2) {
-              e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
-                Math.sign(ecx - seg.cx) * this.knockback, 0, game, this.settlePen, false, 1, true);
+              // ★BJ729-A（D2 残差清偿）：283 SetDefaults ranged=true（P.cs:3713 亲读）
+              //  → Kill 三连 Damage() 重跑逐靶 DV(:12970)+ranged crit 掷（:12920）;
+              //  旧臂无 DV/静态 false crit=BJ727-A 登记债 D2 本体（census⑥「仅缺DV」
+              //  不完整,⑤「无 DV/crit」为准）。
+              const crit283 = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+              e.hurt(applyBannerDamageDealt(game, ent, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+                Math.sign(ecx - seg.cx) * this.knockback, 0, game, this.settlePen, crit283, 1, true);
             }
           }
         }
@@ -5370,6 +5465,20 @@ export class Arrow extends Entity {
                 Math.sign(ccx - seg.cx) * this.knockback, 0, game, this.settlePen, false, 1, true);
             }
           }
+        }
+        // ★BJ727-A（C-D4 族刀）：283 三段 Kill 爆城镇臂（:77565-77577 三连 Damage()
+        //  重跑含城镇 voodoo 靶）——敌怪臂链镜像（banner 通道内置;无 DV/crit=面级
+        //  既有形态,残差随 BJ727-A 登记债 D2）。三段各扫;TownNPC.hurt 8t iframes
+        //  使同靶多段不二结算（vanilla 283 无 local/idStatic 免疫表可三跳,近似登记 D3）。
+        for (const seg of segs283) {
+          // ★BJ729-A（D2）：settle 同扩 DV+crit（与敌怪臂同链同掷;三段各掷=原版
+          //  三连 Damage() 逐段逐靶语义）。
+          hitTownNpcsAoeBox(seg.cx, seg.cy, R283, game,
+            this.damage, this.projId, 'playerProj',
+            (tn) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+              crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+              penPercent: this.settlePen,
+              kb: Math.sign((tn as unknown as { x: number }).x - seg.cx) * this.knockback }));
         }
       }
     }
@@ -6909,7 +7018,7 @@ export class Arrow extends Entity {
         //  （SetDefaults :6788）→ 命中拍 rollVanillaHitCrit 动态。
         const crit631 = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
         const rec631 = tgt631 as unknown as { hurt?: (...a: unknown[]) => boolean };
-        rec631.hurt?.(Math.max(1, Math.trunc(this.damage)) * (crit631 ? 2 : 1),
+        rec631.hurt?.(Math.max(1, Math.trunc(this.damage)),   // ★S02:crit ×2=Enemy.hurt 防后
           0, 0, game, this.settlePen, crit631, this.pierceInit, true);
         this.killNow(game);
         return;
@@ -8975,7 +9084,7 @@ export class Arrow extends Entity {
               //  0.04 路由门误当 4% 平率+丢 owner 聚合。514 数据面 ranged（SetDefaults
               //  :5850;spawn 位=通用 ranged :17556 0.04 门,亲读）→ 命中拍动态。
               const critN = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-              const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
+              const dN = Math.max(1, Math.trunc(this.damage * 0.15));   // ★S02:crit ×2=Enemy.hurt 防后
               // ★F3 接线（蓝队四轮）：刺入 DoT 每隔拍一击 = Damage() 整段重入
               // （aiStyle93 :13368-13376 + immune 写 1 档 :14060-14062 → 隔拍再刺面，
               // ★aiStyle93 双触面陷阱：这里每拍都是独立 Damage() pass ⇒ 焰爆石/
@@ -8988,8 +9097,8 @@ export class Arrow extends Entity {
                   targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
                 });
               rec.hurt(applyBannerDamageDealt(game, rec, dN)
-                + (snapBonusDot ? Math.trunc(snapBonusDot * (critN ? 2 : 1)) : 0),
-                0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+                + (snapBonusDot ? snapBonusDot : 0),
+                0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点;★S02 ×2=防后
             }
           }
         }
@@ -11005,7 +11114,7 @@ export class Arrow extends Entity {
         //  （AI 侧 :7337 位）同 rollVanillaHitCrit 单源——旧 `||` 面把 0.04 路由门误当
         //  4% 平率+丢 owner 聚合/:25712 持械折入。514 数据面 ranged（SetDefaults :5850）。
         const critN = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-        const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
+        const dN = Math.max(1, Math.trunc(this.damage));   // ★S02:crit ×2=Enemy.hurt 防后
         // ★F3 接线（蓝队四轮）：钉首击走 Damage() 全管线（aiStyle93 :13368-13376 段同
         //  在 Damage_PVE_Inner 内）→ 焰爆石/拍击石双支（:13439-13446）一并生效；
         //  弹 514 数据面 ranged；加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）
@@ -11015,8 +11124,8 @@ export class Arrow extends Entity {
             targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
           });
         e.hurt(applyBannerDamageDealt(game, e, dN)
-          + (snapBonusNail ? Math.trunc(snapBonusNail * (critN ? 2 : 1)) : 0),
-          0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+          + (snapBonusNail ? snapBonusNail : 0),
+          0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点;★S02 ×2=防后
         // ★清偿刀 U2（2026-10-01）：钉 514 首击 ghostHeal 白耗面（:13877-79 通用 on-hit
         //  段,StrikeNPC :13716 后=本位;命中专管不入主环 → 主环白耗臂对刺入首击不可达,
         //  S2 台账「Arrow 主环第三臂」残差站）。514 数据面 ranged 非 magic（SetDefaults
@@ -11282,7 +11391,11 @@ export class Arrow extends Entity {
             | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
           const res = resolveWhipTagHit(en2, dmg, game,
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-            SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
+            SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2,
+            // ★BJ723-C S05：随从弹词缀 tagdmg 透传（ApplyStatsFromSource :11140
+            //  EntitySource_Parent 继承 → :12954 tag 项并入;owner 缺省 game.player
+            //  既有兼容语义不动）
+            undefined, this.bonusTagDmg);
           pendingDirect916 = direct;
           dmg = res.dmg;
           // ★6176 圣殿骑士背包（Projectile.cs:12962-12965,2026-09-03 哨兵携带批收口）：
@@ -11300,10 +11413,10 @@ export class Arrow extends Entity {
           //  tag 支 DV 掷 res.dmg（tag 乘后基数）;res.crit 的 ×2 已嵌 res.dmg →
           //  tag crit 拍 DV 掷已翻倍基数（原版掷未翻倍）=边界舍入微差,登记债①
           dmg = damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
-          // ★BJ496③ 翻倍归位：tag crit ×2 已嵌 res.dmg——roll/TimerCrit/golem 源强制
-          //  时补一次 ×2（原版 crit 单布尔单翻倍,MinionProj contact :4983 同式;旧形
-          //  golem 单独掷中=染 crit 色【零翻倍】缺口随刀闭合）
-          if (crit && !res.crit) dmg *= 2;
+          // ★S02（BJ723-B 2026-10-26）：crit ×2 摘除——原版单布尔单翻倍在
+          //  StrikeNPC_Inner 防后（NPC.cs:82067,Enemy.hurt 承载）;res.crit ×2 亦已
+          //  从 WhipTag 尾摘除（DV 掷基数复位未翻倍值=BJ716-A 登记债①清偿;
+          //  banner(:13388)/EoW /5(:13392) 均在未翻倍值上=登记债②同刀清偿）。
         } else {
           // 暴击：基 4% + spawn 注入的系暴击/item.crit（P:2300-2304/P:25230-25232）
           // ★Notes（蓝队四轮，2026-08-31）：TryConsumingTimerCrit 并入（Projectile.cs
@@ -11355,7 +11468,8 @@ export class Arrow extends Entity {
           //  整缺曾=非暴击恒同数;与 dealContacts/WeaponProj/explodeAt 对称,281 双载体
           //  （Arrow 雕像死亡爆弹掷 DV/Dart 载体不掷）一致性归位
           dmg = damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
-          if (crit) dmg *= 2;
+          // ★S02（BJ723-B）：crit ×2 摘除——Enemy.hurt 防后承载（NPC.cs:82067,与
+          //  tag 支同批;预倍形全域退役）。
         }
         if (this.onFireHit) {
           // AddBuff(buff, minT + Next(max−min+1)) 直译（1106/1097 共用,见字段注）
@@ -11494,7 +11608,7 @@ export class Arrow extends Entity {
         //  183 蜂榴弹等;锥界 crit 前位差=±1 截断噪（登记债②,主修 5× 超伤）
         e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e, dmg), this.projId,
           (e as { vanillaId?: number | null }).vanillaId, game.world)
-          + (snapBonusArrow ? Math.trunc(snapBonusArrow * (crit ? 2 : 1)) : 0),
+          + (snapBonusArrow ? snapBonusArrow : 0),   // ★S02:snap 随整体进 hurt 吃防后 ×2
           Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         // ★B6D 刀②写侧（2026-09-01）：IDStatic 族结算成功即清本跳 iframes（=原版
         //   usesIDStaticNPCImmunity 支 `targetNPC.immune[owner] = 0` :14033-14036）——
@@ -12242,7 +12356,7 @@ export class Arrow extends Entity {
       //  spawn 侧逐位亲读）+丢 owner 聚合/:25712 持械折入=BJ489 路由化时本环漏迁的
       //  现役退化。190 数据面 ranged（SetDefaults :2789）→ 命中拍 rollVanillaHitCrit 动态。
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;   // ★S02:crit ×2 移 Enemy.hurt 防后（NPC.cs:82067）
       // StatusNPC :10622-10625：命中必挂 Hemorrhage(375) 240-360t（表驱动）
       applyProjStatus(PIRANHA_PROJ, e as unknown as Record<string, number>);
       if (this.frostEligible) {
@@ -12264,7 +12378,7 @@ export class Arrow extends Entity {
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
       // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点；★F1 加伤随暴击并入
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusPiranha ? Math.trunc(snapBonusPiranha * (crit ? 2 : 1)) : 0),
+        + (snapBonusPiranha ? snapBonusPiranha : 0),
         Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :14175-14178 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :13270-13274 首咬 latch

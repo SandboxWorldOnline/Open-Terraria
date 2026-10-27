@@ -55,7 +55,7 @@ function fakeRoDir(name: string, files: Record<string, string>, perm: 'granted' 
         (e as { name?: string }).name = 'NotFoundError';
         throw e;
       }
-      return { text: async () => map.get(n) ?? '' };
+      return { getFile: async () => ({ text: async () => map.get(n) ?? '' }) };   // ★Issue#25 标准句柄形状
     },
     removeEntry: async () => { /* 恢复链不消费 */ },
   };
@@ -86,7 +86,8 @@ function fakeRwDir(name: string, files: Record<string, string> = {}, perm: 'gran
           throw e;
         }
         return {
-          text: async () => map.get(n) ?? '',
+          // ★Issue#25 标准句柄形状：getFile()→File（text 在 File 上）;无句柄级 text()
+          getFile: async () => ({ text: async () => map.get(n) ?? '' }),
           createWritable: async () => {
             if (writeFail) throw writeFail;
             return {

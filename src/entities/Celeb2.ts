@@ -35,7 +35,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
 import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
-import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B24）：城镇 voodoo 靶
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -425,7 +425,7 @@ export class Celeb2Rocket extends Entity {
         { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
         | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
       const crit = rollCrit || timerCrit;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // ★F3 接线（蓝队四轮）：庆祝弹射器 MK2 族（714/615/715-718）数据面 ranged
       // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在
       // banner 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -434,9 +434,28 @@ export class Celeb2Rocket extends Entity {
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
-        + (snapBonusCeleb2 ? Math.trunc(snapBonusCeleb2 * (crit ? 2 : 1)) : 0),
+        + (snapBonusCeleb2 ? snapBonusCeleb2 : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
       this.explode(game);                              // penetrate 1 → 命中即 Kill
+      return;
+    }
+    // ★BJ729-A（D1 B24,2026-10-27）：城镇 voodoo 靶——715-718 friendly 火箭巫毒
+    //  窄门（:12618-12631）;AABB 自盒;settle 镜像敌怪臂链（crit=rollCrit||TimerCrit
+    //  :12915-28 全掷/DV=面级既有形态不单侧补齐[D6 族登记]/穿甲 armorPen）;
+    //  penetrate 1 受理即 explode 消亡（:14189-196 同相）。714/615 muzzle=
+    //  friendly=false+hostile=false → 原版入场门恒 return 纯视觉,双臂销案。
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
+      'playerProj', this.projId ?? 714, undefined, undefined, undefined, undefined,
+      (tn) => ({
+        crit: (this.critChance > 0 && rollVanillaHitCrit(this.projId ?? 714, game))
+          || ((game.player as unknown as
+            { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+            | null)?.tryConsumingTimerCrit?.(game,
+              (tn as unknown as { x: number }).x, (tn as unknown as { y: number }).y,
+              (tn as unknown as { w: number }).w, (tn as unknown as { h: number }).h) ?? false),
+        penPercent: this.armorPen,
+      }))) {
+      this.explode(game);
       return;
     }
   }

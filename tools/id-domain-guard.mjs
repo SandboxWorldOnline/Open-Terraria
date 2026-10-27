@@ -77,9 +77,13 @@ const T_ANCHORS = new Map([
     'bestOreSheet: bestOreS >= 0',
     'const SHADOW_CANDLE = SHEET_MAP.get(646)',   // 影烛修法(同普查案)
   ]],
-  // 探测器输出消费域=sheet(Lang.tileName 按 sheet 键解析)+平移器单源+粒子热路径 LUT
+  // 探测器输出消费域=sheet+平移器单源+粒子热路径 LUT
+  // ★BJ731 随迁（2026-10-27）：明胶水晶修法（v0.1.59,40f93184）把输出名改
+  //   oreFinderDisplayName(sheet, fx)（SceneMetrics.ts:323 单源,fx 帧态维:
+  //   129 明胶水晶/227 染料植物 baseOption;兜底支 Lang.tileName(sheet) 随迁
+  //   SceneMetrics）——本锚自 `Lang.tileName(scene.bestOreSheet)` 随迁新消费形。
   [join(SRC, 'core/Game.ts'), [
-    'Lang.tileName(scene.bestOreSheet)',
+    'oreFinderDisplayName(scene.bestOreSheet,',
     'function internalIdsOfVanSheets',
     'const sheetCache = new Int16Array(TILE_DEFS.length).fill(-2)',
   ]],
@@ -130,7 +134,13 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/DungeonPass.ts', 'world/liquid/LiquidSim.ts',
     // ★BJ426-债A(2026-10-01)转正:Door.ts shiftTrapdoor 折翼行门/砍切臂(cellSheet 平移
     //   sheet 域,≡WorldGen.cs:52001/:52013-52019 tileCut 臂,BJ324 新消费面)
-    'world/Door.ts']],
+    'world/Door.ts',
+    // ★BJ731 转正（2026-10-27）：MysticSnakeCoil mysticSnakeCond/阻挡扫描两处
+    //   sheetOf 平移后 TILE_CUT_SHEETS 查询——≡WorldBuilding/Conditions.cs:57-67
+    //   `Conditions.MysticSnake.CheckValidity` 读 Main.tileCut[type]（type=原版
+    //   tile id=sheet 域）+ :52933-52941 绳阻挡扫同谓词。sheet 域消费合法
+    //   （968d867f v0.1.65 落地后漏登记,非新违规）。
+    'entities/MysticSnakeCoil.ts']],
   ['BREAKABLE_WHEN_PLACING_SHEETS', ['data/tiles.ts', 'world/TileAnchorValidator.ts',
     'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/evolution/WorldEvolution.ts',
     'entities/RollingBoulder.ts', 'player/SmartCursor.ts',
@@ -216,7 +226,11 @@ const T_SHEET_TABLES = [
     //   · VanillaFraming SETS_PLATFORMS=S256([...PLATFORMS_SHEETS]) sheet 键 LUT(BJ221 收编面漏挂)
     //   · ClingerStaffWallProj CLINGER_WALL_STOP_SHEETS=[...PLATFORMS_SHEETS,380] 停行集
     //     (sheetAt sheet 域消费,≡Player.cs:49110-49117 弹482 发射侧下扫 Platforms[t]∥t==380)
-    'render/VanillaFraming.ts', 'entities/ClingerStaffWallProj.ts']],
+    'render/VanillaFraming.ts', 'entities/ClingerStaffWallProj.ts',
+    // ★BJ731 转正（2026-10-27）：net/vanilla/sections.ts msg42 剖面回放 slope/half
+    //   还原支——vanillaType=原版线格式 tile type（=sheet 域本相,全文件线格式域）
+    //   ×2 处直查（4667b330 BJ708-720 落地后漏登记,非新违规）。
+    'net/vanilla/sections.ts']],
   ['PLATFORMS_IDS', ['data/tiles.ts', 'world/gen/vanilla/CorruptionPass.ts',
     'world/gen/vanilla/QuickCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts']],
 ];

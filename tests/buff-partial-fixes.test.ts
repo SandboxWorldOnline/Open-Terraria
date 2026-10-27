@@ -212,6 +212,11 @@ describe('Invisibility(10)：aggro 钳位 -750(未挥击)/-250(挥击)——索�
     const patched = { ...p.equipStats, vortexSet: true };
     Object.defineProperty(p, 'equipStats', { value: patched, configurable: true });
     (p as unknown as { stealth: number }).stealth = 0.5;
+    // ★BJ731 改判史（2026-10-27）：BJ725-A D2 起 aggro/伤/暴三消费位补齐
+    //   vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,
+    //   :26044 `aggro -= (int)((1f-stealth)*1200f)` 亲读确认）——星璇潜行档
+    //   须同时开开关（实机=双击下键置位）,旧测试只驱动 stealth 已不足。
+    (p as unknown as { vortexStealthActive: boolean }).vortexStealthActive = true;
     expect(p.aggro).toBe(-600);           // 无隐身基准
     p.buffs.apply(BuffType.Invisibility, 60);
     expect(p.aggro).toBe(-750);           // -600 > -750 → 钳到 -750

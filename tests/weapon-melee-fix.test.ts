@@ -200,7 +200,7 @@ describe('③ AI_019_Spears_GetExtensionHitbox', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0.999);   // 无暴击
     (sp as unknown as { t: number }).t = 13;           // 回拨一帧重走 t=14（同位置确定性重算）
     sp.fixedUpdate(1, hooks);
-    expect(e.hits).toEqual([61]);                      // 延伸盒命中（此前整段漏=零命中）
+    expect(e.hits).toEqual([70]);                      // 延伸盒命中（此前整段漏=零命中）;★W01(BJ723-B)改判:0.999=DV +15 档 61×1.15→ToEven 70(旧无 DV 恒 61)
     expect(cutTiles.length).toBeGreaterThan(0);        // CutTilesAt(extensionBox)（:14176-14179）
   });
 

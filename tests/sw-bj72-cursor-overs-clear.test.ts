@@ -364,7 +364,10 @@ describe('SW-BJ320 清零拍位归一（0 步进帧图标可见性恒定）', ()
     // fixedUpdate 头：world 门内清零先于 tickCount++（每逻辑 tick,与 claim 同拍耦合）
     const sFu = src.indexOf('private fixedUpdate(dt: number) {');
     expect(sFu).toBeGreaterThan(0);
-    const fuHead = src.slice(sFu, sFu + 600);
+    // ★BJ730 改判史：窗口旧 600——interp 快照块（2026-10-14,?interp=1 相机/玩家
+    //  上步末态快照）合法插在 BJ320 清零行前,清零行现偏移 650;窗口随文本放宽
+    //  （BJ710-G35 发射位增重破窗判例同族）,锁语义不变（清零先于 tickCount++）。
+    const fuHead = src.slice(sFu, sFu + 1200);
     const iFuClear = fuHead.indexOf('if (this.world) this.mouseOversClear()');
     const iTick = fuHead.indexOf('this.tickCount++');
     expect(iFuClear, 'fixedUpdate 头须有 world 门内清零').toBeGreaterThan(0);

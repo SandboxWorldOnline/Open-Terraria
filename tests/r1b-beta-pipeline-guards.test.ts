@@ -99,7 +99,10 @@ describe('R3b-2 boltScratch 资源面', () => {
 
 describe('R1b-8 降级帧水扭曲 gate 缺席触发面', () => {
   it('fg 批门带环溢出探针+足迹 2D 重放接线', () => {
-    expect(RDR).toContain('liqMode && !liqRingOverflow() ? this.liqBatchHook() : null');
+    // ★BJ731 改判史（2026-10-27）：BJ676 月套逃逸帧（veil676=月套/甲辉队列非空）
+    //   给 fg 批门追加第三与项 `&& !veil676`（批化支前景水直入 FBO,禁批回
+    //   canvas gate 路）——锁随条件扩展,溢出探针语义不变。
+    expect(RDR).toContain('liqMode && !liqRingOverflow() && !veil676 ? this.liqBatchHook() : null');
     expect(RDR).toContain('if (fgCtx) replayLiquidFootQuads2D(fgCtx);');
     expect(VLR).toContain('export function replayLiquidFootQuads2D');
     expect(VLR).toContain('export function liqRingOverflow(): boolean');

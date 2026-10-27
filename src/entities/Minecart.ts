@@ -1079,7 +1079,10 @@ export class Minecart extends Entity {
       const cartTimerCrit = ((game.player as unknown as
         { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
         | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h)) ?? false;
-      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG) * (cartTimerCrit ? 2 : 1), 0, 0, game, 0, cartTimerCrit, 0, true);   // 玩家矿车激光=DPS 计;★BJ467③ crit 色位+×2
+      //  ★BJ729-A（2026-10-27）:S02(BJ723-B) 全仓预倍清偿漏站——BJ467③ 期预倍形
+      //  `* (cartTimerCrit ? 2 : 1)` + crit 同传=×4 双倍;Enemy.hurt 防后单次 ×2
+      //  （NPC.cs:82067,Mount.cs:5282 Damage()→StrikeNPC 单次乘区）承载,预倍摘除。
+      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG), 0, 0, game, 0, cartTimerCrit, 0, true);   // 玩家矿车激光=DPS 计;★BJ467③ crit 位;★BJ729-A 预倍摘除
     }
   }
 

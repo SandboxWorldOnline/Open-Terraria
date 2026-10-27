@@ -105,17 +105,22 @@ describe('③ 消费方向 = (1−stealth)（:25970/:26043/:26015-26018）', () 
     expect(cloaked - visible).toBeCloseTo(3, 6);
   });
 
-  it('星璇套远程伤：满潜行(0) = 无潜行(1) ×1.8（:26043 rangedDamage += 0.8f×(1−s)）', () => {
+  it('星璇套远程伤：满潜行(0) 池加算恰 +0.8（:26043 rangedDamage += 0.8f×(1−s)——★BJ723-A R01 乘数改回池加算）', () => {
     const p = mkPlayer();
     p.inv.armor[0] = { id: iid(2757), stack: 1 };
     p.inv.armor[1] = { id: iid(2758), stack: 1 };
     p.inv.armor[2] = { id: iid(2759), stack: 1 };
     expect(p.equipStats.vortexSet).toBe(true);
+    p.vortexStealthActive = true;   // BJ725-A D2 改判史注：三消费位补开关门后,潜行加成断言须先开开关（原版 :26027-26052 全在块内）
     p.stealth = 1;
     const visible = p.rangedDamageMult('arrow');
     p.stealth = 0;
     const cloaked = p.rangedDamageMult('arrow');
-    expect(cloaked / visible).toBeCloseTo(1.8, 6);
+    // 套件本体 fx 0.16+0.12+0.08 = 0.36 入池（:14004/:14010/:14015）→ 池 1.36→2.16，
+    // 加算 Δ 恰 +0.8（旧乘数码 = 1.36×1.8 = 2.448，Δ +1.088 越多基伤越放大）
+    expect(visible).toBeCloseTo(1.36, 6);
+    expect(cloaked).toBeCloseTo(2.16, 6);
+    expect(cloaked - visible).toBeCloseTo(0.8, 6);
   });
 
   it('蘑菇矿套远程伤同向：满潜行(0) > 无潜行(1)（:26015-26018 Remap(1→0.75) 档，方向回归）', () => {
@@ -227,17 +232,18 @@ describe('⑤ 移动/坐骑回升（:25957-25960/:25961-25964/:26010-26013）', 
 //    解析式 clamp(4s−3,0,1)：s=1→因子 0、s=0.875→0.5、s≤0.75→恒 1（钳 0 段）
 // ---------------------------------------------------------------------------
 describe('⑥ 蘑菇矿 Remap(1,0.75→1,0) 三态（:26015-26018）', () => {
-  it('伤：s=1 → ×1、s=0.875 → ×1.25、s≤0.75 → ×1.5（(1−Remap)×0.5,曾误平铺 ×0.6）', () => {
+  it('伤：s=1 → +0、s=0.875 → +0.25、s≤0.75 → +0.5（:26016 rangedDamage += (1−Remap)×0.5f 池加算,曾误平铺 ×0.6;★BJ723-A R01 乘数改回池加算）', () => {
     const p = mkShroomite();
     expect(p.equipStats.shroomiteSet).toBe(true);
     p.stealth = 1;
     const base = p.rangedDamageMult('bullet');
+    expect(base).toBeCloseTo(1.13, 6);     // 1 + 1549 胸 fx dmgRanged 0.13（:13814）
     p.stealth = 0.875;
-    expect(p.rangedDamageMult('bullet') / base).toBeCloseTo(1.25, 6);
+    expect(p.rangedDamageMult('bullet') - base).toBeCloseTo(0.25, 6);
     p.stealth = 0.75;                      // 钳制起点：Remap=0 → 因子已满
-    expect(p.rangedDamageMult('bullet') / base).toBeCloseTo(1.5, 6);
+    expect(p.rangedDamageMult('bullet') - base).toBeCloseTo(0.5, 6);
     p.stealth = 0;                         // 满潜行仍 +0.5（非 (1−s) 全程线性）
-    expect(p.rangedDamageMult('bullet') / base).toBeCloseTo(1.5, 6);
+    expect(p.rangedDamageMult('bullet') - base).toBeCloseTo(0.5, 6);
   });
 
   it('暴：s=1 → +0、s=0.875 → +5、s≤0.75 → +10（:26017 (1−Remap)×10）', () => {
@@ -260,14 +266,16 @@ describe('⑥ 蘑菇矿 Remap(1,0.75→1,0) 三态（:26015-26018）', () => {
     expect(p.aggro).toBe(-750);
   });
 
-  it('星璇仍走平铺轴不受 Remap 影响（:26043-26045 (1−s)×0.8/×20/−1200）', () => {
+  it('星璇仍走平铺轴不受 Remap 影响（:26043-26045 (1−s)×0.8/×20/−1200——★BJ723-A R01 乘数改回池加算）', () => {
     const p = mkVortex();
     expect(p.equipStats.vortexSet).toBe(true);
+    p.vortexStealthActive = true;   // BJ725-A D2 改判史注：三消费位补开关门后,潜行加成断言须先开开关（原版 :26027-26052 全在块内）
     p.stealth = 1;
     const base = p.rangedDamageMult('bullet');
     const c1 = p.critChance('ranged');
+    expect(base).toBeCloseTo(1.36, 6);     // 1 + 2757/2758/2759 fx 0.36（:14004/:14010/:14015）
     p.stealth = 0.875;                     // 平铺轴：因子 = 1−s = 0.125
-    expect(p.rangedDamageMult('bullet') / base).toBeCloseTo(1.1, 6);
+    expect(p.rangedDamageMult('bullet') - base).toBeCloseTo(0.1, 6);   // 0.8×0.125 池加算
     expect(p.critChance('ranged') - c1).toBe(Math.round(0.125 * 20));
     expect(p.aggro).toBe(-Math.round(1200 * 0.125));
   });

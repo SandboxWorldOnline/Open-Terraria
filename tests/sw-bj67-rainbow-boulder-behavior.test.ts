@@ -237,8 +237,15 @@ describe('SW-BJ67 D2 Kill 彩虹爆（:72354-72427）', () => {
     expect(d66.every((d) => d.alpha === 100 && d.scale === 1.7 && d.color)).toBe(true);
     expect(d66.every((d) => d.dust.noGravity === true)).toBe(true);
     expect(d66.every((d) => Math.abs((d.dust.vx as number) - 2.1) < 1e-9)).toBe(true);   // 0.7（NewDust 基速）×3
-    // ④ RainbowRodHit 编排 ×2（:72418-72425,clientOnly:true → spawnParticles 直生）
-    expect(game.particles.length).toBeGreaterThanOrEqual(12);
+    // ④ RainbowRodHit 编排 ×2（:72418-72425,clientOnly:true）
+    // ★BJ730 改判史：旧载体 spawnParticles 直生（≥12 粒方块近似）——BJ704-G24
+    //  （件4,G2 族一致性清偿）编排迁 spawnDust prettySparkle 专用档（princess/
+    //  stardust R3 同族:精确直装位/速+TTL 60+双轴星芒承载,spawnParticles 单标量
+    //  方块近似退役）。新载体=每调用 6k×双层 mkPS=12 prettySparkle 尘,×2 调用=24。
+    const ps = game.dusts.filter((d) => (d.dust as { prettySparkle?: boolean }).prettySparkle === true);
+    expect(ps.length).toBeGreaterThanOrEqual(24);
+    expect(ps.every((d) => (d.dust as { ttl?: number }).ttl === 60)).toBe(true);      // :3475 衰减窗=寿命
+    expect(ps.every((d) => (d.dust as { rotation?: number }).rotation === Math.PI / 2)).toBe(true);   // :3472
     // ⑥ CloneDust 白影消费（:72390-72396——尾尘逐粒克隆）
     expect(game.clones.length).toBeGreaterThanOrEqual(2);   // 尾尘逐粒克隆（mock 尘不带 type,计总数）
     // ⑤ 白克隆（:72390-72396 CloneDust 白影——vanillaDust.clone 消费）

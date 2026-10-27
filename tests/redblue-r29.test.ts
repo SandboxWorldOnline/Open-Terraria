@@ -13,7 +13,7 @@
 //  ⑦ 星星炮族：955 闪烁档+Item9 循环音、728 alpha 钳100+Item9、自旋 (|vx|+|vy|) 式
 //     （AI_005 :24133/:24216 + AI_151 :22338-22376——红队"无循环音/0.3 自旋"驳正）
 //  ⑧ Kill 面：120/206·225/819/178/284/286(80px AoE)/BULLET_KILL_SFX 音族
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ729-A：vi（DV 中性档钉值 mock）
 import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { Arrow, BULLET_KILL_SFX } from '../src/entities/Arrow';
@@ -136,6 +136,10 @@ describe('R29 §5 玛瑙爆破枪 661 黑爆', () => {
     expect(a.alpha).toBe(0);
   });
   it('Kill 二段 AoE：160px 盒内敌全额伤结算 + Item14 + d240/d62 尘配比', () => {
+    // ★BJ729-A（2026-10-27,D2 残差清偿）DV 中性档钉值：661 Kill 重跑 Damage() 逐
+    //  靶 DV（:12970）补齐后未 mock 期望 48 必漂（41-55）——0.5 → tier 0 → ×1.0
+    //  恒等档（BJ716-A 同款修法）;crit 掷 0.5<0.04+agg 恒 false 同钉。
+    const rvi661 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     // 近敌放在弹道下方但仍在爆点 80px 盒内（避开接触命中,单验 AoE 结算）
     const near = { x: 830, y: 130, w: 20, h: 20, dead: false, hurt: (..._a: unknown[]) => true };
     const far = { x: 1400, y: 900, w: 20, h: 20, dead: false, hurt: (..._a: unknown[]) => true };
@@ -152,6 +156,7 @@ describe('R29 §5 玛瑙爆破枪 661 黑爆', () => {
     expect(r.sfx).toContain('Item_14');
     expect(r.dusts.filter((d) => d.type === 240).length).toBeGreaterThanOrEqual(4);
     expect(r.dusts.filter((d) => d.type === 62).length).toBeGreaterThanOrEqual(16);
+    rvi661.mockRestore();
   });
 });
 
@@ -440,6 +445,9 @@ describe('R29 §12 弹药 Kill 面 + 子弹火花音族', () => {
     expect(b.dusts.filter((d) => d.type === 5).length).toBe(20);
   });
   it('爆炸弹 286：Item14 + owner 本机 80px AoE 二次结算（近敌吃、远敌免）', () => {
+    // ★BJ729-A（D2 残差清偿）DV 中性档钉值：286 Kill 重跑 DV+crit 收编后未 mock
+    //  期望 15 必漂（13-17）——0.5 → tier 0 → ×1.0 恒等档,crit 掷同钉 false。
+    const rvi286 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const near = { x: 20, y: -10, w: 20, h: 20 };    // 距爆心(0,0) ~28px ⊂ 80 盒
     const far = { x: 300, y: 300, w: 20, h: 20 };
     const { g, hurt, sfx, dusts } = mkDeathGame([near, far]);
@@ -449,6 +457,7 @@ describe('R29 §12 弹药 Kill 面 + 子弹火花音族', () => {
     expect(hurt[0][1]).toBe(15);
     expect(dusts.filter((d) => d.type === 31).length).toBe(7);
     expect(dusts.filter((d) => d.type === 6).length).toBe(6);      // 3 循环×双枚
+    rvi286.mockRestore();
   });
   it('子弹撞块火花音族 BULLET_KILL_SFX：1458 全量 24 型（含红队漏记的 389）', () => {
     for (const id of [14, 20, 88, 36, 83, 84, 389, 104, 279, 100, 110, 180,

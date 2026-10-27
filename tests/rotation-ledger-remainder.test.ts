@@ -85,6 +85,10 @@ function drawWithFake(e: Enemy, w: WorldT, rect = { sw: 8, sh: 8 }): Array<{ m: 
     atlas: { vnpc: () => rectStub, ensureVImage: () => null, vmisc: () => null },
     drawNpcGlow: () => {},
     npcWhiteLiftQueue: [] as unknown[],   // ★BJ504：395 入队面（本测只断言 rotate/scale,队列丢弃）
+    // ★BJ731 补桩（2026-10-27）：drawEnemy 白提亮分支（刀2-C1 mod fullbright 族）
+    //   读 this.isBehindTilesEnemy(e)——假体缺方法=TypeError（moonlord-ellipse
+    //   同款桩,false=非钻地层走白提亮评估面）。
+    isBehindTilesEnemy: () => false,
   };
   (Renderer.prototype as unknown as { drawEnemy: (this: unknown, e: Enemy, w: WorldT) => void })
     .drawEnemy.call(fake, e, w);

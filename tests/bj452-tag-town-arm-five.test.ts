@@ -236,7 +236,7 @@ describe('BJ452-N2：敌怪环 hurt crit 参补 res.crit（光环/拳盒/扑击�
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);
     const spy = vi.spyOn(e, 'hurt');
     tickUntil(m, hooks, () => spy.mock.calls.length > 0);
-    expect(spy.mock.calls[0]![0]).toBe(85);            // (30+20)×2=100 预倍 → DV(100,−15 档)=85（BJ716-A R18-F2）
+    expect(spy.mock.calls[0]![0]).toBe(42);            // ★S02(BJ723-B)改判:(30+20)=50 未翻倍 → DV(50,−15 档)=42.5→ToEven 42(旧 85=预倍+DV 双重形)
     expect(spy.mock.calls[0]![5]).toBe(true);          // ★主判别:色位（旧恒 golemCritAura=false 必红）
   });
 
@@ -251,7 +251,7 @@ describe('BJ452-N2：敌怪环 hurt crit 参补 res.crit（光环/拳盒/扑击�
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);
     tickUntil(m, hooks, () => e.calls.length > 0);
     expect(e.calls.length).toBeGreaterThan(0);
-    expect(e.calls[0]!.d).toBe(85);                    // (30+20)×2=100 → DV(100,−15 档)=85（BJ716-A R18-F2）
+    expect(e.calls[0]!.d).toBe(42);                    // ★S02 改判:50 未翻倍 → DV(50,−15 档)=42(旧 85=预倍形)
     expect(e.calls[0]!.crit).toBe(true);               // ★主判别:色位（旧恒 false 必红）
   });
 
@@ -263,7 +263,7 @@ describe('BJ452-N2：敌怪环 hurt crit 参补 res.crit（光环/拳盒/扑击�
     player.tagEffectStack.tryApplyTagToNPC(4914, e.id, 0, 0);
     tickUntil(p, hooks, () => e.calls.length > 0, 8);
     expect(e.calls.length).toBeGreaterThan(0);
-    expect(e.calls[0]!.d).toBe(85);                    // (20×1.5+20)×2=100 → DV(100,−15 档)=85（BJ716-A R18-F2）
+    expect(e.calls[0]!.d).toBe(42);                    // ★S02 改判:(20×1.5+20)=50 未翻倍 → DV(50,−15 档)=42(旧 85=预倍形)
     expect(e.calls[0]!.crit).toBe(true);               // ★主判别:色位（旧恒 false 必红）
   });
 });

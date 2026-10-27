@@ -459,7 +459,12 @@ describe('⑥ 收藏标记随移动的清/保面', () => {
 
   it('makeSlotEl 优先级链接线（左键门+Alt 先于 Shift/Ctrl；无动作回落 dragFrom 普通面）', () => {
     expect(srcMatch(/if \(e\.button === 0 && e\.altKey && this\.altSlotClick\(i, where, panelOpen\)\) return;/)).toBe(true);
-    expect(srcMatch(/if \(e\.button === 0 && \(e\.shiftKey \|\| e\.ctrlKey\) && this\.altMoveClick\(i, where, e\.shiftKey, e\.ctrlKey, panelOpen\)\) return;/)).toBe(true);
+    // ★BJ730 改判史：旧锁=单行门 `…(e.shiftKey||e.ctrlKey) && this.altMoveClick(…) return;`
+    //  ——BJ704-R5 P1（红蓝审查 F6 同族缺口）把该门改块形:门内先 snapshot
+    //  slotContent,altMoveClick 命中后按空槽/内容变维护 cursor tooltip（悬停泡
+    //  不残留不漂移）。门语义不变（button 0 + shift/ctrl → altMoveClick 优先于
+    //  dragFrom）,锁随块形改写（门+调用双锚）。
+    expect(srcMatch(/if \(e\.button === 0 && \(e\.shiftKey \|\| e\.ctrlKey\)\) \{\s*const before = this\.slotContent\(where, i\);\s*if \(this\.altMoveClick\(i, where, e\.shiftKey, e\.ctrlKey, panelOpen\)\) \{/)).toBe(true);
     expect(srcMatch(/this\.dragFrom = \{ i, where, sx: e\.clientX, sy: e\.clientY \};/)).toBe(true);
     expect(srcMatch(/planAlternateClick\(\{/, '../src/ui/UI.ts')).toBe(true);
     expect(srcMatch(/export function planAlternateClick/, '../src/ui/SlotActions.ts')).toBe(true);

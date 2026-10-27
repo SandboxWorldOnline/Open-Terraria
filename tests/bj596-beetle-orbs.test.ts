@@ -264,8 +264,12 @@ describe('BJ596 接线锁', () => {
 
   it('绘制挂 drawPlayer 眼球伞块之前（原版 37<38 层序）、手持物之后（27<37）', () => {
     expect(RDR.includes('vanilla/BeetleOrb.png')).toBe(true);
-    const atBeetle = RDR.indexOf('DrawPlayer_37_BeetleBuff');
-    const atEyebrella = RDR.indexOf('DrawPlayer_38_EyebrellaCloud');
+    // ★BJ730 改判史：旧锚裸 'DrawPlayer_37/38_…' 走 indexOf 首中——后续波注释
+    //  （鞭线体/水前面层链注,提及 38 层）先于真绘制位抢中致序断言错位。改用真
+    //  绘制位区段头形态锚（唯一）,层序本体未动（22105 drawUseItem < 22108 Beetle
+    //  < 22147 Eyebrella 实测在位）。
+    const atBeetle = RDR.indexOf('★BJ596 甲虫 orb（DrawPlayer_37_BeetleBuff');
+    const atEyebrella = RDR.indexOf('眼球伞云盖（DrawPlayer_38_EyebrellaCloud');
     const atHeld = RDR.indexOf('drawUseItem(ctx, p, swing, flicker)');
     expect(atBeetle).toBeGreaterThan(-1);
     expect(atBeetle).toBeGreaterThan(atHeld);          // 手持物(27)之下（先画）

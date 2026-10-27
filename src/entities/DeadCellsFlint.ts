@@ -72,7 +72,7 @@ function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
       targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
   e.hurt(applyBannerDamageDealt(game, e, dmg)
-    + (snapBonusFlint ? Math.trunc(snapBonusFlint * (crit ? 2 : 1)) : 0),
+    + (snapBonusFlint ? snapBonusFlint : 0),
     kdir * kb, 0, game, pen, crit, 0, true);
 }
 
@@ -366,7 +366,7 @@ export class FlintWaveProj extends Entity {
       // ★BJ489 def-3：1043 斩击波掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+
       //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // 击退=远离玩家中心（:13664-13666 aiStyle 188-191 特列）
       const kdir = this.owner.cx < ecx ? 1 : -1;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
@@ -508,7 +508,7 @@ export class FlintSpikeProj extends Entity {
       // ★BJ489 def-3：1041 尖刺掷率=rollVanillaHitCrit（melee 旗,命中拍动态;
       //  emitFlintSpikes 入参载体退为关断钉传播面,值不作掷率消费）
       const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = crit ? this.damage * 2 : this.damage;
+      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
       // 击退=远离玩家中心（1041 属 AI_190 特列? 否——1041 走默认弹体向;
       // 但 EmitSpikes 弹速自带出手向,原版 num40 缺省=弹体速度向投影。取速度 x 向）
       const kdir = Math.sign(this.vx) || 1;

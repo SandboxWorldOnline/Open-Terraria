@@ -90,7 +90,10 @@ describe('BJ263 站 1：121 飞尸死 → 1× netID-2 小腐化史莱姆（NPC.c
     expect(b.vanillaNetId).toBe(-2);
     expect(b.hp).toBe(90); expect(b.maxHp).toBe(90);
     expect(b.def.damage).toBe(45); expect(b.def.defense).toBe(20);
-    expect(b.def.knockbackResist).toBe(1.2);           // SetDefaults(-2) kbResist×1.2（基 1f）
+    // ★BJ730 改判史：旧值 1.2（D12 前旧码 kb 直写经典档）→ 新值 f32(1.2)=
+    //  1.2000000476837158——BJ720-A D12（2026-10-26）netIdFlagTrueRescale kb 乘子
+    //  f32 保真（NPC.cs case 体 `knockBackResist *= 1.2f` C# float 位级结果）。
+    expect(b.def.knockbackResist).toBe(Math.fround(1.2));   // SetDefaults(-2) kbResist×1.2（基 1f,f32）
     expect(b.w).toBe(36); expect(b.h).toBe(27);        // (int)(40×0.9f)=36,(int)(30×0.9f)=27
     expect(b.x).toBe(slimer.cx - b.w / 2);             // 底中锚 X
     expect(b.y + b.h).toBe(slimer.y + slimer.h);       // ★判别：Bottom=父底（中心锚=红）
@@ -112,7 +115,7 @@ describe('BJ263 站 2：81 腐化史莱姆（scale≥1）死 → 2-3× netID-1 �
       expect(b.vanillaNetId).toBe(-1);
       expect(b.hp).toBe(90);
       expect(b.def.damage).toBe(45); expect(b.def.defense).toBe(10);
-      expect(b.def.knockbackResist).toBe(1.2);
+      expect(b.def.knockbackResist).toBe(Math.fround(1.2));   // ★BJ730 改判史同上（D12 f32 保真）
       expect(b.w).toBe(24); expect(b.h).toBe(18);      // (int)(40×0.6f),(int)(30×0.6f)
       expect(b.ai1).toBe(i);                           // ★ai[1]=num419 分裂序号（确定性）
       expect(b.x).toBe(cs.cx - b.w / 2);

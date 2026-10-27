@@ -185,7 +185,7 @@ export interface ClientNetHooks {
   onSSC?: (recordJson: string) => void;
   /** 打击到达（msg42；房主权威结算）。fromSlot=打击者槽位（服务器回填,Boss 伤害
    *  统计归账;旧 server 无尾段=0 房主） */
-  onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) => void;
+  onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number, crit?: boolean) => void;
   /** 其他端玩家表情到达（msg120；Game 在对应远端代理头顶出泡 360t） */
   onEmoteBubble?: (slot: number, emoteId: number) => void;
   /** 树妖星露谷彩蛋广播到达（msg144；各端本地启动编排器——双向免回显） */
@@ -883,7 +883,10 @@ export class ClientNet {
         // 尾部 u8 fromSlot（服务器回填打击者槽位——旧 server 无尾段 = 0 房主）：
         // 房主 BossDamageTracker 的访客伤害归账用（原版服务器端 owner 同义）
         const fromSlot = r.remaining > 0 ? r.u8() : 0;
-        this.hooks.onStrike?.(netId, dmg, kbx, kby, fromSlot);
+        // BJ723-B D5 清偿（BJ725-A）：尾段 crit 位（server 在 slot 后重排——旧端读
+        //  remaining>0 只吃 slot,残留 crit 字节被旧端忽略=双向优雅降级）
+        const crit = r.remaining > 0 ? r.u8() > 0 : false;
+        this.hooks.onStrike?.(netId, dmg, kbx, kby, fromSlot, crit);
         return;
       }
       case Msg.DryadStardew: {
@@ -1539,8 +1542,8 @@ export class ClientNet {
   }
 
   /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */
-  sendStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
-    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).finish());
+  sendStrike(netId: number, rawDmg: number, kbx: number, kby: number, crit?: boolean) {
+    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).u8(crit ? 1 : 0).finish());   // BJ723-B D5 清偿（BJ725-A）：尾部 u8 crit
   }
 
   /** PvP 近战命中意向上报（v7 msg44，C→S→定向转发被击者；权威=被打方本地结算）。

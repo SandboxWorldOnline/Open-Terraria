@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, statusPlayer, evpDirectDmg } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, statusPlayer, evpDirectDmg, hitTownNpcs, hitTownNpcsAoeBox, hitCrittersAll } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）;★BJ729-A：hitCrittersAll（B25/D4 critter 臂）
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2）：全环 DamageVar 首掷（:12970）
 import { InfernoHostileBlast } from './InfernoHostileBlast';
 import { shadowbeamLineFx } from '../fx/orchestraFx';
@@ -970,10 +970,57 @@ export class TrapShot extends Entity {
         }
       }
     }
-    // 友方弹幕（炮弹族 friendly=true）到此为止：不误伤小动物/城镇 NPC
-    // （原版 friendly 弹对城镇 NPC 免疫；小动物不在敌怪判定内）。
-    // 反射后转 hostile 同样走此出口（原版敌弹对 NPC 无伤害）
-    if (!this.hostile || this.reflected) return;
+    // ★BJ729-A（B25,2026-10-27）：错注勘正 + friendly 接触面 critter/城镇臂接线。
+    //  旧注两句均错：①「原版 friendly 弹对城镇 NPC 免疫」——Damage_PVE_Inner
+    //  :12618-12631 friendly 弹走 flag 巫毒窄门（22 killGuide/54 killClothier/
+    //  318 臭鸡蛋）,162/166/281 装娃娃可达;「小动物不在敌怪判定内」——小动物是
+    //  Main.npc 成员（victim 循环 :12592 同链）,CanNPCBeHit :20675 对非 minion/
+    //  sentry 的 friendly 弹放行（dontHurtCritters 4767/5323 例外=原语内置门）。
+    //  ②「原版敌弹对 NPC 无伤害」——对敌怪桶成立（flag 假门,反射弹上环已拦）,
+    //  对城镇 NPC 不成立：hostile&flag2（:12626-12631）恒命中档,反射转 hostile
+    //  弹可打城镇 NPC。
+    if (!this.hostile || this.reflected) {
+      const tpB25 = TRAP_PROJ_ID[this.kind];
+      const kbB25 = st.kb ?? 2;
+      if (!this.hostile) {
+        // critter 臂（friendly 陷阱/炮弹族）：hitCritters 原语全门+fromPlayer
+        //  （Wiring/玩家发射 owner=myPlayer → OwnedBySomeone :580-588 真值）;
+        //  穿透经济=受理计数逐个递减（162 炮弹 pen4 一拍多鸟=原版 keepIterating
+        //  同相;per-victim 私表窗对一击致死小动物=死面,黑化复权残窗由 Enemy.hurt
+        //  iframes 承载=近似登记;281 idStatic 共享桶同 iframes 近似）。
+        const nCritB25 = hitCrittersAll(
+          { x: this.x, y: this.y, w: this.w, h: this.h, projId: tpB25 ?? this.projId ?? 0 },
+          game);
+        for (let i = 0; i < nCritB25; i++) {
+          if (--this.pierceLeft <= 0) {
+            if (st.shatterDust) this.shatter(game);
+            this.dead = true;
+            return;
+          }
+        }
+        // 城镇臂：巫毒窄门（hitTownNpcs 单源;settle 镜像敌怪臂 DV 链 R18-F2;
+        //  crit 面同 TrapShot 族既有登记近似不掷;受理耗穿同敌怪环经济）
+        const townHitB25 = hitTownNpcs(
+          this as unknown as Parameters<typeof hitTownNpcs>[0], game,
+          this.damage, Math.sign(this.vx) * kbB25, 'playerProj', tpB25 ?? this.projId ?? 0,
+          undefined, undefined, undefined, undefined,
+          () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0) }));
+        if (townHitB25 && --this.pierceLeft <= 0) {
+          if (st.shatterDust) this.shatter(game);
+          this.dead = true;
+          return;
+        }
+      } else {
+        // 反射转 hostile：城镇 NPC flag2 恒命中档（敌怪环已拦=原版 flag 假门同相;
+        //  hitTownNpcs 'hostile' 单源;DV 镜像敌怪臂链;反射族 penetrate=-1 恒存续）
+        hitTownNpcs(
+          this as unknown as Parameters<typeof hitTownNpcs>[0], game,
+          this.damage, Math.sign(this.vx) * kbB25, 'hostile', tpB25 ?? this.projId ?? 0,
+          undefined, undefined, undefined, undefined,
+          () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0) }));
+      }
+      return;
+    }
     // 小动物桶（Enemy 单参 shim / Critter.hurt(game) 皆可，被击即死）
     // ★SW-BI1 2026-09-06：hurt 改可选形+调用前守卫——npcs 桶有非 TownNPC 成员
     //  （PetFollower 宠物走 Game.ts:36787 入 npcs 桶、无 hurt 方法），机关弹碰上
@@ -1177,6 +1224,27 @@ export class TrapShot extends Entity {
       }
       if (this.windowGate && !idStaticKey) this.hitCdT.set(e as unknown as object, 10);
     }
+    // ★BJ729-A（D4,2026-10-27）：critter 臂——原版 Resize+Damage() 重跑 victim 循环
+    //  （:12592）对小动物同链（162/281/167-170 非 minion/sentry → CanNPCBeHit
+    //  :20675 放行）;penetrate=-1（Kill 重跑置 -1）多靶 → hitCrittersAll 全结算
+    //  （hitCritters 单发档语义不适用）。idStatic/immune 窗对 critter =
+    //  perIDStaticNPCImmunity 门以 Enemy.hurt iframes 近似承载（D3 族登记口径）。
+    hitCrittersAll({ x: cx - r, y: cy - r, w: r * 2, h: r * 2,
+      projId: TRAP_PROJ_ID[this.kind] ?? this.projId ?? 0 }, game);
+    // ★BJ727-A（C-D4 族刀,2026-10-27）：炮弹/兔爆/烟花 Kill 爆城镇臂——原版 Resize+
+    //  Damage() 重跑（162 :77393-77400/:77445-77452 / 281 :77374-77384 / 烟花
+    //  :78549-78556）victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源
+    //  hitTownNpcsAoeBox,敌怪臂链镜像（DV :12970 掷;crit=TrapShot blast 族既有登记
+    //  近似不掷,同相）。162 两段各自一扫（immune[owner]=10 窗→TownNPC.hurt iframes
+    //  同靶不二结算,与敌怪 hitCdT 私表同净效）;281 idStatic 共享桶同由 iframes 承载。
+    //  415-418 damage=0 已在头门整退（Damage_PVE :12576 同相）;hail 1049 hostile 面
+    //  有独立城镇臂（:1035）不经本口。
+    hitTownNpcsAoeBox(cx, cy, r, game, this.damage,
+      TRAP_PROJ_ID[this.kind] ?? this.projId ?? 0, 'playerProj',
+      () => ({
+        dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        kb: Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2),
+      }));
   }
 
   // ============ 烟花三件套 + 马桶水花（Projectile 167-170 / 415-422 / 733）============
@@ -1246,6 +1314,13 @@ export class TrapShot extends Entity {
           e.hurt(applyBannerDamageDealt(game, ent,
               damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
             Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);
+          // ★BJ727-A（C-D4 族刀）：烟花火箭接触拍城镇臂——原版 Damage() 逐拍 victim
+          //  循环（:17184/:12592）含城镇 voodoo 靶;直击敌后 Kill 爆（explodeFirework
+          //  内 blastDamage 城镇臂另扫）。敌怪臂链镜像（DV;crit 同 blast 族既有近似）。
+          hitTownNpcs(this as unknown as Parameters<typeof hitTownNpcs>[0], game,
+            this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2),
+            'playerProj', this.projId ?? 0, undefined, undefined, undefined, undefined,
+            () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0) }));
           this.explodeFirework(game);   // penetrate==0 → Kill()（:17312-17315）
           return;
         }

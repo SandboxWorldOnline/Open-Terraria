@@ -202,7 +202,8 @@ describe('★P1-B ④ 源级锁:GLSpriteLayer.texRefreshRegion 三链分档+账�
   it('bolt bake 链携子区（bbox 实采域）;Renderer 中介透传', () => {
     expect(PROJ).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);");
     const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');   // ★P0 去画布化:preBytes 直挂
-    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): string {');   // ★P0 去画布化:preBytes 直挂
+    expect(RDR).toContain('const key = `${fam}:${n % ring}`;');   // ★BJ731 改判史(2026-10-27):R3b-1 环键回传(d0a1859d,2026-10-17 尘批)——键先存 const 回传,内联直呼形退役
+    expect(RDR).toContain('sh.uploadScratchNow(img, key, rw, rh, preBytes);');
   });
 });

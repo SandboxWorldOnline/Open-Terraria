@@ -5,7 +5,7 @@
 //     炸弹族接触零伤零钳引信,手雷族接触=注入伤+钳 3（:13153）
 //  ③ 通用引信烟尘 :48285-48322——Next(2)==0 双尘齐出（31+num30）,排除表 10 型
 //  ④ 519 帧动画 :47951-47970（阈值 (num12/10+6)/2、末 15t 双速、4 帧回绕 M.cs:8619）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ731:vi=DV 恒等档 mock
 import { World } from '../src/world/World';
 import { GrenadeProj, bombGravityGateOf, bombFuseSmokeTypeOf, bombFishFrameTick,
   BOMB_DAMAGE_KEEP_16 } from '../src/entities/WeaponProj';
@@ -60,7 +60,13 @@ describe('SW-I1 AI_016 投掷弹道四件', () => {
     // SW-L1 2026-09-03 I-2：爆点判前移（--fuse≤2 ≡ 原版 AI timeLeft≤3 先于尾减）,
     //   接触段随之移至爆点判后——首拍 180→179（不爆）→ 接触钳 3,终值=3;
     //   次拍 --fuse→2≤2 爆 = 原版 Damage 钳后次拍 AI Kill 同拍
-    expect(mk(30)).toEqual({ hurt: [100], fuse: 3 });
+    // ★BJ731 改判史（2026-10-27）：BJ723-B W01（2026-10-26）起 Damage_PVE_Inner
+    //   :12970 每靶掷 DamageVar（damageVarRoll ±15% 31 档）——未 mock 时接触伤
+    //   100 必漂（85-115）。0.5 → tier 0 → ×1.0 恒等档（a-batch2 :134 同款修法）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      expect(mk(30)).toEqual({ hurt: [100], fuse: 3 });
+    } finally { rvi731.mockRestore(); }
   });
   it('引信烟尘（:48285-48322）：50%/t 双尘齐出、引信尖差 6.6px、排除表+num30 分型', () => {
     expect([30, 397, 517, 519, 588, 681, 779, 783, 862, 863, 1086, 655].map((t) => bombFuseSmokeTypeOf(t, 33)))

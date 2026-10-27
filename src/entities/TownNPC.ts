@@ -1449,12 +1449,20 @@ export class TownNPC extends Entity {
     // (int)Math.Max(1.0, calc*(!crit?1:2))（NPC.cs:82067）——暴击乘法在截断前的
     // double 上、一次性 (int) 截断。旧"round 后再 ×2"使奇防（def×0.5 带半值）
     // 每击多伤 0~1（如 40+7−7.5=39.5：原版 39/暴击 79，旧式 40/80）。双精度后截断：
+    // ★R-B-F4(2026-10-13):mod 承伤值链——★BJ731 改判（2026-10-27）随 Enemy.hurt
+    //  A5（2026-10-14「移防前」：tML HitModifiers 位=StrikeNPC 头部对原始 Damage
+    //  修正后入防御链，DR/伤害帽族按 tML 语义作用全链）同形收编：①hook 自「防后」
+    //  移回防前 dmg 面（Enemy.hurt 的旧防后位=R-A-M3 登记债已清偿，城镇域漏同步）；
+    //  ②撤 R-B-F4 在防后 double 上的 Math.trunc——该截断使 crit ×2 落在截断【后】
+    //  （trunc(48.5)×2=96 ≠ 原版 (int)(48.5×2)=97），违反 NPC.cs:82067 两步式
+    //  （Math.Max 保底门在 ×2 前、double 域）——town-npc-hurt F6(65→64)与
+    //  combat-stitch A1(97→96)双红实锤。≥9999 演出通道门与 Enemy.hurt 同形。
+    if (dmg < 9999) {
+      dmg = Math.max(1, Math.trunc(runModNpcIncomingHit(this as never, dmg)));
+    }
     const penAdd = npcCheckArmorPenetration(def, flatPen, penPercent, {});
     let calc = dmg + penAdd - def * 0.5;
     if (calc < 1) calc = 1;
-    // ★R-B-F4(2026-10-13):mod 承伤值链(防御结算后/暴击前=tML ModifyIncomingHit 域;
-    //  Enemy.hurt :15026 同族——旧=城镇域整缺,DR 族 mod 对城镇 NPC 不生效)
-    calc = Math.max(1, Math.trunc(runModNpcIncomingHit(this as never, calc)));
     dmg = Math.trunc(calc * (crit ? 2 : 1));
     this.hp -= dmg;
     this.lastStrikeDealt = dmg;   // ★X1 face 4：num41 等位（StrikeNPC 返值=防后实扣）

@@ -117,7 +117,12 @@ describe('② 41 狱炎箭爆炸（Kill :73256-73293）', () => {
       onProjectileDeath: (...a: unknown[]) => (sh.g.onProjectileDeath as (...aa: unknown[]) => void)(...a),
     });
     const a = new Arrow(41 * TILE, 185 * TILE, 0, 6, 30, 8, 41, {});
-    flyToTileDeath(a, game);
+    // ★BJ731 改判史（2026-10-27）：41 爆箱伤走 :12970 DV 掷（BJ723-B 落地面）
+    //   ——0.5 恒等档钉 30（未 mock 必漂 25-34）。
+    const rvi731 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      flyToTileDeath(a, game);
+    } finally { rvi731.mockRestore(); }
     expect(sh.sfx).toEqual(['Item_14']);                       // SoundID.Item14（:73258）
     expect(sh.dusts.filter((d) => d.type === 31).length).toBe(10);   // :73259-73262
     expect(sh.dusts.filter((d) => d.type === 6).length).toBe(10);    // 5 拍×(2.5+1.5)（:73263-73272）

@@ -11,7 +11,7 @@
 //   （2026-09-29）：hurt 返假两族异义——门拒（iframes 残窗 :13972/dontTakeDamage
 //   :13978）无 proc 无 numHits++;血尽级联/普通未致命（无门位返假）原版仍受理
 //   （proc :13877-79/numHits++ :14263 无死亡复查）→ 照 proc 照计数（判据=!vanillaGated）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -83,6 +83,10 @@ describe('BJ382 雨滴 239/245 ghostHeal proc（aiDrop → hitEnemies onAccepted
     const game = makeGame(log, [e]);
     const rain = new RainCloudProj(80 * TILE, 97 * TILE, 0, 5, 130, 0, 239);
     rain.critChance = 0;
+    // ★BJ726 改判史：W01(BJ723-B) hitEnemies 补 DV 掷(:12970)后防后值非确定（旧期望=
+    //  平值 108=130−DEFENSE 不变,单跑实收 114/122/125… 随机漂移）——mock 0.5（tier 0,
+    //  DV 恒等）恢复定值（BJ723-C M02 习语,同 §3/§4/§5）;生产 239 DV 掷=原版同构
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     rain.fixedUpdate(1, game);
     expect(e.lastStrikeDealt).toBe(130 - DEFENSE);
     expect(log.length).toBe(1);                           // ← 旧码 0 = 漏接病灶
@@ -101,6 +105,9 @@ describe('BJ382 雨滴 239/245 ghostHeal proc（aiDrop → hitEnemies onAccepted
     const game = makeGame(log, [e]);
     const rain = new RainCloudProj(80 * TILE, 97 * TILE, 0, 5, 130, 0, 245);
     rain.critChance = 0;
+    // ★BJ726 改判史：同 239——W01(BJ723-B) hitEnemies 补 DV 掷后非确定（旧期望=平值
+    //  108 不变）,mock 0.5（tier 0,DV 恒等）恢复定值（BJ723-C M02 习语）
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     rain.fixedUpdate(1, game);
     expect(log.length).toBe(1);
     expect(log[0].dmg).toBe(130 - DEFENSE);
@@ -186,6 +193,8 @@ describe('BJ382 磁球激光 255/炼狱叉 260 ghostHeal proc（BeamBoltProj ⑤
 
 describe('BJ382 棱镜光棱 632 ghostHeal proc（PrismProng 线碰撞命中）', () => {
   it('充能中段命中 → proc（无 ×3,dmg=防后,numHits=0）', () => {
+    // ★BJ723-C M02：632 DV 首掷后防后值非确定——mock 0.5（tier 0,DV 恒等）恢复定值
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: StealCall[] = [];
     const game = makeGame(log, []);
     const parent = new PrismProj(0, 1, 100, 2, () => true, () => ({ x: 0, y: 0 }), () => true);
@@ -236,6 +245,8 @@ describe('BJ382 棱镜光棱 632 ghostHeal proc（PrismProng 线碰撞命中）'
 
 describe('BJ382 充能爆破炮光束 461 ghostHeal proc（BlasterBeam 线碰撞命中）', () => {
   it('同拍两敌 numHits 衰减 0→1;防后实扣', () => {
+    // ★BJ723-C M02：461 DV 首掷后防后值非确定——mock 0.5（tier 0,DV 恒等）恢复定值
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: StealCall[] = [];
     const game = makeGame(log, []);
     const cb = new ChargedBlaster(1, 0, 130, 2, () => true, () => ({ x: 0, y: 0 }), () => true);
@@ -301,6 +312,8 @@ describe('BJ382 充能爆破炮光束 461 ghostHeal proc（BlasterBeam 线碰撞
 
 describe('BJ382 美杜莎 volley 536 ghostHeal proc（每目标独立束,numHits 恒 0 档）', () => {
   it('单目标 → proc（结算载体 536 magic,dmg=防后,Center 出生）', () => {
+    // ★BJ723-C M02：凝视束 DV 首掷后防后值非确定——mock 0.5（tier 0,DV 恒等）恢复定值
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const log: StealCall[] = [];
     const p = new Player(80 * TILE, 100 * TILE, new Inventory());
     p.useTime = 10;                                       // channel 电平
@@ -319,6 +332,7 @@ describe('BJ382 美杜莎 volley 536 ghostHeal proc（每目标独立束,numHits
   });
 
   it('同 volley 三目标全 0 档（原版逐目标独立 NewProjectile(536),numHits 逐弹独立）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C M02：DV 恒等档定值
     const log: StealCall[] = [];
     const p = new Player(80 * TILE, 100 * TILE, new Inventory());
     p.useTime = 10; p.mana = 200;

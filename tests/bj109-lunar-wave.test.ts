@@ -19,7 +19,11 @@
 //   I  ScreenEffectInitializer.cs:14-17 四塔预设 + SceneState.cs:107-111（塔心−(0,10)+
 //      flag4 压独石）+ ScreenShader.cso obj9 FilterTower
 //   J  Projectile.cs:80895-80931 GetAlpha 专支（538/573/575/578/579 灰度白化族）
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
+// ★BJ730 改判史：BJ109-H 动态 import Renderer（27.9k+ 行,随渲染波持续增重）在
+//  esbuild 转换+模块初始化跨过 vitest 缺省 5s 测试超时=超时伪红（BJ712-A 判例
+//  签名同源;vitest-default-timeout-pseudo-red 仓内习语放宽）——非行为回归。
+vi.setConfig({ testTimeout: 600_000, hookTimeout: 600_000 });
 import { readFileSync } from 'node:fs';
 
 const gameSrc = () => readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');

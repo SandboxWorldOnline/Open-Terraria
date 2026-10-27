@@ -52,6 +52,21 @@ export function cycleVoiceVariant(cur: number | null | undefined): 1 | 2 | 3 {
   return order[(i + 1) % order.length] as 1 | 2 | 3;
 }
 
+/** ★BJ732-A:体型切换的语音自动跟随（原版 UpdateSelectedGender
+ *  UICharacterCreation.cs:1312-1330——性别翻转时 1↔2 互转;switch 无 case3 分支
+ *  =「其他」声存活（玩家显式选择不被性别切换覆写）;同性别切换 no-op。
+ *  voiceVariant 缺省(undefined,新号/旧档)同样 no-op——消费侧按性别推导兜底。 */
+export function autoSwitchVoiceOnGenderFlip(
+  voiceVariant: 1 | 2 | 3 | null | undefined,
+  prevMale: boolean,
+  nowMale: boolean,
+): 1 | 2 | 3 | null | undefined {
+  if (prevMale === nowMale) return voiceVariant;            // :1313-1317 同性别:不动
+  if (voiceVariant === 1 && prevMale) return 2;             // :1319-1323 男声随男→女翻女声
+  if (voiceVariant === 2 && !prevMale) return 1;            // :1324-1329 女声随女→男翻男声
+  return voiceVariant;                                       // case3/缺省:存活
+}
+
 /** voicePitchOffset → XNA Pitch（PlayHurtSound :38998 Remap(-1..1 → ∓0.7),
  *  Utils.Remap 默认 clamped——越界先钳 -1..1 再线性映射） */
 export function remapVoicePitch(offset: number | null | undefined): number {

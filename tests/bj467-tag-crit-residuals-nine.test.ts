@@ -157,9 +157,10 @@ describe('BJ467-①：WhipProj tryHit TimerCrit :12928 消费（三类掷不达�
     player.accTimerCritCharge = 1000;
     const e = spyEnemy(400, 552);
     push(hooks, e);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);       // ★BJ723-C S03 位移修复:鞭 DV 中性档（确定性复稳）
     whipHit(hooks, player, e);
     expect(e.calls.length).toBe(1);                       // 夹具自证：鞭尖命中成立
-    expect(e.calls[0]!.d).toBe(28);                      // ★主判别①:14×2（旧 14 必红）
+    expect(e.calls[0]!.d).toBe(14);                      // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——未翻倍基伤(旧 28=预倍形;旧 14=零翻倍)
     expect(e.calls[0]!.crit).toBe(true);                 // ★主判别②:crit 参（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);         // ★主判别③:消费位（:28568-71）
   });
@@ -169,6 +170,7 @@ describe('BJ467-①：WhipProj tryHit TimerCrit :12928 消费（三类掷不达�
     player.accTimerCritCharge = 1000;                    // 蓄满但未装备 6170
     const e = spyEnemy(400, 552);
     push(hooks, e);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);       // ★BJ723-C S03 位移修复:鞭 DV 中性档
     whipHit(hooks, player, e);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.d).toBe(14);
@@ -189,7 +191,7 @@ describe('BJ467-②：四件套 :12928 消费——964 直调面补位（三件 
       { x: e.x, y: e.y, vx: 0, vy: 0, ai0: 0, ai1: 0 }, 18);
     tickUntil(sh, hooks, () => e.calls.length > 0);
     expect(e.calls.length).toBeGreaterThanOrEqual(1);    // 夹具自证：淡入后命中成立
-    expect(e.calls[0]!.d).toBe(36);                      // ★主判别①:18×2（旧 18 必红）
+    expect(e.calls[0]!.d).toBe(18);                      // ★S02(BJ723-B)改判:×2=Enemy.hurt 防后——未翻倍基伤(旧 36=预倍形;旧 18=零翻倍)
     expect(e.calls[0]!.crit).toBe(true);                 // ★主判别②（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);         // ★主判别③:消费位
   });
@@ -233,7 +235,7 @@ describe('BJ467-③：SuperCart 激光 TimerCrit :12928 消费（Mount.cs:5282 D
       .castSuperCartLaser(player, hooks);
   };
 
-  it('3a 满蓄在场：60×2 + crit 参 true + charge −15（旧 60/false 必红）', () => {
+  it('3a 满蓄在场：基伤 60 + crit 参 true + charge −15（S02 改判史:旧 120 必红）', () => {
     const { hooks, player } = makeGame();
     timerOn(player);
     player.accTimerCritCharge = 1000;
@@ -241,7 +243,10 @@ describe('BJ467-③：SuperCart 激光 TimerCrit :12928 消费（Mount.cs:5282 D
     push(hooks, e);
     laserHit(hooks, player, e);
     expect(e.calls.length).toBe(1);                      // 夹具自证：锥内视线命中成立
-    expect(e.calls[0]!.d).toBe(120);                     // ★主判别①:60×2（旧 60 必红）
+    // ★BJ729-A（2026-10-27）改判史：S02（BJ723-B）crit ×2 移 Enemy.hurt 防后单次
+    //  （NPC.cs:82067）——调用侧预倍 ×2 为 S02 全仓清偿漏站（×4 双倍,BJ729-A 摘除）,
+    //  spyEnemy mock 观调用侧=基伤 60,crit 旗真值由 Enemy.hurt 承载翻倍。
+    expect(e.calls[0]!.d).toBe(60);                      // ★主判别①:基伤无预倍（旧 ×2 预倍形必红）
     expect(e.calls[0]!.crit).toBe(true);                 // ★主判别②（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);         // ★主判别③:消费位
   });
@@ -306,7 +311,10 @@ describe('BJ467-④：Game.ts 爆炸结算面 TimerCrit :12928 消费（水晶�
     (Game.prototype as unknown as { scarabBombExplode: Function })
       .scarabBombExplode.call(fake, 1600, 1500, 100, 0);
     expect(e.calls.length).toBe(1);                    // 夹具自证：爆炸盒命中成立
-    expect(e.calls[0]!.d).toBe(base * 2);              // ★主判别①:DV 终值 ×2（旧 base 必红）
+    // ★BJ729-A（2026-10-27）改判史：S02（BJ723-B）crit ×2 移 Enemy.hurt 防后单次
+    //  （NPC.cs:82067）——scarab 敌臂预倍 ×2 为 S02 全仓清偿漏站（×4 双倍,BJ729-A
+    //  摘除）,spyEnemy mock 观调用侧=DV 终值基伤,crit 旗真值由 Enemy.hurt 承载翻倍。
+    expect(e.calls[0]!.d).toBe(base);                  // ★主判别①:DV 终值基伤（旧 ×2 预倍形必红）
     expect(e.calls[0]!.crit).toBe(true);               // ★主判别②（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);       // ★主判别③:消费位
   });
@@ -339,7 +347,8 @@ describe('BJ467-④：Game.ts 爆炸结算面 TimerCrit :12928 消费（水晶�
     (Game.prototype as unknown as { explodePrimeBomb102: Function })
       .explodePrimeBomb102.call(fake, 100, 90, 1600, 1440, 3, false, 0);
     expect(crystal.calls.length).toBe(1);              // 夹具自证（explodeAt 臂被 friendly 门拒）
-    expect(crystal.calls[0]!.d).toBe(base * 2);        // ★主判别①（旧 base 必红）
+    // ★BJ729-A 改判史（同 4a）：预倍 ×2=S02 漏站,基伤+crit 旗现役形。
+    expect(crystal.calls[0]!.d).toBe(base);            // ★主判别①:DV(40) 基伤（旧 ×2 预倍形必红）
     expect(crystal.calls[0]!.crit).toBe(true);         // ★主判别②（旧恒 false 必红）
     expect(player.accTimerCritCharge).toBe(-15);       // ★主判别③:消费位
   });
