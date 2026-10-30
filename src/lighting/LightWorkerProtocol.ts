@@ -263,12 +263,15 @@ export function buildEngineSnapshot(cap: EngineCaptureView, tiles: TileSlicePack
  *  【除恒动面】输入摘要——恒动面 = clock.timeOfDay / flicker 全族 / hourly（振荡器
  *  与昼夜推进,每 tick 必变,不进门、随实发拍到达;稳态呈现节拍 60→15Hz = 本地引擎
  *  稳态 4-tick 周期（原版 4 帧节奏）同款口径）。返回确定性 JSON 串（键序=字面量
- *  构造序恒定）,调用方与上次实发指纹逐位比较。tile 变更不进指纹（engine.dirty/
- *  liquidDirty/写日志长度由调用点前置判,三源已完备覆盖记账写面——TileStore
- *  头注「未记账直写面」沿用锚帧自愈,lwbp 判例:跳发=延迟非丢失,锚帧界随发率
- *  弹性,语义同族）。★新增快照字段【必须】同步入此指纹——漏记=稳态门对已变输入
- *  误判未变=陈旧光;tests/light-steady-gate 键集锚定防漂移。 */
-export function buildSteadyFingerprint(cap: EngineCaptureView, logLen: number): string {
+ *  构造序恒定）,调用方与上次实发指纹逐位比较。tile/liquid 原语写不整面进指纹,
+ *  只进【快照切片窗内】的写日志格数（窗=sliceGeometry 同款 ±SNAPSHOT_PAD 数学,
+ *  与 worker 可见面精确同界）——窗外写（世界演化/远处液体沉降,实测 idle 主源=
+ *  植被生长 type309 窗外写每 ~2.8 tick 一发）不影响结果,不破稳态。未记账直写面
+ *  （TileStore 头注登记债:crater/hardmode 渐进/联机 strip）不进指纹——靠「下次
+ *  实发(≤3 拍后)内容脏门全量锚」自愈=有界陈旧,lwbp 同族语义（跳=延迟非丢失）。
+ *  ★新增快照字段【必须】同步入此指纹——漏记=稳态门对已变输入误判未变=陈旧光;
+ *  tests/light-steady-gate 键集锚定防漂移。 */
+export function buildSteadyFingerprint(cap: EngineCaptureView, inWinLog: number): string {
   const wc = cap.world.clock as { timeOfDay: number; dayCount: number; eclipse?: boolean; bloodMoon?: boolean; moonPhase?: number; isDay?: boolean };
   const w = cap.world as { sundialCooldown?: number; moondialCooldown?: number; weather?: { raining?: boolean } };
   return JSON.stringify({
@@ -281,7 +284,7 @@ export function buildSteadyFingerprint(cap: EngineCaptureView, logLen: number): 
     sky: getSkyFrameState(),
     decay: cap.decay,
     held: cap.heldLight, buffs: cap.buffLights, per: cap.perFrame,
-    logLen,
+    inWinLog,
   });
 }
 

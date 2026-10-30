@@ -79,6 +79,21 @@ const footCfg = (() => {
 /** ★v6 内禀「落脚贴合」:按实际切片扫描内容底行(fMax),返回使其贴住盒底的
  *  额外位移(世界 px)。扫描结果按位图身份+切片键缓存,首帧一次性开销。 */
 const FOOT_ROW_CACHE = new Map<string, number>();
+/** ★任务#27 烘焙键纯构造（可单测）:img 身份(WeakMap 序号)+源矩形+rgb 逐位+
+ * alphaMul+染料 vid+lit 态。rgb 逐位入键=浮点 tint 相位(mtPulse/nebula)每帧新键
+ * miss 重烘（精确,零近似）;同帧重复（翼主绘/水罩镜像同帧同 mc/fr/tint/uTime）
+ * 命中复用。 */
+const bakeImgIds = new WeakMap<object, number>();
+let bakeImgIdNext = 1;
+export function bakeKeyOf(img: ImageBitmap | HTMLImageElement,
+  sx: number, sy: number, sw: number, sh: number,
+  rgb: readonly [number, number, number], alphaMul: number,
+  dye: { vid: number } | null, dyeLitTint: readonly [number, number, number] | null): string {
+  let id = bakeImgIds.get(img as unknown as object);
+  if (id === undefined) { id = bakeImgIdNext++; bakeImgIds.set(img as unknown as object, id); }
+  return `${id}|${sx},${sy},${sw},${sh}|${rgb[0]},${rgb[1]},${rgb[2]}|${alphaMul}|${dye ? dye.vid : 0}|${dyeLitTint ? 1 : 0}`;
+}
+
 const BMAP_UIDS = new WeakMap<object, string>();
 let BMP_UID_SEQ = 0;
 function bmpUidOf(src: unknown): string {
@@ -128,7 +143,7 @@ import { GLShimCensus } from './glshim/GLShimCensus';   // ★B0 census 仪具(?
 import { GLShimExecutor } from './glshim/GLShimExecutor';   // ★B2 shim 执行器（实体/弹/尘族 drawImage→GL quad 桥;riding ?bgl=1）
 import type { GoreSegSpec } from './glshim/GLShimExecutor'; // ★F-gore 批段规格（buildGoreQuadBatch 产出面）
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
-import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
+import { SkyRenderer, clearAmbientTintCache, type FlareQuad } from './SkyRenderer';   // ★gladd 面④:FlareQuad 单源收集器产物
 import { ChunkCache } from './ChunkCache';
 import { Clock, type World } from '../world/World';
 import { collectModScreenFx, modProjSpecOf, type ModScreenFxState } from '../mods/hooks';   // mod 全屏后处理产位(7d 链前插)
@@ -299,7 +314,7 @@ export function dollEquipFromInv(inv: Inventory, app?: import('../player/Appeara
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,
-  liqgl, liqC13b, emitVanillaLiquidGate, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,
+  liqgl, liqC13b, emitVanillaLiquidGate, emitVanillaLiquidVeil, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,
   type LiqBatchEmit } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
@@ -320,7 +335,7 @@ import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawTileGlows, type TileGlowOp } from './TileGlow';   // ★BJ603 tileGlowMask 运行时叠画（visEffectFrames 已有 :1006 import）
 import { heldItemStealthDim, dimmedHeldRegion, applyStealthToColor, type HeldStealthDim } from './heldItemStealthDim';   // ★BJ599 手持物潜行减色（ApplyStealthToColor 移植）
-import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
+import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook, shineAddLayerOf } from './TileShine';   // ★gladd 面③:+后导出为 GL 桥访问器
 import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
 import { setTintAtlasInvalidateRect } from './TintAtlas';   // ★E51 刀A:回收矩形精确失效注入
 import { texId, texEpoch, bumpTexEpoch } from './texId';   // ★F-gore 批段纹理幂等键（er: 同族）;池化重烘换代（2026-10-12）
@@ -333,7 +348,7 @@ import { GLSpriteLayer, type TexEntry } from './GLSpriteLayer';
 import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
 import { ghostFrameEnd } from './GhostBlur';   // ★ghostblur（2026-10-07;?ghostblur=1 缺省关,Game 帧 tick 尾收口）
 import { judderFrameEnd } from './JudderSmooth';   // ★juddersmooth（2026-10-10;?smooth=1 缺省关,同族收口点）
-import { motionBlurStep } from './MotionBlur';   // ★motionblur（2026-10-14;?mblur=1 灰度——速度门控世界域运动模糊）
+import { motionBlur, motionBlurStep } from './MotionBlur';   // ★motionblur（2026-10-14;?mblur=1 灰度——速度门控世界域运动模糊）
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
@@ -4132,6 +4147,16 @@ export class Renderer {
   /** 本帧夹层路由：世界 present 改 blit→HUD（夹层族/veil+人工星 2D 内容已在
    *  HUD=主 ctx,世界必须画其上）。帧头定谳（opresentInterlayerPending+shimmer）。 */
   private _c10eWorldToHud = false;
+  /** ★BJ740 shimmer 黑幕+人工星 GL 桥（帧头预备;'sstars' over-present 落 glCanvas
+   *  中栈槽;null=本帧走路由 2D 原路径）。 */
+  private _shimStarGl: GLSpriteLayer | null = null;
+  /** ★BJ740 旗（缺省开;?shimstargl=0 逃生门=shimmer 路由臂整回旧行为） */
+  static c10eShimGl = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('shimstargl') !== '0';
+    } catch { return false; }
+  })();
   /** 本帧已做「sky2D+glCanvas→HUD 全帧合成」（幂等闩——死亡灰化/重力翻转等
    *  全帧自拷消费者各有一个触发点,先到先得） */
   private _c10eComposited = false;
@@ -4317,6 +4342,9 @@ export class Renderer {
    *  注入,dispose 不级联;glfx 继续承载全屏地图/拖尾（?cloudpipe=0 逃生门=
    *  云+bg 整体回 glfx 共享会话） */
   acquireCloudPipe(): GLSpriteLayer | null {
+    // ★Phase-2 刀1:gladd 组会话窗内返代理层(begin/end 组语义拦截,余全透传
+    //  绑定真层——驱动器/消费者零改动)
+    if (this._gladdGroupProxy) return this._gladdGroupProxy;
     const cur = this.cloudPipeLayer;
     if (cur) {
       if (!cur.unavailable) { this.cloudPipeRetryLadder = 0; return cur; }
@@ -4527,6 +4555,32 @@ export class Renderer {
    *  失败（GL 死/world FBO 未开）=句柄 null→compose gate=null→obj19 gate=0 恒等
    *  直通（安全降级,登记:降级帧水扭曲缺席）。 */
   private _liqGateHandle: { tex: WebGLTexture; w: number; h: number; flipY: number } | null = null;
+  /** ★BJ743（2026-10-30）罩源 GL 层（独立上下文,直绘自家 canvas=水罩源;veil 帧
+   *  前景液体保持批化,CPU 原链+fgCanvas 绕行退役）。失败退避 5s 重建。 */
+  private _veilLiqLayer: GLSpriteLayer | null = null;
+  private _veilLiqLayerAt = 0;
+  /** ★BJ743 旗（缺省开;?veilliq=0 逃生门=veil 帧前景液体整臂回 canvas-gate 旧路） */
+  static c10eVlq = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('veilliq') !== '0';
+    } catch { return false; }
+  })();
+  /** ★BJ743 罩源 GL 层获取（活实例直取;死亡→退避 5s 重建——软渲染/双开风暴域同
+   *  acquireWorldGl 哨兵语义,轻量版）。null=本帧不可用(调用方回 canvas-gate 路)。 */
+  private acquireVeilLiqLayer(): GLSpriteLayer | null {
+    if (!Renderer.c10eVlq || typeof document === 'undefined') return null;
+    const l = this._veilLiqLayer;
+    if (l && !l.unavailable) return l;
+    const now = performance.now();
+    if (l) { this._veilLiqLayer = null; this._veilLiqLayerAt = now; }
+    if (now - this._veilLiqLayerAt < 5000) return null;
+    const nu = new GLSpriteLayer();
+    this._veilLiqLayerAt = now;
+    if (nu.unavailable) return null;
+    this._veilLiqLayer = nu;
+    return nu;
+  }
   private emitLiquidGate(w: number, h: number): void {
     this._liqGateHandle = null;
     const glw = this._accGlw;
@@ -5414,6 +5468,9 @@ export class Renderer {
     this.gpuSentinelRemove?.();
     this.gpuSentinelRemove = null;
     window.removeEventListener('resize', this.onResize);
+    // ★任务#27:烘焙帧内缓存/池随实例收刀（帧内语义=不跨局持有;退世界画布即弃）
+    this._bakeCache.clear();
+    this._bakePool.length = 0;
     this.canvas.width = 0; this.canvas.height = 0;
     this.lightCanvas.width = 0; this.lightCanvas.height = 0;
     this.fogPix = null; this.fogP32 = null; this.fogImage = null; this.fogVersion = -1; this._mapFogRowSeen = -1;
@@ -6019,8 +6076,25 @@ export class Renderer {
     this.sky.draw(this._c10eFrame ? (this.skyCtx ?? ctx) : ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
     // ★C10e 帧分类·下半：夹层路由（世界 present 改 blit→HUD）。读 sky.draw 后
     //  状态=与 opresent 门同相（见上半注）。
+    // ★BJ740（2026-10-30）：shimmerAlpha 路由臂 GL 化——黑幕+人工星改走
+    //  'sstars' over-present 直落 glCanvas 中栈槽（bg present 后/世界 present 前
+    //  =lantern/ambgl 桥同款）,独石帧不再强制世界 blit→HUD（用户 trace:微光湖
+    //  compositeLight 子树 2.7ms/帧大头=每帧世界 blit;?shimstargl=0 逃生门回
+    //  旧行为整臂路由）。桥预备在此（预获取 pipe=发射位同一实例零失败窗）;
+    //  照相/全帧变换帧保守走路由（P1/xform 合成域未验,登记）。GL 路由成=帧内
+    //  gladd 门（!_c10eWorldToHud）随之解锁=独石帧加算面不再 elision。
+    this._shimStarGl = null;
+    if (Renderer.c10eShimGl && this._c10eFrame && this.monoFilters.shimmerAlpha > 0
+      && !this._capturePass && this.swPipe?.screenStackMode
+      && !this.c10eFullXformCond(player, world)) {
+      const shimGl = this.acquireCloudPipe();
+      if (shimGl && !shimGl.unavailable && shimGl.canvas.width > 0 && shimGl.canvas.height > 0) {
+        this._shimStarGl = shimGl;
+      }
+    }
     this._c10eWorldToHud = this._c10eFrame
-      && (this.sky.worldRouteInterlayerPending() || this.monoFilters.shimmerAlpha > 0);
+      && (this.sky.worldRouteInterlayerPending()
+        || (this.monoFilters.shimmerAlpha > 0 && !this._shimStarGl));
     // ★K1:滤镜待发预测（P1 位之前定谳;谓词/登记口径见 c10eFilterPending 方法注）
     this._c10eFilterPending = this._c10eFrame
       && this.c10eFilterPending(world, player);
@@ -6236,12 +6310,18 @@ export class Renderer {
     //  三通道 tint + ×shimmerAlpha），自然星在 shimmerAlpha=1 整批停画（:63034）
     const shimA0 = this.monoFilters.shimmerAlpha;
     if (shimA0 > 0) {
-      ctx.save();
-      ctx.globalAlpha = shimA0;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, viewW, viewH);
-      ctx.restore();
-      this.sky.drawShimmerStars(ctx, viewW, viewH, cam.y, shimA0);
+      // ★BJ740：GL 桥在场=黑幕+人工星 'sstars' over-present 直落 glCanvas 中栈槽
+      //  （世界 present 在其后=墙/tile 盖星,原版层序;2D 回退=HUD 原路径,路由帧）。
+      if (this._shimStarGl) {
+        this.sky.drawShimmerStarsGL(this._shimStarGl, viewW, viewH, cam.y, shimA0);
+      } else {
+        ctx.save();
+        ctx.globalAlpha = shimA0;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, viewW, viewH);
+        ctx.restore();
+        this.sky.drawShimmerStars(ctx, viewW, viewH, cam.y, shimA0);
+      }
     }
     const worldLayer = this.beginWorldLayer(viewW, viewH, wK);
     if (worldLayer) ctx = worldLayer;
@@ -6956,7 +7036,12 @@ export class Renderer {
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720；
     //     ★r15 R15-7：在 gore/尘【之后】= 水 0.6 半透明罩住碎块与尘——水中爆炸
     //     碎块/尘带水色,原版语义）：
-    this.drawLiquids(world, cam, viewW, viewH, z, false, entities);   // ★BJ679:实体直绘逃逸族（茎蔓/Faeling/fairy/鹿角怪）入水罩谓词
+    // ★BJ741：玩家域盒（bbox+96px——翼/盾/伞云保守覆盖）传前景水罩谓词
+    {
+      const phw = (player.w || 20) / 2 + 96, phh = (player.h || 42) / 2 + 96;
+      this.drawLiquids(world, cam, viewW, viewH, z, false, entities,
+        { x0: player.cx - phw, y0: player.cy - phh, x1: player.cx + phw, y1: player.cy + phh });
+    }   // ★BJ679:实体直绘逃逸族（茎蔓/Faeling/fairy/鹿角怪）入水罩谓词
 
     // 4.55 导线覆盖层 + 宏伟蓝图预览（★r15 R15-2：原版 DrawWires 唯二调用
     //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上。
@@ -7075,6 +7160,16 @@ export class Renderer {
     //    HUD,终像 sky<gl<coatglow 逐位同;夹层帧（世界 blit 回 HUD,会话会压在
     //    HUD 世界之下）/已合成帧（P1 全帧合成在前）/GL 失败=2D 原路径。
     if (!this.fullbright) {
+      // ★Phase-2 刀1:gladd 组会话开(①-⑫ 共享 'gladd' FBO,块尾一次 present;
+      //  门=①cgGl 同式——旗关/夹层/非纯帧不开组=各面自会话零变化)。
+      //  ★㊿-6 veil 预测(2026-10-29):水罩帧(12 队列+前景水)整块跳过——
+      //  _veilActive 旗 7273 才置(块 7111 在其前=sink 内 veil 守卫驱动位死码),
+      //  GL 发射不经 mask=水罩层序违规面;各面 2D 位跑含 mask 镜像(正确路径)。
+      this._veilPredictEnts = entities as unknown[];   // ★㊿-6:帧界实体表快照(679Ent 同源)
+      if (Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
+        && !this._c10eComposited && this.swPipe?.screenStackMode && !this.gladdVeilPredict()) {
+        this.gladdGroupBegin();
+      }
       const cgGl = Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
         && !this._c10eComposited && this.swPipe?.screenStackMode
         ? this.drawCoatGlowGridGL(chunks, cam, world, viewW, viewH, z) : null;
@@ -7091,12 +7186,95 @@ export class Renderer {
       //   失败语义:GL 假（退避/begin 审计/纹理缺/发射期批假）=队列不动,7139 位
       //   2D 原路径重放（兜底位恒在,双消费防双绘由队列排空语义保证）。
       if (Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud
-        && !this._c10eComposited && this.swPipe?.screenStackMode) {
-        const igGl = this.acquireCloudPipe();
-        if (igGl) this.flushItemGlowGL(igGl);
+        && !this._c10eComposited && this.swPipe?.screenStackMode && !this.gladdVeilPredict()) {
+        // ★D1(2026-10-29 BJ737-A 债 D1 收口):7e 全族入组——② 前移归位(2D 序
+        //  7505=被盖后/arm 前,移至块内被盖 blit 后发射;BJ737-A 刀4 的 hudAbove
+        //  门随全族入组退役)。发射序=2D 序:tower→wing→repaint→under→shield→
+        //  carriers→covered→②→arm→eyebrella→whip→wires→inferno→trail。
+        // ★gladd 面③（2026-10-28,task#22）:tileShine +0.39 平加层 GL 会话——①②
+        // 同块同屏栈态（over present→垫底 drawImage(glCanvas) 收编,收集语义已验）;
+        // 成功=7133 位 2D 跳过（失败语义=会话自包含,2D 原位重放兜底恒在）。
+        this._shineAddGl = this.drawTileShineAdditiveGL(chunks, cam, world, viewW, viewH, z);
+        // ★gladd 面④（2026-10-28,task#22）:晨昏镜头光斑 GL 会话——同块同屏栈态;
+        //  收集器=sky.worldFxFrame（采样副作用内含,早调与 2D 位恒等）;成功=7164
+        //  位 2D 跳过,失败/旗关=原位 2D 重放（worldFxFrame 幂等——采样读 store）。
+        this._flareGl = this.drawWorldFxGL(cam, viewW, viewH, z);
+        // ★gladd 面⑤（2026-10-28,task#22）:LitNature 晨昏光晕 GL 会话——同块同屏
+        //  栈态;门/数学在桥内与 2D 位(7187+)逐字同源(纯读 clock/sky/world,早调
+        //  恒等);成功=7187 位 2D 跳过,失败/旗关=原位 2D 逐位兜底。
+        this._litNatureGl = this.drawLitNatureGL(clock, cam, viewW, viewH, z, world);
+        // ★gladd 面⑥（2026-10-28,task#22）:虚空透镜补差+回声 GL 会话——收集表在
+        //  世界段已冻结完整(2c'.0 收集);成功=排空+7159 位 2D 跳过,失败=表不动
+        //  →2D flushVoidLensComplements 原位重放兜底(唯一消费账语义)。
+        this._vlensGl = this.drawVoidLensGL();
+        // ★gladd 面⑦（2026-10-28,task#22）:月总地板补差 GL 会话——sink 式(驱动器
+        //  武装 _mlFloorEmitGL,共用 applyMoonLordLightFloor 烘焙循环);成功=7158
+        //  位 2D 跳过,失败/旗关=原位 2D 重放(烘焙幂等)。
+        this._mlFloorGl = this.drawMoonLordFloorGL(entities, cam, viewW, viewH,
+          lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+        // ★gladd 面⑧（2026-10-28,task#22）:茎蔓下限色 GL 会话——⑦ sink 同型;
+        //  成功=7c 位 2D 跳过,失败/旗关/水罩活跃=原位 2D 重放。
+        this._bvineGl = this.drawBrightVinesGL(entities, cam, z,
+          lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+        // ★gladd 面⑨（2026-10-28,task#22）:全亮尘 pass GL 会话——原语级 sink
+        //  (dbA 收集器 gladd 变体);成功=7d 位 2D 跳过,失败/旗关/非桥分支
+        //  (sparkle/mod/43/66 二画/premul 尾)=原位 2D 重放(pass 副作用幂等)。
+        //  层序=⑧ 之上⑩ 之下(2D 位 7c<7d<7d'' 同序;加算可交换,序仅原则性)。
+        this._vdustGl = this.drawVanillaDustGL(cam, player);
+        // ★gladd 面⑩（2026-10-28,task#22）:FadingParticles GL 会话——⑦⑧ sink
+        //  同型;成功=7d'' 位 2D 跳过,失败/旗关/水罩=原位 2D 重放。
+        this._fpartGl = this.drawFadingParticlesGL(cam, player);
+        // ★gladd 面⑪（2026-10-28,task#22）:自发光实体族(7d' 四原语+BJ504
+        //  whiteLift)GL 会话——⑦⑧⑩ sink 同型;成功=7d' 块跳过+whiteLift 队列
+        //  已被驱动器消费排空(7309 位空队早退,排空语义防双绘),失败/旗关/水罩
+        //  =原位 2D 重放(队列回滚后原样)。
+        this._entGlowGl = this.drawEntityGlowGL(cam, z, viewW, viewH, entities, world);
+        // ★五面桥·towerGlow(2026-10-29):7d''' 四塔 GlowMask GL 会话——⑫-a 型
+        //  (帧头清队列=零回滚);成功=7379 位 2D 跳过,失败/水罩=原位重放。
+        this._towerGl = this.drawTowerGlowGL(cam, z, viewW, viewH);
+        // ★五面桥·wingGlow(2026-10-29;★BJ737-A 刀2/刀3 修正):翼 'lighter'
+        //  overlay 域+mainGlow 主纹理入组(同层保序=2D 序精确);其余 overlay
+        //  case=SO 留 2D;成功=7383 位跳过。
+        this._wingGl = this.drawWingGlowGL(cam, z);
+        // ---- ★D1 7e 族入组段(发射序=2D 序) ----
+        this._lunarArmorGl = this.drawLunarArmorGL();   // 恒甲重绘(7457 位)
+        this._armorUnderGl = this.drawArmorGlowGL(false);   // 甲 glow under 遍(7468 位=repaint 后)
+        this._solarShieldGl = this.drawSolarShieldGL(cam, z);   // 盾球(7479 位)
+        this._hprojGl = this.drawHeldProjGL(cam, z, viewW, viewH);   // ★D1 复桥:载体(7489 位;armorQuad 习语在位)
+        this._lunarCoverGl = this.drawLunarCoverGL();   // 被盖 blit(7499 位)
+        {
+          const igGl = this.acquireCloudPipe();
+          if (igGl) this.flushItemGlowGL(igGl);   // ★D1 归位:②(7505 位=被盖后/arm 前)
+        }
+        this._armorArmGl = this._armorUnderGl !== null
+          ? this.drawArmorGlowGL(true) : null;   // 甲 glow arm 遍(7515 位;under 失败=同帧全 2D)
+        this._eyebrellaGl = this.drawEyebrellaGL(cam, z);   // 眼球伞(7519 位)
+        // ★gladd 面⑫-a（2026-10-28,task#22）:1034 鞭线体 GL 会话——⑪ 同型克隆;
+        //  成功=7e' 位 2D 跳过(队列已清),失败/旗关/水罩=原位 2D 重放(拷贝回滚)。
+        this._whipGl = this.drawWhipGlowGL(cam, z);
+        // ★gladd 面⑫-b（2026-10-28,task#22）:7f 条带拖尾 GL 会话——strips 半桥
+        //  (闭包族恒 2D 在 7f 位照跑);成功=7f 位 strips 半跳过,失败/旗关/水罩
+        //  =原位 2D 重放(引用+旗回滚)。★D1 尾序勘正:7f(7553/7555)在 2D 序中
+        //  先于导线(7558)/狱火(7574)——旧块序使 strips 垫 wires 之上=倒置
+        //  (既有登记,本刀收口:trail 提到 wires 前)。
+        this._trailGl = this.drawTrailGL(cam, z, viewW, viewH);
+        // ★gladd 面⑫-c-wires（2026-10-28,task#22）:7g 导线 Bright 档 GL 会话——
+        //  双子矩形批;成功=7g 位 2D 跳过,失败/旗关=原位 2D 重放(pass 幂等)。
+        this._wiresGl = this.drawWiresGL(world, cam, viewW, viewH, z);
+        // ★gladd 面⑫-c-inferno（2026-10-28,task#22）:7h 狱火火圈 GL 会话——emit 钩
+        //  双拍;成功=7h 位 2D 跳过,失败/旗关=原位 2D 重放(pass 幂等)。
+        this._infernoGl = this.drawInfernoGL(player, cam, z, viewW, viewH);
+        this.gladdGroupCommit();   // ★Phase-2 刀1:组尾一次 present(毒=弃组全 2D)
       }
-      this.c10eCompositeIntoHud();
-      if (!cgGl) this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z);
+      // ★终局垫底退役·刀A（2026-10-28,task#22 终局）:gladd 纯帧撤主垫底——
+      //  consumer-pull 折叠(各 2D 消费位自带 c10eCompositeIntoHud,闩保帧内至多
+      //  一次;本块下方 cgGl/②7442/③-⑫ 回退支/tower/wing/eyebrella/mblur 全带
+      //  局部折叠)。纯帧终像=DOM 三层合成(sky2D<glCanvas<HUD,零像素拷贝);
+      //  旗关/夹层(_c10eWorldToHud)/非 c10e 帧=主垫底照旧零行为变。
+      if (!(Renderer.gladd && this._c10eFrame && !this._c10eWorldToHud && !Renderer.c10efoldKeep)) {
+        this.c10eCompositeIntoHud();
+      }
+      if (!cgGl) { this.c10eCompositeIntoHud(); this.drawCoatGlowGrid(chunks, cam, world, viewW, viewH, z); }
     }
 
     // ★motionblur 7x 段头收口（2026-10-14,?mblur=1 灰度;挂接点论证见 MotionBlur.ts
@@ -7106,12 +7284,18 @@ export class Renderer {
     //   画布全帧滤镜）在【本位之前】——dead 态由 MotionBlur 内部门重置旁路;后续
     //   7-shine/voidlens/HUD 画在本位之后=恒清晰。速度源=cam（跟随相机,玩家运动
     //   忠实代理含传送幕帘联动）。
+    if (motionBlur) this.c10eCompositeIntoHud();   // ★刀A:mblur 捕获读整帧(透明 HUD 无世界)——consumer-pull
     motionBlurStep(ctx, cam.x, cam.y, undefined, paused, player.dead, z);
 
     // 7-shine. tileShine +0.39 加法支（Main.shine case 262-268 Gemspark：原版加在
     //    顶点色(光)上、与光照 L 无关 → 乘光合成后平加 sprite×0.39；设备矩形与
     //    drawCoatGlowGrid 同式含低清 wKg 约定。乘法 delta 支在世界段 2c'''.5）
-    if (this.atlas) {
+    // ★gladd 面③:GL 会话成功（含零 add 层免开）=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._shineAddGl !== null && this.atlas) {
+      // GL 已发射（调用点 ①② 块）;仅旗关/失败时 _shineAddGl 为 null 走 2D
+      this._shineAddGl = null;   // 帧界单消费（下帧由调用块重置——防御跨帧滞留）
+    } else if (this.atlas) {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支 'lighter' 落透明 HUD=黑晕——按需折
       drawTileShineAdditive(ctx, world, chunks, cam, viewW, viewH, z, this._worldLowK || 1);
     }
 
@@ -7122,20 +7306,37 @@ export class Renderer {
     //      ——原版逐精灵顶点色通道本仓不存在,乘光面=compositeLight 全屏光照图;
     //      月总 0.3 白斜坡同形）。加性补差不破 z 序（本体仍在实体/水之下,
     //      溢出照亮遮挡格与 7b′ 备案同口径）;全亮 → 补差 0 自然零开销。
-    this.flushVoidLensComplements();
+    // ★gladd 面⑥:GL 会话成功(含零收集免开)=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._vlensGl !== null) {
+      this._vlensGl = null;   // 帧界单消费（同③④⑤）
+    } else {
+      this.flushVoidLensComplements();
+    }
 
     // 7b'. 月总 30% 白斜坡（Main.cs:24345/24417/24479/24486
     //      GetAlpha(Color.Lerp(Lighting.GetColor, White, 0.3f))——原版月总四部件
     //      以「光照色向白 30%」为顶点色,暗处恒保 30% 亮度;本仓光照=合成期全屏
     //      乘光,实体级顶点色通道不存在 → 合成后补差(见方法注)
-    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
-    this.applyMoonLordLightFloor(entities, cam, viewW, viewH,
-      lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    // ★gladd 面⑦:GL 会话成功(含零部件免开)=2D 跳过;失败/旗关=原位 2D 逐位。
+    // ★刀A:扫尾垫底挪入回退支(consumer-pull;桥成功帧零折叠)
+    if (this._mlFloorGl !== null) {
+      this._mlFloorGl = null;   // 帧界单消费（同③-⑥）
+    } else {
+      this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（黑晕域按需折）
+      this.applyMoonLordLightFloor(entities, cam, viewW, viewH,
+        lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    }
 
     // 7a'. 晨昏镜头光斑(NextHorizonRenderer.DrawLensFlare :362-408,原版
     //      backbuffer 后处理不吃 tile 光——从世界层内挪出到光照合成后;曾画
     //      世界层内被乘光 → 加性耀斑变黑矩形,用户实报 2026-08-20)
-    this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
+    // ★gladd 面④:GL 会话成功（含零光斑免开）=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._flareGl !== null) {
+      this._flareGl = null;   // 帧界单消费（下帧由 ①② 块重置——防御跨帧滞留,同③）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折
+      this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
+    }
 
     // 7a''. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器
     //       后处理——从世界层内挪出到光照合成后;曾画在世界层内被乘光:晨昏
@@ -7150,7 +7351,12 @@ export class Renderer {
     //       屏顶低于 worldSurface+2 整门关 + 强度乘 sunOcclusion(与镜头光斑
     //       同源的 tile 遮挡采样,洞口/悬崖下同步衰减)
     const litVis = litNatureVisibility(clock);
-    if (litVis > 0.003) {
+    // ★gladd 面⑤（2026-10-28,task#22）:GL 会话成功(含空档免开)=2D 跳过;
+    //  失败/旗关=原位 2D 逐位(门与数学在桥内逐字同源)。
+    if (this._litNatureGl !== null) {
+      this._litNatureGl = null;   // 帧界单消费(同③④)
+    } else if (litVis > 0.003) {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折(渐变 α>0=黑晕域)
       const screenTopY = cam.y - viewH / 2 / z;
       if (screenTopY / TILE < world.groundLevel + 2 && this.sky.sunOcclusionReady
         && this.sky.sunOcclusion > 0.003) {
@@ -7173,29 +7379,52 @@ export class Renderer {
 
     // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
     //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉
-    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
+    // ★刀A:扫尾垫底挪入 ⑧ 回退支(consumer-pull)
     // ★BJ679（2026-10-14）水罩会话扩区:BJ676 登记的同性质逃逸队列九路收编——
     //   会话从 7c（逃逸族首队列）起开、收口挪到 7f 拖尾后（收编清单+余债登记
     //   见 7e 段 BJ676 头注 ★BJ679 段）。_liqVeil 缺席帧（无水/liqgl 批化）本调
     //   用返 false=会话外全链零开销（各 flush 镜像 _veilActive 守卫恒 no-op）。
     this.escapeVeilBegin();
-    this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    // ★gladd 面⑧:GL 会话成功(含零藤免开)=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._bvineGl !== null) {
+      this._bvineGl = null;   // 帧界单消费（同③-⑦）
+    } else {
+      this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（黑晕域按需折;⑧=SO 面本免,保守）
+      this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    }
 
     // 7d. 原版 Dust 全亮 pass（type 6/15/59-64 强制 White :38406——不受光照，
     //     合成后直画 = GetColor(White) 等价）
-    this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（同上判语）
-    this.drawVanillaDustPass(true, cam, player);
+    // ★gladd 面⑨:GL 会话成功(含零尘免开)=2D 跳过;失败/旗关=原位 2D 重放。
+    // ★刀A:扫尾垫底挪入回退支(consumer-pull;premul 'lighter' add.A=e>0=黑晕域)
+    if (this._vdustGl !== null) {
+      this._vdustGl = null;   // 帧界单消费（同③-⑪）
+    } else {
+      this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（黑晕域按需折）
+      this.drawVanillaDustPass(true, cam, player);
+    }
 
     // 7d''. FadingParticle 层（ParticleSystem_World_OverPlayers,Main.cs:63208——
     //     DrawPlayers_AfterProjectiles :63204 之后的玩家上层;fullbright=true 全亮
     //     加色,FadingParticle.Draw :57-66 逐值——拍击石系 Spawn_SnappingStone /
     //     Spawn_SnappingStoneSummon 环带,见 fx/FadingParticles.ts）
-    this.drawFadingParticles(cam, player);
+    // ★gladd 面⑩:GL 会话成功(含零粒子免开)=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._fpartGl !== null) {
+      this._fpartGl = null;   // 帧界单消费（同③-⑧）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折(tinted α=黑晕域)
+      this.drawFadingParticles(cam, player);
+    }
 
     // 7d'. 飞灵 677 自发光多层渲染（DrawNPCDirect_Faeling :26306-26368 不走
     //      GetAlpha——自发光色不受 tile 光照，须在光照合成后绘制。此前画在
     //      实体层被光照覆层压暗 → 暗洞穴发光不可见，用户实报 2026-08-21）
-    {
+    // ★gladd 面⑪:GL 会话成功(含零对象免开)=本块跳过;失败/旗关=原位 2D
+    //  (whiteLift 队列在 GL 成功时已被驱动器消费排空,7309 位空队自清早退)。
+    if (this._entGlowGl !== null) {
+      this._entGlowGl = null;   // 帧界单消费（同③-⑩）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退块按需折(faeling 'lighter' 染色α=黑晕域)
       const camRX2 = Math.round(cam.x * z) / z;
       const camRY2 = Math.round(cam.y * z) / z;
       ctx.save();
@@ -7239,11 +7468,21 @@ export class Renderer {
     //   亦在玩家之上——与 677/668 既有偏差惯例同槽。
     //   ★BJ-C1 F4：整段抽方法 flushTowerGlow（行为零变;recording-ctx 重放锁
     //   体裁直调——M3 禁用整段全绿实锤的本刀补锁）。
-    this.flushTowerGlow(cam, z, viewW, viewH);
+    // ★五面桥·towerGlow:GL 会话成功=2D 跳过;失败/旗关=原位 2D(队列帧头清=未动)。
+    if (this._towerGl !== null) {
+      this._towerGl = null;   // 帧界单消费
+    } else {
+      this.flushTowerGlow(cam, z, viewW, viewH);
+    }
 
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
-    this.flushWingGlow(cam, z);
+    // ★五面桥·wingGlow:GL 会话成功=2D 跳过;失败/旗关=原位 2D(队列帧头清=未动)。
+    if (this._wingGl !== null) {
+      this._wingGl = null;   // 帧界单消费
+    } else {
+      this.flushWingGlow(cam, z);
+    }
     // ★BJ676（2026-10-14 用户实报「星云/日耀套在水里时水的渲染在装甲下一层,
     //   不穿套装时水正常画在角色层之上」）月套逃逸族前景水罩会话。原版层序
     //   （Main.cs:63194-63266 亲读定谳）:玩家层组【全部】（DrawDataCache 主链
@@ -7290,14 +7529,24 @@ export class Renderer {
     //      SetPassColors 恒色 250³ 覆写采光基值=自发光甲。lit 实体窗烘除（PaperDoll
     //      lunarSplit）→ 合成后重绘；被盖层随迁在 7e⁴。位次=甲位 glow 前（星尘
     //      GlowMask 叠层在甲件之上=原版逐件后随叠画序））
-    this.flushLunarArmor();
+    // ★D1:GL 会话成功=跳过;失败/旗关=原位 2D(flush 尾换数组=毒弃 rollbacks 复原)。
+    if (this._lunarArmorGl !== null) {
+      this._lunarArmorGl = null;   // 帧界单消费
+    } else {
+      this.flushLunarArmor();
+    }
     // 7e'''' 甲位 GlowMask·under 遍（★BJ597 2026-10-10：SetPassColors 色面免光照
     //      =自发光——月辉四套/驱动套装/杂件 45 项叠画,drawPlayer 收集、此处消费。
     //      在翼光后=原版 13/17/21/28 层组>9 翼层;同槽判例=四塔/盾球合成后逃逸族。
     //      ★BJ681（2026-10-14 用户实报「甲盖武器」）分两遍冲刷：本遍=13/17/21 站
     //      （腿/身/头,arm 未标 op）——原版序武器(27)【之下】→ 须在 7e⁴ 随迁重放
     //      前;28 臂站 op 留队列由下方 itemGlow 后的 arm 遍消费）
-    this.flushArmorGlow();
+    // ★五面桥·armorGlow(under 位):GL 会话成功=跳过;失败/旗关=原位 2D。
+    if (this._armorUnderGl !== null) {
+      this._armorUnderGl = null;   // 帧界单消费(under 位)
+    } else {
+      this.flushArmorGlow();
+    }
     // 7e'''. 日曜盾球（★BJ594 2026-10-09：DrawPlayer_26_SolarShield 恒色
     //      Color(255,255,255,127) 免光照——实体窗内画被 compositeLight 乘暗=
     //      用户实报"半透的比较暗";drawPlayer 收集、此处消费。同槽判例=翼光/
@@ -7307,7 +7556,12 @@ export class Renderer {
     //      7e⁴ 随迁重放后=盾球盖住挥舞武器=用户实报「日耀套甲盖武器」面真身。
     //      今位=甲位 glow under 遍后（26 > 13/17/21 glow ✓）、7e⁴ 前（26 < 27 ✓）;
     //      滑轮(24)/浮游圈前半(17)与盾球次序残差登记（R2 内容整窗重放无法夹层））
-    this.flushSolarShieldQueue(cam, z);
+    // ★D1:GL 会话成功=跳过;失败/旗关=原位 2D。
+    if (this._solarShieldGl !== null) {
+      this._solarShieldGl = null;   // 帧界单消费
+    } else {
+      this.flushSolarShieldQueue(cam, z);
+    }
     // 7e³·⁵ heldProj 载体弹（★BJ682 2026-10-14 用户实报「弓还是被盔甲遮住,脱掉
     //      盔甲才正常」=BJ681 复诊面）：630 幻象弓（noUseGraphic 武器 3540 Phantasm
     //      的视觉主体）原版 drawLayer=7 经 heldProj 在玩家层组 27_HeldItem 开头位
@@ -7316,13 +7570,23 @@ export class Renderer {
     //      弹层 postPlayerDraws（本段冲刷【前】）=被恒色甲重绘/甲位 glow 盖住。
     //      本槽=盾球(26)后、武器随迁重放(27)前——原版 27 开头插入位逐位复刻
     //      （26 < 630 < 27,LegacyPlayerRenderer.cs:233-235 全序）。
-    this.flushHeldProjCarriers(cam, z, viewW, viewH);
+    // ★五面桥·heldProj:GL 会话成功=2D 跳过;失败/旗关=原位 2D(回滚后重放)。
+    if (this._hprojGl !== null) {
+      this._hprojGl = null;   // 帧界单消费
+    } else {
+      this.flushHeldProjCarriers(cam, z, viewW, viewH);
+    }
     // 7e⁴ 恒色甲件+glow 族被盖层随迁（★BJ665b：手持物/身前配饰/滑轮/坐骑前层等
     //      原版 18-38 层组——甲件恒色重绘在其下=层序保持（禁 C 裸重绘）;在甲位
     //      glow under 遍后=原版 glow 逐件后随叠画 < 22 脸饰 < 27 手持物序;本槽在
     //      itemGlow 前=手持光罩仍在物品之上。★BJ681 扩 glowCover:星云/漩涡等
     //      glow 族武器/身前配饰同随迁=画回 glow 之上）
-    this.flushLunarCovered();
+    // ★D1:GL 会话成功=跳过;失败/旗关=原位 2D(纯 blit/会话画布还池在 flush 内)。
+    if (this._lunarCoverGl !== null) {
+      this._lunarCoverGl = null;   // 帧界单消费
+    } else {
+      this.flushLunarCovered();
+    }
     // 7e''''' Item.glowMask（★BJ601 2026-10-10：手持两段+掉落物光罩——光罩色不取
     //      光照=自发光,drawPlayer/drawUseItem/drawDrop 收集、此处消费。同槽判例=
     //      四塔/甲位/盾球合成后逃逸族）
@@ -7334,19 +7598,42 @@ export class Renderer {
     //      物 < 28 臂+臂glow（LegacyPlayerRenderer.cs:234-235）=臂 glow 在武器
     //      【之上】→ 本遍在 7e⁴ 随迁重放+itemGlow 后（27 本体 < 27 光罩 < 28 臂
     //      glow 全序保持）。甲虫 orb(37) 在臂 glow 之下的残差登记）
-    this.flushArmorGlow(true);
+    // ★五面桥·armorGlow(arm 位):GL 会话成功=跳过;失败/旗关=原位 2D。
+    if (this._armorArmGl !== null) {
+      this._armorArmGl = null;   // 帧界单消费(arm 位)
+    } else {
+      this.flushArmorGlow(true);
+    }
     // 7e''. 眼球伞云盖（A4 终版：min(头顶光照,170) 一次性施加的合成后逃逸；
     //      drawPlayer 收集、此处消费；在翼后=原版 38 层>9 层）
-    this.flushEyebrellaCloud(cam, z);
+    // ★D1:GL 会话成功=跳过;失败/旗关=原位 2D(SO=透明 HUD DOM 语义本正确)。
+    if (this._eyebrellaGl !== null) {
+      this._eyebrellaGl = null;   // 帧界单消费
+    } else {
+      this.flushEyebrellaCloud(cam, z);
+    }
 
     // 7e'. 1034 星辰鞭线体全亮（flag3 :36747-36749 color2=color 免逐段取光——
     //      固定色 (0,61,153,12) 不受光照合成;WhipProj 收集、此处 worldToScreen 直画）
-    this.flushWhipFullbright(cam, z);
+    // ★gladd 面⑫-a:GL 会话成功(含零段免开)=2D 跳过(队列已清);失败/旗关=原位 2D。
+    if (this._whipGl !== null) {
+      this._whipGl = null;   // 帧界单消费（同③-⑪）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折(tinted 'lighter'=黑晕域)
+      this.flushWhipFullbright(cam, z);
+    }
 
     // 7f. 条带拖尾全亮（2026-09-03 黑椭圆止血：原版 Drawer 全程不取光=fullbright，
     //     与星辰鞭同层——compositeLight 之后直绘主画布 'lighter' 加算；Arrow/
     //     MissileProj 实体段收集）
-    this.flushTrailShade(cam, z, viewW, viewH);
+    // ★gladd 面⑫-b:GL 会话成功(条带+gx 已在栈)=strips 半跳过;闭包族恒 2D 照跑
+    //  (黑晕域;fb-only 帧自带幂等垫底)。
+    if (this._trailGl !== null) {
+      this._trailGl = null;   // 帧界单消费（同③-⑫-c）
+    } else {
+      this.flushTrailStrips(cam, z, viewW, viewH);
+    }
+    this.flushProjFullbright(cam, z, viewW, viewH);
     this.escapeVeilEnd();   // ★BJ676 收口（★BJ679 挪位）:「前景水层×mask」over 主画布
     //   ——会话扩至 7c-7f 全逃逸族（c10e 幂等垫底内含;eyebrella/鞭线体/拖尾与
     //   月套四 flush+itemGlow 同会话同收;7g 导线/7h 狱火环/BJ553 接口层在收口
@@ -7359,7 +7646,12 @@ export class Renderer {
     //     亮段可见）。层序：原版 DrawWires（:63251）在 DrawDust（:63241）/水体（:63248）
     //     之后、接口层（BJ553 标记 1_2/标尺 4）之前——本位在 7f 拖尾后、BJ553 标记块
     //     前=同序;变换=7a-pre 同式（见 drawWiresBright 注）。
-    this.drawWiresBright(world, cam, viewW, viewH, z);
+    // ★gladd 面⑫-c-wires:GL 会话成功=2D 跳过;失败/旗关=原位 2D。
+    if (this._wiresGl !== null) {
+      this._wiresGl = null;   // 帧界单消费（同③-⑫-a）
+    } else {
+      this.drawWiresBright(world, cam, viewW, viewH, z);
+    }
 
     // 7h. 狱火药水火圈（★BJ579 2026-10-09,用户实报「狱火药水喝了后没有火圈」）：
     //     DrawInfernoRings（Main.cs:65248-65297）1:1——三层 FlameRing(Images/FlameRing,
@@ -7369,7 +7661,13 @@ export class Renderer {
     //     → 本位 7g 导线后、BJ553 标记前同序;AlphaBlend 主批次不吃 tile 光照 →
     //     全亮域（compositeLight 后,与 7d'/7e 判例域同）。相位推进在 Game
     //     fixedUpdate（draw:Update 1:1@60 语义,InfernoRing.ts 头注）,此处纯消费。
-    this.drawInfernoRingPass(player, cam, z, viewW, viewH);
+    // ★gladd 面⑫-c-inferno:GL 会话成功=2D 跳过;失败/旗关=原位 2D。
+    if (this._infernoGl !== null) {
+      this._infernoGl = null;   // 帧界单消费（同③-⑫-c-wires）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折(topup 'lighter' 帧α=黑晕域)
+      this.drawInfernoRingPass(player, cam, z, viewW, viewH);
+    }
 
     // ★BJ553（2026-10-07）：鞭 tag/召唤集火目标标记（★BJ512 落,本刀自世界层
     //  实体段后挪出至光照合成后=原版接口层语义。定谳:旧位在 compositeLight
@@ -8300,12 +8598,23 @@ export class Renderer {
   /** ★GL 直出 Phase 1 旗（2026-10-12 侦察定谳后立项,用户令:旗控灰度+逐像素一致+
    *  验收后转正）：加算面逐桥化——post-composite 'lighter' 族（7x 段/标记/黑晕/
    *  回声环）经 GL 会话加算呈现,替代「c10e 加算垫底折叠」（每帧 2 次全屏
-   *  drawImage,Trace-230353=56ms/s 饱和场景第一架构税）。?gladd=1 灰度开
-   *  （缺省关=折叠路径逐位）;验收转正后翻转缺省。侦察判据=memory
-   *  trace-103710-gpu-pressure-map GL 直出侦察段+probe _c10e-fold-probe.mjs。 */
+   *  drawImage,Trace-230353=56ms/s 饱和场景第一架构税）。侦察判据=memory
+   *  trace-103710-gpu-pressure-map GL 直出侦察段+probe _c10e-fold-probe.mjs。
+   *  ★转正（2026-10-30,用户令「gladd=1 如果没啥大问题就转正吧」）：缺省开,
+   *  ?gladd=0=逃生门（回 c10e 加算垫底折叠路径逐位——GL 死/软渲染帧运行时回退
+   *  语义不动）。旗面史：灰度期 ?gladd=1 显式开（10-12 立项→BJ737-A 三真凶修复
+   *  「翼淡半透+姿态滞留/星尘套暗淡」→D1 7e 全族入组 20 闸绿→BJ740 独石帧
+   *  gladd 门解锁→BJ743 fg 复用环勘正）。转正验证组（2026-10-30 全绿）：
+   *  _gladd-wingarmor-strict 7/7（GA n=0.0235%≤0.05% census 界=⑥/⑧ AA 边缘族）+
+   *  _gladd-d1-soak（150 帧行走动画活,组 commit 150/150,gqV=0 零残留）+
+   *  _gladd-veil-strict（池+甲深重叠逐字节 md5 同;水罩帧 ⑪ 正确降级 2D+mask）+
+   *  _gladd-group-audit F1-F7 清（presents 栈 gladd+over 稳态在位）+
+   *  _gladd-perf-ab 重载混合 −7.6%均值/−12.8%中位（GL 会话七面 1350/1350 全活）。
+   *  node 缺省 false（GL 臂 node 不可达,测试行为零变化）。 */
   static gladd = (() => {
     try {
-      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('gladd') === '1';
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('gladd') !== '0';
     } catch { return false; }
   })();
   /** ★A1 screenFx 滤镜链入管线旗（2026-09-25,渲染 v2 路线图最后一枚收割刀）——
@@ -8522,7 +8831,8 @@ export class Renderer {
   }
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean,
-    veilEntities: Entity[] = []) {
+    veilEntities: Entity[] = [],
+    veilPlayerBox?: { x0: number; y0: number; x1: number; y1: number }) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
     // isBackground：背景 pass（墙层之前，不透明）或前景 pass（实体之后，0.6）
     // ★BJ317：窗口改走 liquidDrawWindow 单源——左/右/上外扩 4 格（底缘保持原版 +5），
@@ -8555,18 +8865,37 @@ export class Renderer {
       if (n instanceof Enemy && !n.dead && (n.vanillaId === 677 || n.vanillaId === 668
         || n.vanillaId === 583 || n.vanillaId === 584 || n.vanillaId === 585
         || ((n.vanillaId === 259 || n.vanillaId === 260) && n.ai0 >= 0 && n.ai1 >= 0))) {
-        veil679Ent = true; break;
+        // ★BJ739 位置域检查（缺省开;?veilbox=0 逃生门=无条件旧行为）:实体绘制域
+        //  无液体 ⇒ 水罩复合对本实体全透明（fgCanvas 盒内无水像素）=跳过视觉
+        //  逐位同——aether 空中 Faeling/干地仙灵不再整帧触发 CPU 液体链+7e 会话。
+        //  668/259-260 域不定（entVeilHitsLiquid 恒 true）=保守直真不收窄。
+        if (!Renderer.veilbox || Renderer.entVeilHitsLiquid(n, world.store)) {
+          veil679Ent = true; break;
+        }
       }
     }
     let veil679Fade = false;
     for (const f of fadingParticles.each()) { veil679Fade = true; break; }
-    const veil676 = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0
+    // ★BJ741（2026-10-30）：玩家绑定六队列位置域——旱地装备帧（甲/翼 glow 队列
+    //  恒非空=谓词恒真）此前整帧陪跑 CPU 前景液体+⑪ 2D+fold。玩家域盒（bbox+96px:
+    //  翼后掠/盾球环绕/眼球伞云上探的保守覆盖）内无液体 ⇒ 水罩复合对这些面全透明
+    //  =解除（?veilbox=0 与实体臂共用逃生门;veilPlayerBox 缺省=不检=旧行为,bg
+    //  pass 不传）。世界绑定五队列（itemGlow 含掉落物 :39408/whip 段/trail 弹道/
+    //  塔/npcWhiteLift）位置域分散=保守不检（登记债）。★BJ679 九路扩区（注见上）
+    //  分组不变,仅玩家绑定组加位置域门。
+    const veilPlayerQ = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0
       || this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0
-      // ★BJ679 九路扩区（注见上）
-      || this.itemGlowQueue.length > 0 || this.wingGlowQueue.length > 0
-      || this.eyebrellaQueue.length > 0 || this.whipFullbrightQueue.length > 0
+      || this.wingGlowQueue.length > 0 || this.eyebrellaQueue.length > 0;
+    // ★BJ742（2026-10-30）：世界绑定五队列位置域——逐条目位置盒液检（同 BJ739/741
+    //  罩源语义:盒内无液体=罩复合对该条目全透明;持火把探洞=itemGlow 恒非空的
+    //  最高频面）。?veilbox=0 三臂共用逃生门。
+    const veilWorldQ = (this.itemGlowQueue.length > 0 || this.whipFullbrightQueue.length > 0
       || this.trailShadeQueue.length > 0 || this.towerGlowQueue.length > 0
-      || this.npcWhiteLiftQueue.length > 0 || veil679Ent || veil679Fade;
+      || this.npcWhiteLiftQueue.length > 0)
+      && (!Renderer.veilbox || this.veilWorldQHitsLiquid(world, cam, viewW, viewH, z));
+    const veil676 = (veilPlayerQ && (veilPlayerBox === undefined || !Renderer.veilbox
+        || Renderer.boxHasLiquid(world.store, veilPlayerBox)))
+      || veilWorldQ || veil679Ent || veil679Fade;
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
     // warpMode 入参 = 表层逐格 bob 关闭（波动由全屏位移场交付）
     // 波光 glint 的场景亮度因子（obj19 :106-111 亮度项；地底暗光→glint→0）
@@ -8610,8 +8939,12 @@ export class Renderer {
       //  ★BJ676：月套逃逸帧（veil676）禁批回 canvas gate 路——批化支前景水直入
       //   FBO('world')（无 canvas 形态层供 7e 局部水罩复合）,canvas 路的 fgCanvas
       //   本就 endFgPass 后不清屏=离屏保留。灰度债:?liqgl=1 且月套+水同屏帧液体
-      //   批化退位（liqgl 缺省关;转正前须 FBO gate 回读或 GL 侧复合,登记）。
-      const bat = liqMode && !liqRingOverflow() && !veil676 ? this.liqBatchHook() : null;
+      //   批化退位——★BJ743（2026-10-30）灰度债清偿:罩源 GL 化（emitVanillaLiquidVeil
+      //   批数据不镜像重发射进独立 GL 层,层 canvas=7e 水罩源）→ veil 帧前景液体
+      //   保持批化;层缺席/旗关（?veilliq=0）/发射失败=回 canvas gate 旧路。
+      const veilLiqGl = veil676 ? this.acquireVeilLiqLayer() : null;
+      const bat = liqMode && !liqRingOverflow() && (!veil676 || !!veilLiqGl)
+        ? this.liqBatchHook() : null;
       if (bat) {
         // ★liqgl：前景水直入 FBO('world')（批化段;SO 合成结合律
         //  (w over ∅) over scene ≡ w over scene=endFgPass 1:1 合成逐位同,B1 判例）
@@ -8620,6 +8953,13 @@ export class Renderer {
           world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick, null, bat, true,
           this._lavaOpacity);   // ★G26 件3
         this.emitLiquidGate(this._worldLowW, this._worldLowH);
+        // ★BJ743：罩源=批数据不镜像重发射进独立层（canvas 替代 fgCanvas;
+        //  世界层分辨率,escapeVeilEnd 的 vk 缩放同语义）。失败=该帧罩源缺席
+        //  （会话退化直绘,自愈;GL 死窗登记——begin 前置+同图已解析,极窄）。
+        if (veil676 && veilLiqGl
+          && emitVanillaLiquidVeil(veilLiqGl, this._worldLowW, this._worldLowH)) {
+          this._liqVeil = veilLiqGl.canvas;
+        }
       } else {
         const fgCtx = this.waterWarp.beginFgPass(this.ctx);
         // ★R1b-8①：混合帧足迹补画——bg 批化帧足迹收集在 _footQuads（footCtx
@@ -8998,7 +9338,13 @@ export class Renderer {
    *  与 wld 内容亚像素偏差≤1 设备像素,同 7d' 既有惯例）。 */
   private drawWiresBright(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
     if (!this.showWires) return;
-    this.c10eCompositeIntoHud();   // ★C10e 透明 HUD 域幂等垫底（7x 直绘惯例）
+    // ★gladd 面⑫-c-wires 判例㊸:本方法头内嵌的幂等垫底在驱动器早调(7142,主垫底
+    //  7144 前)会【提前占闩】→主垫底 no-op→会话 over-present 的导线 quad 永不入
+    //  HUD=整面蒸发(B 臂裸世界实锤)。armed 时跳过(2D 位语义不变——消费位的
+    //  垫底由主垫底 7144 承担,2D 直绘前 HUD 已含全帧)。内嵌垫底面普查:7x 直绘
+    //  方法族中仅本方法与 flushTrailShade(⑫-b 债注)带内嵌头,其余面(⑨⑩⑪⑫-a)
+    //  的垫底在消费位=无此病。
+    if (!this._wiresEmitGL) this.c10eCompositeIntoHud();   // ★C10e 透明 HUD 域幂等垫底（7x 直绘惯例）
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -9024,6 +9370,8 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
     const ctx = this.ctx;
     const has = (x: number, y: number, bit: number) => st.inBounds(x, y) && (st.wire[st.idx(x, y)] & bit) !== 0;
+    // ★gladd 面⑫-c-wires 判例:共享相机变换一次读(全批同 M;pass 自身不改变换)
+    if (this._wiresEmitGL) this._wiresM = ctx.getTransform();
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
         const i = st.idx(tx, ty);
@@ -9059,21 +9407,52 @@ export class Renderer {
           if (has(tx - 1, ty, bit)) mask += 144;
           // ★BJ583：红恒全 α（:59225 无 num7 除）;蓝绿黄 ×(1/n)（:59294/:59395/:59496）
           const fadeAlpha = c === 0 ? 1 : (n > 1 ? 1 / n : 1);
-          if (fadeAlpha !== 1 || modeAlpha !== 1) ctx.globalAlpha = fadeAlpha * modeAlpha;
-          ctx.drawImage(wires, mask, rowY, 16, 16, tx * ts, ty * ts, ts, ts);
-          ctx.globalAlpha = 1;
+          if (this._wiresEmitGL) {
+            this.wiresPushQuad(this._wiresQuadV, mask, rowY, tx * ts, ty * ts,
+              fadeAlpha * modeAlpha, wires.width, wires.height);
+          } else {
+            if (fadeAlpha !== 1 || modeAlpha !== 1) ctx.globalAlpha = fadeAlpha * modeAlpha;
+            ctx.drawImage(wires, mask, rowY, 16, 16, tx * ts, ty * ts, ts, ts);
+            ctx.globalAlpha = 1;
+          }
         }
         if ((b & 16) && actuatorImg) {
           // ★SW-FX19/BJ583：致动器模式（[9]，num6 :59126/:59135——同四态,随通道分派;
           //  Faded ×0.5,Hidden 不画;Bright 档原版免 Brightness 门恒画 :59533）
           const am = this.wireModes[4];
           if (wireDrawPass(am) === pass) {
-            ctx.globalAlpha = am === 2 ? 0.5 : 1;
-            ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
-            ctx.globalAlpha = 1;
+            if (this._wiresEmitGL) {
+              this.wiresPushQuad(this._wiresActV, 0, 0, tx * ts, ty * ts,
+                am === 2 ? 0.5 : 1, actuatorImg.width, actuatorImg.height);
+            } else {
+              ctx.globalAlpha = am === 2 ? 0.5 : 1;
+              ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
+              ctx.globalAlpha = 1;
+            }
           }
         }
       }
+    }
+    // ★gladd 面⑫-c-wires:批尾冲(两图集各自一批,SO 缺省 blend;纹理惰性取)
+    const glEmitW = this._wiresEmitGL;
+    if (glEmitW) {
+      let okAll = true;
+      if (this._wiresQuadV.length) {
+        if (!this._wiresTex) this._wiresTex = glEmitW.texFromImage('wires:atlas', wires, false, true) ?? null;
+        if (this._wiresTex) {
+          if (!glEmitW.quadBatchRgba(this._wiresTex, new Float32Array(this._wiresQuadV), this._wiresQuadV.length / 48, false)) okAll = false;
+        } else okAll = false;
+        this._wiresQuadV.length = 0;
+      }
+      if (this._wiresActV.length && actuatorImg) {
+        if (!this._wiresActTex) this._wiresActTex = glEmitW.texFromImage('wires:act', actuatorImg, false, true) ?? null;
+        if (this._wiresActTex) {
+          if (!glEmitW.quadBatchRgba(this._wiresActTex, new Float32Array(this._wiresActV), this._wiresActV.length / 48, false)) okAll = false;
+        } else okAll = false;
+        this._wiresActV.length = 0;
+      }
+      if (!okAll) this._wiresEmitFailed = true;
+      return;
     }
   }
 
@@ -9946,6 +10325,13 @@ export class Renderer {
   //  【逐位论证】顶点四角=translate·rotate·scale 与 2D 变换栈同式;uv 带 quadSprite
   //  同款 −1/4096 texel tie 补正;col 恒 (1,1,1,1)（乘数在烘焙/img 恒等）;tier-1
   //  blend='lighter'。翻面口 ?dustbatch=0（灰度对拍后转正缺省开）。
+  /** ★刀A 逃生门:?c10efold=1=gladd 纯帧强制保留主垫底(旧行为;二分/回退用)。
+   *  ★解析判例:探针 bootstrap 的防缓存戳以「/?t=」追加会污染尾参值
+   *  (c10efold='1/?t=…')——子串式解析对此鲁棒。 */
+  static c10efoldKeep = (() => {
+    try { return location.search.includes('c10efold=1'); } catch { return false; }
+  })();
+
   static dustbatch = (() => {
     try {
       if (typeof location === 'undefined') return false;
@@ -9973,6 +10359,29 @@ export class Renderer {
     ctx: CanvasRenderingContext2D, pair: { add: HTMLCanvasElement; erase: HTMLCanvasElement },
     mul = 1, ox = -4, oy = -4,
   ): void {
+    // ★gladd 面⑨ sink（2026-10-28,task#22）:premul 对=单一 SO quad 可表达（⑪ ㊵
+    //  判例族）——dustPremulBake.gl 合并面字节 (rgb=aR 预乘, a=e) 经 texFromData
+    //  原样上传（禁二次预乘）,vCol=(mul,mul,mul,mul) 预乘一致 SO:
+    //  dst' = aR×mul + dst×(1−e×mul) ≡ 2D erase+lighter 两步 ≡ XNA One/InvSrcAlpha
+    //  （B2 shim 合并面同式,㉟ 域判例=gladd 管线自有纹理不可跨管复用）。M=调用
+    //  位 ctx 变换（save/translate/rotate/scale 已设）;dest=(ox,oy,8,8) 本地矩形。
+    const glEmit = this._vdustEmitGL;
+    if (glEmit) {
+      const glb = (pair as { glb?: Uint8Array }).glb;
+      if (!glb) { this._vdustEmitFailed = true; return; }
+      let t = this._vdustPmTex.get(pair);
+      if (!t) {
+        const e = glEmit.texFromData(`vdust:pm:${this._vdustPmTexN++}`, glb, 8, 8);
+        if (!e) { this._vdustEmitFailed = true; return; }
+        t = e;
+        this._vdustPmTex.set(pair, t);
+      }
+      const M = ctx.getTransform();
+      if (!this.vdustQuad(M, t, ox, oy, 8, 8, 0, 0, 8, 8, mul, mul, mul, mul, false)) {
+        this._vdustEmitFailed = true;
+      }
+      return;
+    }
     ctx.globalAlpha = mul;
     ctx.globalCompositeOperation = 'destination-out';
     ctx.drawImage(pair.erase, ox, oy);
@@ -10065,6 +10474,24 @@ export class Renderer {
         x2, y2, u1, w1, 1, 1, 1, 1, x0, y0, u0, w0, 1, 1, 1, 1,
         x2, y2, u1, w1, 1, 1, 1, 1, x3, y3, u0, w1, 1, 1, 1, 1);
     };
+    /** ★gladd 面⑨（2026-10-28,task#22）:gladd 域顶点发射=dbEmit 同式但
+     *  col=(1,1,1,**0**)(over-present FBO 域纯加算惯用法——(1,1,1,1) 会累积 α
+     *  在 present 时按 (1−α) 衰减世界=2D 'lighter' 无此语义,禁复用 dbEmit)。 */
+    const dbEmitGl = (v: number[], fx: number, fy: number, uw: number, uh: number,
+      d2: { rotation?: number; scale: number }, px2: number, py2: number): void => {
+      const eps = -1 / 4096;
+      const u0 = (fx + eps) / uw, u1 = (fx + 8 + eps) / uw;
+      const w0 = (fy + eps) / uh, w1 = (fy + 8 + eps) / uh;
+      const sc = d2.scale, rot = d2.rotation || 0;
+      const cr = Math.cos(rot) * 4 * sc, sr = Math.sin(rot) * 4 * sc;
+      const x0 = px2 - cr + sr, y0 = py2 - sr - cr;
+      const x1 = px2 + cr + sr, y1 = py2 + sr - cr;
+      const x2 = px2 + cr - sr, y2 = py2 + sr + cr;
+      const x3 = px2 - cr - sr, y3 = py2 - sr + cr;
+      v.push(x0, y0, u0, w0, 1, 1, 1, 0, x1, y1, u1, w0, 1, 1, 1, 0,
+        x2, y2, u1, w1, 1, 1, 1, 0, x0, y0, u0, w0, 1, 1, 1, 0,
+        x2, y2, u1, w1, 1, 1, 1, 0, x3, y3, u0, w1, 1, 1, 1, 0);
+    };
     // 收集态（dbCtx 才建——Map/数组 pass 级复用新建,量小）
     type DbRec = { d: { rotation?: number; scale: number; fx: number; fy: number; type?: number }; px: number; py: number };
     type DbBakeRec = { d: Parameters<typeof dbEmit>[5] & { fx: number; fy: number }; px: number; py: number; mR: number; mG: number; mB: number };
@@ -10073,7 +10500,74 @@ export class Renderer {
     const dbBakeBuckets = new Map<string, { v: number[]; r: DbBakeRec[] }>();
     const dbBakeOrder: string[] = [];
     let dbN = 0;
-    const dbA = dbCtx ? {
+    // ★gladd 面⑨:sink 武装时收集器走 gladd 变体(shim 让位——域判例㉟ 双后端互斥;
+    //  接口逐字段同形=分支站点 dbA?.pushImg/pushBake/flush 零改)。烘焙桶=内容签名
+    //  (fx,fy|乘数)——签名即内容恒等→桶纹理跨帧复用零刷新(shim 环键=shim 管线
+    //  冻结纹理不可跨管,㉟);LRU 256 淘汰+dropTexture 防层 texs 无界驻留。
+    const dbgImgV: number[] = [];
+    const dbgBuckets = new Map<string, { v: number[]; fx: number; fy: number; mR: number; mG: number; mB: number }>();
+    const dbgOrder: string[] = [];
+    let dbgN = 0;
+    const dbA = this._vdustEmitGL ? {
+      pushImg: (d: DbRec['d'], px: number, py: number): void => {
+        dbEmitGl(dbgImgV, d.fx, d.fy, img.width, img.height, d, px, py);
+        dbgN++;
+      },
+      pushBake: (d: DbBakeRec['d'], px: number, py: number,
+        _key: string, mR: number, mG: number, mB: number): void => {
+        const sig = `${d.fx},${d.fy}|${mR.toFixed(4)},${mG.toFixed(4)},${mB.toFixed(4)}`;
+        let b = dbgBuckets.get(sig);
+        if (!b) { b = { v: [], fx: d.fx, fy: d.fy, mR, mG, mB }; dbgBuckets.set(sig, b); dbgOrder.push(sig); }
+        dbEmitGl(b.v, 0, 0, 8, 8, d, px, py);   // 桶画布全幅 8×8(烘焙内容域)
+        dbgN++;
+      },
+      flush: (): void => {
+        if (!dbgN) return;
+        const glE = this._vdustEmitGL!;
+        let okAll = true;
+        if (dbgImgV.length) {
+          if (!this._vdustAtlasTex) this._vdustAtlasTex = glE.texFromImage('vdust:atlas', img, false, true) ?? null;
+          if (this._vdustAtlasTex) {
+            glE.blendAdditive(true);
+            if (!glE.quadBatchRgba(this._vdustAtlasTex, new Float32Array(dbgImgV), dbgImgV.length / 48, false)) okAll = false;
+            glE.blendAdditive(false);
+          } else okAll = false;
+          dbgImgV.length = 0;
+        }
+        for (const sig of dbgOrder) {
+          const b = dbgBuckets.get(sig)!;
+          if (!b.v.length) continue;
+          let bucket = this._vdustBakeTex.get(sig);
+          if (!bucket) {
+            const c = document.createElement('canvas'); c.width = 8; c.height = 8;
+            const cc = c.getContext('2d', { willReadFrequently: true })!;
+            cc.drawImage(img, b.fx, b.fy, 8, 8, 0, 0, 8, 8);
+            const idb = cc.getImageData(0, 0, 8, 8);
+            for (let i = 0; i < idb.data.length; i += 4) {
+              idb.data[i] = idb.data[i] * b.mR; idb.data[i + 1] = idb.data[i + 1] * b.mG; idb.data[i + 2] = idb.data[i + 2] * b.mB;
+            }
+            cc.putImageData(idb, 0, 0);
+            const key = `vdust:bake:${sig}`;
+            const t = glE.texFromImage(key, c, false, true);
+            if (!t) { okAll = false; b.v.length = 0; continue; }
+            bucket = { c, t, key };
+            this._vdustBakeTex.set(sig, bucket);
+            if (this._vdustBakeTex.size > 256) {
+              const k0 = this._vdustBakeTex.keys().next().value;
+              if (k0 !== undefined) { glE.dropTexture(this._vdustBakeTex.get(k0)!.key); this._vdustBakeTex.delete(k0); }
+            }
+          }
+          glE.blendAdditive(true);
+          if (!glE.quadBatchRgba(bucket.t, new Float32Array(b.v), b.v.length / 48, false)) okAll = false;
+          glE.blendAdditive(false);
+          b.v.length = 0;
+        }
+        dbgOrder.length = 0;
+        dbgBuckets.clear();
+        dbgN = 0;
+        if (!okAll) this._vdustEmitFailed = true;
+      },
+    } : dbCtx ? {
       pushImg: (d: DbRec['d'], px: number, py: number): void => {
         dbEmit(dbImgV, d.fx, d.fy, img.width, img.height, d, px, py);
         dbImgR.push({ d, px, py });
@@ -10172,6 +10666,9 @@ export class Renderer {
       //  各档（编排池粒子无此四面）
       const axis = dustAxisScale(d);
       if (axis.dual) {
+        // ★gladd 面⑨:sparkle 双臂=未桥分支(独立臂几何原语)→置失败旗 skip,
+        //  整面降级 2D 重放(本帧 GL 批随会话弃)
+        if (this._vdustEmitGL) { this._vdustEmitFailed = true; continue; }
         dbA?.flush();   // ★尘批交错边界（非批型绘制前冲段=保序）
         this.drawSparkleArms(d, px, py, axis.sx, axis.sy);
         continue;
@@ -10183,6 +10680,8 @@ export class Renderer {
       //  光照合成后直绘)。α=(255-alpha)/255 缺省衰落档;无拖影/染料/帧(声明面无此三面)。
       //  贴图缺失=跳笔(占位语义,与 mod NPC 贴图缺省同相)。零 mod=分支恒 miss。
       if (d.modType !== undefined) {
+        // ★gladd 面⑨:mod 尘 SO 直绘=未桥分支→失败旗 skip(降级 2D)
+        if (this._vdustEmitGL) { this._vdustEmitFailed = true; continue; }
         dbA?.flush();   // ★尘批交错边界
         // ★D12 余债:motionType 重写后 d.type=运动档原版 type——载体 d.modType 才是
         //  原 mod type(贴图键/全亮桶都读它)
@@ -10309,6 +10808,10 @@ export class Renderer {
         //  本体同色再叠 = 原版双画亮度。门槛看 RGB 内容（cp.a 恒 ≈1/255,低于本体
         //  支 0.004 α 阈——原文本 pass 的 cA 只进 dst 因子,rgb 全额加法不乘 c.a）。
         if ((d.type === 43 || d.type === 66) && d.color) {
+          // ★gladd 面⑨:43/66 colorPass 二画=未桥分支(fullbright 桶不可达,防御位)
+          //  →失败旗 skip(降级 2D)
+          if (this._vdustEmitGL) { this._vdustEmitFailed = true; }
+          else {
           // ★66 扩员（同 43 门槛语义）：GetColor 二程=Main.cs:39696-39704 color.PackedValue!=0
           //  即跑——66 的 disco 色（弹 79 每拍喂 Main.Disco）靠本程上画面（A=0 纯加算,
           //  base=(1,0)→cp=disco 全额）。门槛必须看 RGB 内容（cp.a 恒 0,α 门槛=漏画）。
@@ -10331,6 +10834,7 @@ export class Renderer {
             ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(s2, -4, -4);
             ctx.restore();
+          }
           }
         }
         continue;
@@ -10430,6 +10934,24 @@ export class Renderer {
             } else canvas = null;
           }
           if (canvas !== null) {
+            // ★gladd 面⑨ sink:染料面 SO vCol=(1,1,1,1)(shader 输出=最终色直绘);
+            //  静态缓存画布=身份键,dynamic(s2 现画)=texRefresh 逐尘重传(内容漂移)
+            const glEmitD = this._vdustEmitGL;
+            if (glEmitD) {
+              ctx.save();
+              ctx.translate(px, py);
+              if (d.rotation) ctx.rotate(d.rotation);
+              if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+              const MD = ctx.getTransform();
+              ctx.restore();
+              const srcD = canvas ?? s2;
+              let tD: TexEntry | null = canvas ? this.vdustTexOf(canvas) : null;
+              if (!tD) tD = glEmitD.texRefresh('vdust:dye', s2);
+              if (!tD || !this.vdustQuad(MD, tD, -4, -4, 8, 8, 0, 0, 8, 8, 1, 1, 1, 1, false)) {
+                this._vdustEmitFailed = true;
+              }
+              continue;
+            }
             ctx.save();
             ctx.translate(px, py);
             if (d.rotation) ctx.rotate(d.rotation);
@@ -10460,6 +10982,23 @@ export class Renderer {
             this.drawDustPremul(ctx, p331);
             ctx.restore();
           }
+        }
+        // ★gladd 面⑨ sink:331 白心=atlas 子矩形 SO vCol=(1,1,1,1)(Color.White 档
+        //  预乘直色恒等)
+        const glEmitW = this._vdustEmitGL;
+        if (glEmitW) {
+          ctx.save();
+          ctx.translate(px, py);
+          if (d.rotation) ctx.rotate(d.rotation);
+          if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+          const MW = ctx.getTransform();
+          ctx.restore();
+          if (!this._vdustAtlasTex) this._vdustAtlasTex = glEmitW.texFromImage('vdust:atlas', img, false, true) ?? null;
+          if (!this._vdustAtlasTex
+            || !this.vdustQuad(MW, this._vdustAtlasTex, -4, -4, 8, 8, d.fx, d.fy, 8, 8, 1, 1, 1, 1, false)) {
+            this._vdustEmitFailed = true;
+          }
+          continue;                                // vanilla 331 无 GetColor 叠画
         }
         ctx.save();                              // 白心:Color.White 原帧,不受光
         ctx.translate(px, py);
@@ -10690,6 +11229,75 @@ export class Renderer {
       //  （FadingParticle.cs:60-63;本仓 MountedCenter≈中心 cx/cy,Game.ts:12821 同口径）
       const ride = f.followPlayerIndex !== -1 && player;
       const [px, py] = cam.worldToScreen(ride ? f.x + player.cx : f.x, ride ? f.y + player.cy : f.y);
+      // ★gladd 面⑩（2026-10-28,task#22）:sink 分支——双拍发射(削底拍=blendErase
+      //  ×raw 纹理 vCol=(1,1,1,eraseA);主拍=blendAdditive×tinted 缓存纹理
+      //  vCol=(env,env,env,0)——tint 已在缓存画布,与 2D 'lighter'×globalAlpha=env
+      //  逐位)。tinted 缓存画布稳定=texFromImage 一次/条目(Map 画布身份键);
+      //  变换=T·R·S(非均匀 sx/sy)仿射角点;水罩活跃置失败旗整面降级 2D。
+      const glEmit = this._fpartEmitGL;
+      if (glEmit) {
+        if (this._veilActive) { this._fpartEmitFailed = true; return; }
+        // ★削底拍域判例(㊱):destination-out 在 over-present FBO 域结构性不可达
+        //  (FBO 只能叠不能减世界——「混合混合域残差」终局判例同族;tintA>0 粒子
+        //  存在=整面降级 2D,GL 域=纯加色子集)
+        if (f.tintA > 0) { this._fpartEmitFailed = true; return; }
+        const cR = Math.cos(f.rot), sR = Math.sin(f.rot);
+        const half = tinted.width / 2, halfH = tinted.height / 2;
+        const emitQuad = (tex: TexEntry, vr: number, vg: number, vb: number, va: number,
+          erase: boolean): boolean => {
+          const corner = (dx: number, dy: number, u: number, v: number): [number, number, number, number] => [
+            px + (dx * f.scaleX) * cR - (dy * f.scaleY) * sR, py + (dx * f.scaleX) * sR + (dy * f.scaleY) * cR, u, v,
+          ];   // ★T·R·S 序:scale 先于 rotate(R(S(p)) 非 S(R(p))——非均匀档畸变)
+          const vd = new Float32Array(48);
+          const V = [
+            corner(-half, -halfH, 0, 0), corner(half, -halfH, 1, 0), corner(half, halfH, 1, 1),
+            corner(-half, -halfH, 0, 0), corner(half, halfH, 1, 1), corner(-half, halfH, 0, 1),
+          ];
+          for (let i = 0; i < 6; i++) {
+            vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+            vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+            vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+          }
+          if (erase) {
+            glEmit.blendErase(true);   // 削底拍:组模式不可达(前置扫描拒 tintA>0)=直发
+            const okE = glEmit.quadBatchRgba(tex, vd, 1, false);
+            glEmit.blendErase(false);
+            return okE;
+          }
+          return this.gladdQuadEmit(glEmit, tex, vd, true, false);   // ★刀2:主拍合批
+        };
+        if (f.tintA > 0) {
+          const raw = atlas.ensureVImage(f.texKey);
+          if (raw && (raw as { width: number }).width > 0) {
+            let t = this._fpartRawTex.get(f.texKey);
+            if (!t) {
+              const e = glEmit.texFromImage(`fpart:${f.texKey}`, raw as TexImageSource, false, true);
+              if (!e) { this._fpartEmitFailed = true; return; }
+              t = e;
+              this._fpartRawTex.set(f.texKey, t);
+            }
+            if (!emitQuad(t, 1, 1, 1, Math.min(1, (f.tintA / 255) * env), true)) {
+              this._fpartEmitFailed = true; return;
+            }
+          }
+        }
+        let tt = this._fpartTintTex.get(tinted);
+        if (!tt) {
+          // ★㊲翻案(2026-10-28 法医定谳):「willReadFrequently 软件画布上传在透明
+          //  texel 产白 rgb」证伪——readPixels 直读纹理字节与 xfer 拷贝逐桶一致
+          //  (黑 137k/全同),白泛真凶=fadingAlphaFactor 在 fadeIn=0∧t01=0 的 0/0=NaN
+          //  (Utils.GetLerpValue 1:1;原版生产全站点 fadeIn=0.1 不可达,闸夹具旧注
+          //  fadeIn:0 所致)。xfer 传输画布=基于伪理论的死码,摘除,直传 tinted。
+          const e = glEmit.texFromImage(`fpart:tint:${this._fpartTintTex.size}`, tinted, false, true);
+          if (!e) { this._fpartEmitFailed = true; return; }
+          tt = e;
+          this._fpartTintTex.set(tinted, tt);
+        }
+        if (!emitQuad(tt, Math.min(1, env), Math.min(1, env), Math.min(1, env), 0, false)) {
+          this._fpartEmitFailed = true; return;
+        }
+        continue;
+      }
       ctx.save();
       ctx.translate(px, py);
       if (f.rot) ctx.rotate(f.rot);
@@ -14274,12 +14882,34 @@ export class Renderer {
     const sx = col * CW, sy = row * CH;
     const tintCtx = tintC.getContext('2d')!;
     const silCtx = silC.getContext('2d')!;
-    ctx.save();
-    ctx.translate(dx, dy);
-    ctx.rotate(rot);
-    if (fl) ctx.scale(-1, 1);
+    // ★gladd 面⑪ sink（2026-10-28,task#22）:发射位矩阵=2D 位逐式复刻(translate/
+    //  rotate/flip 复刻读 M);剪影拍=premul-SO vCol=(1,1,1,ma)(黑 texel 出流
+    //  (0,a·ma)=纯衰减,over-present 对世界 dst×(1−a·ma)=XNA InvSrcAlpha 同构);
+    //  加算拍=texRefresh 上传烘焙布 vCol=(1,1,1,0)(⑩ 同款)/恒等档=源表子矩形
+    //  身份键直采。烘焙舞步单源共用(silC/tintC 逐层重画→texRefresh 逐层重传,⑦
+    //  mlfloor 同型)。水罩活跃置失败旗(驱动器 fail-fast 兜底,此处双保险)。
+    const glEmit = this._entGlowEmitGL;
+    let M: DOMMatrix | null = null;
+    if (glEmit) {
+      if (this._veilActive) { this._entGlowEmitFailed = true; return; }
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.rotate(rot);
+      if (fl) ctx.scale(-1, 1);
+      M = ctx.getTransform();
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.translate(dx, dy);
+      ctx.rotate(rot);
+      if (fl) ctx.scale(-1, 1);
+    }
     // ① 背景衰减：黑剪影 source-over alpha=ma → 与 XNA InvSrcAlpha 项逐像素等价
-    if (ma > 0.004) {
+    // ★⑪ 批化刀(2026-10-29):armed(M)支双拍并撤——单 SO quad vCol=(1,1,1,ma) 与
+    //  [sil SO α=ma]+[tint 'lighter'] 数学恒等(premul 单笔:tint_rgb 全额 +
+    //  dst×(1−texA·ma)=XNA 预乘 AlphaBlend 本式);sil 烘焙/shim 登记/上传 GL 域
+    //  不再消费(2D/拴绳支保留——armed 窗内无 3.8 段拴绳消费者,判例见 ⑪ 档案)。
+    if (ma > 0.004 && !M) {
       silCtx.clearRect(0, 0, CW, CH);
       silCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
       silCtx.globalCompositeOperation = 'source-in';
@@ -14295,9 +14925,17 @@ export class Renderer {
       //  调用经 uploadScratchNow !active 自判 no-op=零白付。BJ481 债面对本面的
       //  「post-window 无效」摘要以本锚为准推翻（tests/bj485-dead-registration-sweep）。
       this.uploadScratchBake(silC, 'faelingSil', 256);
-      ctx.globalAlpha = Math.max(0, Math.min(1, ma));
-      ctx.drawImage(silC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
-      ctx.globalAlpha = 1;
+      if (M) {
+        const t = glEmit!.texRefresh('entglow:sil', silC);
+        if (!t || !this.entGlowQuad(M, t, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc,
+          0, 0, CW, CH, 1, 1, 1, Math.max(0, Math.min(1, ma)), false)) {
+          this._entGlowEmitFailed = true; return;
+        }
+      } else {
+        ctx.globalAlpha = Math.max(0, Math.min(1, ma));
+        ctx.drawImage(silC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+        ctx.globalAlpha = 1;
+      }
     }
     // ② RGB 加算：染色纹理（texel.rgb×调制色，alpha 不变）'lighter' 全额叠加。
     //    mr=mg=mb=255 时免染色直画（列 2 光晕/列 1 翅膀）
@@ -14312,13 +14950,28 @@ export class Renderer {
       tintCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
       tintCtx.globalCompositeOperation = 'source-over';
       this.uploadScratchBake(tintC, 'faelingTint', 256);   // ★变体①终扫:逐层烘焙即刻上传（★BJ485 销案锚:有效登记保留,见 silC 支锚注）
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.drawImage(tintC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+      if (M) {
+        // ★单 SO quad(vCol=(1,1,1,ma)):tint premul rgb 全额 + dst×(1−texA·ma)
+        const t = glEmit!.texRefresh('entglow:tint', tintC);
+        if (!t || !this.entGlowQuad(M, t, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc,
+          0, 0, CW, CH, 1, 1, 1, Math.max(0, Math.min(1, ma)), false)) {
+          this._entGlowEmitFailed = true; return;
+        }
+      } else {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(tintC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+      }
+    } else if (M) {
+      const t = this.entGlowTexOf(img);
+      if (!t || !this.entGlowQuad(M, t, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc,
+        sx, sy, CW, CH, 1, 1, 1, Math.max(0, Math.min(1, ma)), false)) {
+        this._entGlowEmitFailed = true; return;
+      }
     } else {
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(img, sx, sy, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
     }
-    ctx.restore();
+    if (!M) ctx.restore();
   }
 
   /** 染色合成进指定画布(faelingPremultLayer 染色支的原位变体,逐式同序):
@@ -14376,6 +15029,26 @@ export class Renderer {
       }
     }
     const ctx = this.ctx;
+    // ★gladd 面⑪ sink:α=0.5 复绘=premul 一致 SO(vCol=(0.5,0.5,0.5,0.5)——rgb 同
+    //  乘=premul src,出流 0.5·s·a+dst×(1−0.5·a) ≡ 2D globalAlpha=0.5 逐位);
+    //  变换三件套同式复刻读 M;水罩活跃置失败旗(驱动器 fail-fast 兜底)
+    const glEmit = this._entGlowEmitGL;
+    if (glEmit) {
+      if (this._veilActive) { this._entGlowEmitFailed = true; return; }
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      ctx.rotate(e.vx * 0.1);
+      ctx.scale(scale, scale);
+      if (e.facing < 0) ctx.scale(-1, 1);
+      const M = ctx.getTransform();
+      ctx.restore();
+      const t = this.entGlowTexOf(img);
+      if (!t || !this.entGlowQuad(M, t, -fw / 2, -fh / 2 + footFlush, fw, fh,
+        0, sy, fw, fh, 0.5, 0.5, 0.5, 0.5, false)) {
+        this._entGlowEmitFailed = true; return;
+      }
+      return;
+    }
     ctx.save();
     ctx.translate(e.cx, e.cy);
     ctx.rotate(e.vx * 0.1);
@@ -14441,24 +15114,17 @@ export class Renderer {
     //   camM=调用位（7d' 循环）相机矩阵快照;tgt 非空=镜像支不重入）
     if (!tgt && this._veilActive) {
       const camM = ctx.getTransform();
-      let hx0 = cx, hx1 = cx, hy0 = cy, hy1 = cy;
-      for (let i = num4; i >= 5; i -= 3) {
-        if (i >= depth) continue;
-        const x = e.histXAt(i), y = e.histYAt(i);
-        if (x < hx0) hx0 = x; if (x > hx1) hx1 = x;
-        if (y < hy0) hy0 = y; if (y > hy1) hy1 = y;
+      // ★BJ739 单源盒（entVeilBox 与谓词共用——漂移即谓词漏罩/过触发双风险）
+      const vb = Renderer.entVeilBox(e);
+      if (vb) {
+        this.escapeVeilStroke(
+          Renderer.veilAabb(camM.a, camM.b, camM.c, camM.d, camM.e, camM.f,
+            vb.x0, vb.y0, vb.x1 - vb.x0, vb.y1 - vb.y0),
+          (mc) => { mc.setTransform(camM); this.drawFaeling(e, world, mc); });
       }
-      const pad = 40 + 14 * scale;
-      this.escapeVeilStroke(
-        Renderer.veilAabb(camM.a, camM.b, camM.c, camM.d, camM.e, camM.f,
-          hx0 - pad, hy0 - pad, (hx1 - hx0) + 2 * pad, (hy1 - hy0) + 2 * pad),
-        (mc) => { mc.setTransform(camM); this.drawFaeling(e, world, mc); });
     }
     if (depth > 6) {
-      const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
-      const fromMax = Math.hypot(32, 16);
-      let num9 = Math.max(0, Math.min(1, Math.hypot(ox4 - e.x, oy4 - e.y) / fromMax)) * 100;
-      num9 = Math.floor(num9 / 5) * 5 / 100;           // (int)num9/5*5/100（:26325-26328）
+      const num9 = Renderer.faelingTrailNum9(e);       // ★BJ739 单源（谓词逐帧界同式）
       const num7 = 32 * num9, num8 = 16 * num9;
       for (let i = num4; i >= 5; i -= 3) {
         if (i >= depth) continue;
@@ -14488,13 +15154,30 @@ export class Renderer {
             gr2 * 255 * kk, gg2 * 255 * kk, gb2 * 255 * kk);
           this._faelingTrailCache.set(ckey, glowC);
         }
-        ctx.save();
-        ctx.translate(e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy);
-        ctx.rotate(rot);
-        if (flip) ctx.scale(-1, 1);
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.drawImage(glowC, -11 * scale, -11 * scale, 22 * scale, 22 * scale);
-        ctx.restore();
+        // ★gladd 面⑪ sink:拖尾桶缓存画布(稳定身份)additive 直采——变换同式
+        //  复刻读 M,vCol=(1,1,1,0)(桶帧已烘彩虹色,A=0 纯加算档)
+        const glEmit2 = this._entGlowEmitGL;
+        if (glEmit2) {
+          ctx.save();
+          ctx.translate(e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy);
+          ctx.rotate(rot);
+          if (flip) ctx.scale(-1, 1);
+          const M2 = ctx.getTransform();
+          ctx.restore();
+          const t2 = this.entGlowTexOf(glowC);
+          if (!t2 || !this.entGlowQuad(M2, t2, -11 * scale, -11 * scale, 22 * scale, 22 * scale,
+            0, 0, 22, 22, 1, 1, 1, 0, false)) {
+            this._entGlowEmitFailed = true; return;
+          }
+        } else {
+          ctx.save();
+          ctx.translate(e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy);
+          ctx.rotate(rot);
+          if (flip) ctx.scale(-1, 1);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.drawImage(glowC, -11 * scale, -11 * scale, 22 * scale, 22 * scale);
+          ctx.restore();
+        }
       }
     }
 
@@ -15149,6 +15832,36 @@ export class Renderer {
     const fogImg = this.atlas!.ensureVImage('vanilla/Extra_245.png');
     const fog = fogImg ? this.tintedSprite('deer-fog-m', { img: fogImg, sx, sy, sw, sh }, [255, 30, 30]) : null;
     const ctx = this.ctx;
+    // ★gladd 面⑪ sink:逐层 SO(vCol=(la,la,la,la) 预乘一致);tintAtlas 共享页
+    //  cell 禁身份上传(重烘 epoch 域,E51)——cell→scratch 拷贝+texRefresh 每层
+    //  重传(red/fog 交替,≤4 层/帧,⑦ mlfloor 同型);变换同式复刻读 M
+    const glEmit = this._entGlowEmitGL;
+    if (glEmit) {
+      if (this._veilActive) { this._entGlowEmitFailed = true; return; }
+      ctx.save();
+      ctx.translate(e.cx, e.y + e.h);
+      ctx.scale(scale * (mirrored ? -1 : 1), scale);
+      const M = ctx.getTransform();
+      ctx.restore();
+      for (const l of layers) {
+        if (l.kind !== 'redGhost' && l.kind !== 'fog') continue;
+        const c = l.kind === 'redGhost' ? red : fog;
+        if (!c) continue;
+        let sc2 = this._entGlowCellScratch;
+        if (!sc2) { sc2 = document.createElement('canvas'); this._entGlowCellScratch = sc2; }
+        if (sc2.width !== c.w || sc2.height !== c.h) { sc2.width = c.w; sc2.height = c.h; }
+        const sctx = sc2.getContext('2d')!;
+        sctx.clearRect(0, 0, c.w, c.h);
+        sctx.drawImage(c.c, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
+        const t = glEmit.texRefresh('entglow:cell', sc2);
+        const la = Math.max(0, Math.min(1, l.alpha));
+        if (!t || !this.entGlowQuad(M, t, -originX + l.dx, -originY + l.dy, sw, sh,
+          0, 0, c.w, c.h, la, la, la, la, false)) {
+          this._entGlowEmitFailed = true; return;
+        }
+      }
+      return;
+    }
     ctx.save();
     ctx.translate(e.cx, e.y + e.h);
     ctx.scale(scale * (mirrored ? -1 : 1), scale);
@@ -16328,6 +17041,27 @@ export class Renderer {
       //  dReg=(200,100,50) 逐通道精确）——Z4 判例的「桥接蒸发」不适用于本面,
       //  真病=上文 destination-in 自擦除（已修）;旧变体①注释所称「flush 期读末
       //  部件字节」前提（blit 被桥接）不成立,删登记刀（2026-10-03）。
+      // ★gladd 面⑦:sink 分支——有 _mlFloorEmitGL=上传+quad(vCol=(1,1,1,0) 整数
+      //  1:1,差值色已烘进画布=与 2D 'lighter' blit 逐位);无 sink=原 2D 逐字。
+      const glEmit = this._mlFloorEmitGL;
+      if (glEmit) {
+        const key = `mlfloor:slot${this._mlFloorSlot++}`;
+        let t = this._mlFloorTex.get(key);
+        const e = t ? glEmit.texRefresh(key, scratch) : glEmit.texFromImage(key, scratch, false, true);
+        if (!e) { this._mlFloorEmitFailed = true; return; }
+        if (!t) this._mlFloorTex.set(key, { e });
+        const vd = new Float32Array(48);   // 6 顶点 × 8 float——③-⑥同 stride
+        const x1 = bx0 + bw, y1 = by0 + bh;
+        const V = [bx0, by0, 0, 0, x1, by0, 1, 0, x1, y1, 1, 1, bx0, by0, 0, 0, x1, y1, 1, 1, bx0, y1, 0, 1];
+        for (let i = 0; i < 6; i++) {
+          vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1];
+          vd[i * 8 + 2] = V[i * 4 + 2]; vd[i * 8 + 3] = V[i * 4 + 3];
+          vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 0;
+        }
+        const ok = this.gladdQuadEmit(glEmit, e, vd, true, false);   // ★刀2:合批(整数位 NEAREST)
+        if (!ok) { this._mlFloorEmitFailed = true; return; }
+        return;
+      }
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
@@ -16646,6 +17380,45 @@ export class Renderer {
           //  本就正确（BJ481 Arm C 判例:登记态不影响 raw 直绘）。
           //  tests/bj485-dead-registration-sweep 锁;普查表见该文件头注。
           const [sxp, syp] = cam.worldToScreen(px, py);
+          // ★gladd 面⑧:sink 分支——有 _bvineEmitGL=段烘焙上传+旋转仿射 quad;水罩
+          //  活跃=置失败旗整面降级 2D(escapeVeil 镜像 2D 专属);无 sink=原 2D 逐字。
+          const glEmit = this._bvineEmitGL;
+          if (glEmit) {
+            if (this._veilActive) { this._bvineEmitFailed = true; return; }
+            const key = `bvine:slot${this._bvineSlot++}`;
+            let t = this._bvineTex.get(key);
+            const e = t ? glEmit.texRefresh(key, scratch) : glEmit.texFromImage(key, scratch, false, true);
+            if (!e) { this._bvineEmitFailed = true; return; }
+            if (!t) this._bvineTex.set(key, { e });
+            // 仿射角点=translate(sxp,syp)·rotate(rot)·(±hw,±hh)——④ flare 同式;
+            // uv v 上界=sh/chain.sh(段采样子矩形)
+            const c = Math.cos(rot), sn = Math.sin(rot);
+            const hw = (chain.sw / 2) * z, hh = (chain.sh / 2) * z;
+            // texel-tie 内缩【已试证伪】:同 5501px 差集不变+maxΔ 恶化(143→207)
+            //  ——非采样偏移;u/v 回平铺 0..sh/chain.sh
+            const u0t = 0, u1t = 1;
+            const v0t = 0, v1t = sh / chain.sh;
+            const corner = (dx: number, dy: number, u: number, v: number): [number, number, number, number] =>
+              [sxp + dx * c - dy * sn, syp + dx * sn + dy * c, u, v];
+            const vd = new Float32Array(48);
+            const V = [
+              corner(-hw, -hh, u0t, v0t), corner(hw, -hh, u1t, v0t), corner(hw, hh, u1t, v1t),
+              corner(-hw, -hh, u0t, v0t), corner(hw, hh, u1t, v1t), corner(-hw, hh, u0t, v1t),
+            ];
+            for (let i = 0; i < 6; i++) {
+              vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+              vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+              // ★over 面:本面=source-over(7c 下限色本体直绘,非加算!首跑判例:
+              //  maxΔ=158 非 tie 族;α=0+SO 混合=FBO 内加法泄漏=负偏实证)。
+              //  会话默认 premul-SO(ONE,1−SA)+vCol=(1,1,1,1):衰减即语义本体。
+              vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 1;
+            }
+            // ★smooth=true 实验:7c 位 ctx 环境 smoothing 态未显式设——若为 ON,
+            //  2D 旋转内容走双线性;GL NEAREST(平滑关)对不上=大边缘差(假设)
+            const okQ = glEmit.quadBatchRgba(e, vd, 1, true);
+            if (!okQ) { this._bvineEmitFailed = true; return; }
+            continue;
+          }
           ctx.save();
           ctx.translate(sxp, syp);
           ctx.rotate(rot);
@@ -18316,6 +19089,44 @@ export class Renderer {
   private flushWhipFullbright(cam: Camera, z: number): void {
     if (!this.whipFullbrightQueue.length) return;
     const ctx = this.ctx;
+    // ★gladd 面⑫-a sink:段双拍(black SO α=a/255+tinted additive)⑪ 同型;tintedTex
+    //  烘焙单源共用(black/tinted 缓存画布,身份键);M=段变换同式复刻;尾清空
+    //  语义保持(sink 成功路径亦清——2D 位守卫跳过时队列已空)。
+    const glEmit = this._whipEmitGL;
+    if (glEmit) {
+      if (this._veilActive) { this._whipEmitFailed = true; return; }
+      for (const q of this.whipFullbrightQueue) {
+        const tex = q.tex;
+        const [r, g, b, a] = q.color;
+        const black = tintedTex(tex as never, [0, 0, 0], false);
+        const tinted = tintedTex(tex as never, [r, g, b], false);
+        if (!black || !tinted) continue;
+        // ★⑫-a 批化刀(2026-10-29):双拍并撤——单 SO quad vCol=(ga,ga,ga,ga) 与
+        //  [black SO α=ga]+[tinted 'lighter'] 数学恒等(premul 单笔,⑪ 同式);
+        //  black 画布/texFromImage GL 域不再消费(2D 支保留)。
+        const tt = this.whipTexOf(tinted);
+        if (!tt) { this._whipEmitFailed = true; return; }
+        const ga = Math.max(0, Math.min(1, a / 255));
+        for (let i = 0; i + 1 < q.pts.length; i++) {
+          const p0 = q.pts[i], p1 = q.pts[i + 1];
+          const dx = p1.x - p0.x, dy = p1.y - p0.y;
+          const len = Math.hypot(dx, dy);
+          const [sx, sy] = cam.worldToScreen(p0.x, p0.y);
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(Math.atan2(dy, dx) - Math.PI / 2);
+          ctx.scale(z, z);
+          const M = ctx.getTransform();
+          ctx.restore();
+          if (!this.whipQuad(M, tt, -tex.width / 2, -2, tex.width, len + 2,
+            0, 0, tex.width, tex.height, ga, ga, ga, ga, false)) {
+            this._whipEmitFailed = true; return;
+          }
+        }
+      }
+      this.whipFullbrightQueue.length = 0;
+      return;
+    }
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
@@ -18389,7 +19200,8 @@ export class Renderer {
    *  update 管线相位静止=MP 债登记（环几何/混合面与本地同式,非缺环）。
    *  贴图懒加载未就绪=整 pass 跳笔（推进照跑相位不错拍;原版 ImmediateLoad 无此态）。
    *  混合语义/层几何/推进率钉面见 InfernoRing.ts 头注（BJ556 两遍拆解推广式）。 */
-  private drawInfernoRingPass(player: Player, cam: Camera, z: number, viewW: number, viewH: number): void {
+  private drawInfernoRingPass(player: Player, cam: Camera, z: number, viewW: number, viewH: number,
+    emit?: (M: DOMMatrix, frame: CanvasImageSource, half: number, base: number, topup: number) => boolean): void {
     const ctx = this.ctx;
     if (!ctx) return;
     // 门=dead ∪ buff 116（Main.cs:65252-65256 的 active/outOfRange/inferno/dead 四门
@@ -18406,7 +19218,7 @@ export class Renderer {
       list.push({ cx: rp.cx, cy: rp.cy, dead: rp.dead, hasInferno: true,
         flameRingRot: rp.flameRingRot, flameRingScale: rp.flameRingScale });
     }
-    drawInfernoRings(ctx, list, ensureFlameRingImage(), cam.x, cam.y, z, viewW, viewH);
+    drawInfernoRings(ctx, list, ensureFlameRingImage(), cam.x, cam.y, z, viewW, viewH, undefined, emit);
   }
 
   private flushNpcWhiteLift(cam: Camera, z: number, viewW: number, viewH: number): void {
@@ -18429,6 +19241,34 @@ export class Renderer {
       //  零重烘;node 单测无 DOM 返 null=跳笔,与 whipFullbright 同守卫）
       const imgT = q.tint ? tintedTex(imgL, q.tint, false) : imgL;
       if (!imgT) continue;
+      // ★gladd 面⑪ sink:恒色族两分支——tintA=0 纯加算(additive vCol=(1,1,1,0),
+      //  削底拍=零削恒等跳过 2D 同款)/缺省 SO 复绘(vCol=(ga,ga,ga,ga) 预乘一致,
+      //  BJ504 a·s+(1−a)·(s·L) 精确式);tintA>0=destination-out 削底拍㊱ FBO 域
+      //  不可达→置失败旗整面降级 2D。imgT 身份键(NPC 表/染色缓存画布稳定)直采。
+      const glEmit = this._entGlowEmitGL;
+      if (glEmit) {
+        if (this._veilActive || (q.tintA !== undefined && q.tintA > 0)) {
+          this._entGlowEmitFailed = true; return;
+        }
+        ctx.save();
+        ctx.translate(q.cx, q.cy);
+        ctx.rotate(q.rot);
+        ctx.scale(q.scale, q.scale);
+        if (q.mirror) ctx.scale(-1, 1);
+        const M = ctx.getTransform();
+        ctx.restore();
+        const t = this.entGlowTexOf(imgT);
+        if (!t) { this._entGlowEmitFailed = true; return; }
+        if (q.tintA !== undefined) {
+          if (!this.entGlowQuad(M, t, -q.sw / 2, q.by, q.sw, q.sh, 0, q.sy, q.sw, q.sh,
+            1, 1, 1, 0, true)) { this._entGlowEmitFailed = true; return; }
+        } else {
+          const ga = q.ga ?? npcWhiteLiftAlpha(q.vid) ?? 0.4;
+          if (!this.entGlowQuad(M, t, -q.sw / 2, q.by, q.sw, q.sh, 0, q.sy, q.sw, q.sh,
+            ga, ga, ga, ga, false)) { this._entGlowEmitFailed = true; return; }
+        }
+        continue;
+      }
       ctx.save();
       ctx.translate(q.cx, q.cy);
       ctx.rotate(q.rot);
@@ -18484,12 +19324,14 @@ export class Renderer {
     if (!this.towerGlowQueue.length) return;
     const ctx = this.ctx;
     if (!ctx) return;
+    if (!this._towerEmitGL) this.c10eCompositeIntoHud();   // ★㊸:armed 跳;2D 位按需折
     ctx.save();
     ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
     ctx.scale(z, z);
     ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
     ctx.imageSmoothingEnabled = false;
     ctx.globalCompositeOperation = 'lighter';
+    if (this._towerEmitGL) this._towerBaseM = ctx.getTransform();   // ★sink:相机基阵一次读
     // ★BJ679 水罩镜像（四塔/516 残影=原版 NPC 链 Main.cs:24483-24520 vel4 四向
     //   Color(64,64,64,0)×Opacity →DrawNPCs :63183 水前;camT=相机矩阵快照,rot 支
     //   qm=相机×本体同枢变换快照,逐拍同 α 重放;box=四向 dest 并集）
@@ -18505,7 +19347,12 @@ export class Renderer {
           ctx.translate(q.cx!, q.cy!);
           ctx.rotate(q.rot);
           const qm = this._veilActive ? ctx.getTransform() : null;
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          if (this._towerEmitGL) {
+            this.towerEmit(img2, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!,
+              q.sw * q.scale!, q.sh * q.scale!, Math.max(0, Math.min(1, q.single!)), ctx.getTransform());
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          }
           ctx.restore();
           if (qm) this.escapeVeilStroke(
             Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
@@ -18513,11 +19360,16 @@ export class Renderer {
             (mc) => { mc.setTransform(qm); mc.globalAlpha = Math.max(0, Math.min(1, q.single!));
               mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!); });
         } else {
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
-          if (camT) this.escapeVeilStroke(
-            Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
-            (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.single!));
-              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
+          if (this._towerEmitGL) {
+            this.towerEmit(img2, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh,
+              Math.max(0, Math.min(1, q.single!)), this._towerBaseM!, true);
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+            if (camT) this.escapeVeilStroke(
+              Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
+              (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.single!));
+                mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
+          }
         }
         continue;
       }
@@ -18529,7 +19381,12 @@ export class Renderer {
           ctx.translate(q.cx!, q.cy!);
           ctx.rotate(q.rot);
           const qm = this._veilActive ? ctx.getTransform() : null;
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          if (this._towerEmitGL) {
+            this.towerEmit(img2, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!,
+              q.sw * q.scale!, q.sh * q.scale!, Math.max(0, Math.min(1, q.overlay!)), ctx.getTransform());
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!);
+          }
           ctx.restore();
           if (qm) this.escapeVeilStroke(
             Renderer.veilAabb(qm.a, qm.b, qm.c, qm.d, qm.e, qm.f,
@@ -18537,11 +19394,16 @@ export class Renderer {
             (mc) => { mc.setTransform(qm); mc.globalAlpha = Math.max(0, Math.min(1, q.overlay!));
               mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.bx! * q.scale!, q.by! * q.scale!, q.sw * q.scale!, q.sh * q.scale!); });
         } else {
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
-          if (camT) this.escapeVeilStroke(
-            Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
-            (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.overlay!));
-              mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
+          if (this._towerEmitGL) {
+            this.towerEmit(img2, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh,
+              Math.max(0, Math.min(1, q.overlay!)), this._towerBaseM!, true);
+          } else {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh);
+            if (camT) this.escapeVeilStroke(
+              Renderer.veilAabb(camT.a, camT.b, camT.c, camT.d, camT.e, camT.f, q.wx, q.wy, q.sw, q.sh),
+              (mc) => { mc.setTransform(camT); mc.globalAlpha = Math.max(0, Math.min(1, q.overlay!));
+                mc.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx, q.wy, q.sw, q.sh); });
+          }
         }
       }
       ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
@@ -18554,10 +19416,19 @@ export class Renderer {
         ctx.translate(q.cx!, q.cy!);
         ctx.rotate(q.rot);
         const qm = this._veilActive ? ctx.getTransform() : null;
-        for (let k = 0; k < 4; k++) {
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
-            q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
-            q.sw * q.scale!, q.sh * q.scale!);
+        if (this._towerEmitGL) {
+          const ga4 = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+          for (let k = 0; k < 4; k++) {
+            if (!this.towerEmit(img2, q.sy, q.iw, q.gh,
+              q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
+              q.sw * q.scale!, q.sh * q.scale!, ga4, ctx.getTransform())) break;
+          }
+        } else {
+          for (let k = 0; k < 4; k++) {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh,
+              q.bx! * q.scale! + offs[k][0], q.by! * q.scale! + offs[k][1],
+              q.sw * q.scale!, q.sh * q.scale!);
+          }
         }
         ctx.restore();
         if (qm) this.escapeVeilStroke(
@@ -18571,8 +19442,16 @@ export class Renderer {
                 q.sw * q.scale!, q.sh * q.scale!);
             } });
       } else {
-        for (let k = 0; k < 4; k++) {
-          ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+        if (this._towerEmitGL) {
+          const ga4 = Math.max(0, Math.min(1, (64 / 255) * (q.noOpac ? 1 : q.opacity)));
+          for (let k = 0; k < 4; k++) {
+            if (!this.towerEmit(img2, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1],
+              q.sw, q.sh, ga4, this._towerBaseM!, true)) break;
+          }
+        } else {
+          for (let k = 0; k < 4; k++) {
+            ctx.drawImage(img2, 0, q.sy, q.iw, q.gh, q.wx + offs[k][0], q.wy + offs[k][1], q.sw, q.sh);
+          }
         }
         if (camT) {
           // box=四向 dest 并集（offs 偏移含入;box 只裁复合域,罩量由 paint 四笔精确）
@@ -18598,29 +19477,29 @@ export class Renderer {
    *  GL 条带层（obj58 tech 路径渲入 glfx.canvas）上屏段一并挪此：渲染发生在
    *  drawStripTrail 内（flush 循环中）、上屏紧随循环后=同 flush 时序闭环
    *  （原实体段 :3441 上屏点已删——挪后 GL/CPU 两 face 同步脱离光照乘+source-over）。 */
-  private flushTrailShade(cam: Camera, z: number, viewW: number, viewH: number): void {
+  /** ★gladd 面⑫-b（2026-10-28,task#22）:flushTrailShade 行为零变拆分——
+   *  flushTrailStrips(queue+gx 上屏,可 GL 桥)/flushProjFullbright(BJ278 闭包族,
+   *  恒 2D——pre-垫底 'lighter' 落透明 HUD=黑晕,闭包必须留在 7f 位;拆分后
+   *  fb-only 帧由本半自带幂等垫底承接原头垫底语义)。层序:strips(GL 栈)∈闭包
+   *  (HUD)同 2D 序;towerGlow/wingGlow SO 与拖尾加算重叠域=②登记族微差。 */
+  private flushTrailStrips(cam: Camera, z: number, viewW: number, viewH: number): void {
     // ★空队列不早退：GL 条带层（天顶剑等 tech 路径渲入 glfx.canvas）的上屏也在此——
     //  只看队列会让无队列帧的 GL 月牙整条消失（2026-09-03 用户实报"月牙没了"）
     const hasQ = this.trailShadeQueue.length > 0;
     const gxC = this.glfx;
     const hasGL = !!(gxC && gxC.trailDirty && !gxC.unavailable);
-    const hasFB = this.projFullbrightQueue.length > 0;
-    if (!hasQ && !hasGL && !hasFB) return;
+    if (!hasQ && !hasGL) return;
     const queue = this.trailShadeQueue;
     this.trailShadeQueue = [];
     const ctx = this.ctx;
     if (!ctx) return;
     // ★C10e 加算黑晕修复（2026-10-03 彩虹杖蓄力星闪黑晕 GL 复发定谳,探针
     //  scripts/_gl79halo.mjs dark=3364px/avg−40.5 实证）：c10e 纯帧分体呈现=
-    //  sky2D/glCanvas/HUD 三层 premul-over 叠合,本函数的 'lighter' 直绘落
-    //  【透明 HUD】把源 α 折进层 α → 合成时 dst×(1−α) 衰减下层亮画面 =
-    //  BJ278 全亮家族（79 星闪头/彩虹带/GL 条带 blit,后续 BJ422 标尺同享）
-    //  黑晕/遮挡带——XNA 加算 dst 因子恒 ONE 无衰减。修=绘制前先走
-    //  c10eCompositeIntoHud（幂等闩,destination-over 把 sky+glCanvas 垫进
-    //  HUD=HUD 含全帧 α≈1）,加算改落不透明基底=复原 BJ278 不透明面语义；
-    //  链/自拷消费方经 _c10eComposited 既有分支语义不变。非 c10e 帧主画布
-    //  不透明（alpha:false 或世界已 blit）,本调用由闩内 !this._c10eFrame 早退。
-    this.c10eCompositeIntoHud();
+    //  sky2D/glCanvas/HUD 三层 premul-over 叠合,'lighter' 直绘落【透明 HUD】
+    //  把源 α 折进层 α → 合成时 dst×(1−α) 衰减下层亮画面 = BJ278 全亮家族
+    //  黑晕/遮挡带。修=绘制前先走 c10eCompositeIntoHud（幂等闩）。★㊸ 判例:
+    //  gladd 驱动器早调位(7142)须跳过(闩占位→主垫底 no-op→会话蒸发)。
+    if (!this._trailEmitGL) this.c10eCompositeIntoHud();
     const camRX = Math.round(cam.x * z) / z;
     const camRY = Math.round(cam.y * z) / z;
     ctx.save();
@@ -18628,11 +19507,35 @@ export class Renderer {
     ctx.scale(z, z);
     ctx.translate(-camRX, -camRY);
     // ★BJ679 水罩镜像（拖尾=原版弹幕 Drawer 全程不取光→DrawProjectiles :63199
-    //   水前面;CPU 光栅路 blit 位经 drawStripTrail onBlit 钩子逐条镜像——scratch
-    //   α=255（带内）/0（带外,putImageData 全幅覆写）=覆盖形状精确;GL 路
-    //   （obj55 SM2/obj58 tech 渲入 glfx.canvas 全幅上屏）不触发钩子+projFullbright
-    //   闭包族不镜像=余债登记,见 7e 头注 BJ679 段）
+    //   水前面;CPU 光栅路 blit 位经 drawStripTrail onBlit 钩子逐条镜像;GL 路
+    //   不触发钩子+projFullbright 闭包族不镜像=余债登记,见 7e 头注 BJ679 段）
     const veilCamM = this._veilActive ? ctx.getTransform() : null;
+    // ★gladd 面⑫-b sink:glEmit 钩(世界系 M=blit 位 ctx 变换逐条读;scratch 直色
+    //  rgb=贡献/α{0,255}→premul 上传=贡献本体;additive vCol=(1,1,1,0);smooth=true
+    //  对位 imageSmoothing——半分辨率上采样)
+    const glEmit = this._trailEmitGL
+      ? (bi: { canvas: HTMLCanvasElement; sw: number; sh: number; dx: number; dy: number; dw: number; dh: number }): boolean => {
+        const glE = this._trailEmitGL!;
+        const t = glE.texRefresh('trail:strip', bi.canvas);
+        if (!t) { this._trailEmitFailed = true; return false; }
+        const M = ctx.getTransform();
+        const vd = new Float32Array(48);
+        const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+          [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+        const V = [
+          corner(bi.dx, bi.dy, 0, 0), corner(bi.dx + bi.dw, bi.dy, 1, 0), corner(bi.dx + bi.dw, bi.dy + bi.dh, 1, 1),
+          corner(bi.dx, bi.dy, 0, 0), corner(bi.dx + bi.dw, bi.dy + bi.dh, 1, 1), corner(bi.dx, bi.dy + bi.dh, 0, 1),
+        ];
+        for (let i = 0; i < 6; i++) {
+          vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+          vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+          vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 0;
+        }
+        const ok2 = this.gladdQuadEmit(glE, t, vd, true, true);   // ★刀2:run-length 合批
+        if (!ok2) this._trailEmitFailed = true;
+        return ok2;
+      }
+      : undefined;
     for (const spec of queue) {
       try {
         drawStripTrail(ctx, this, spec, veilCamM ? (bi) => {
@@ -18640,21 +19543,54 @@ export class Renderer {
             Renderer.veilAabb(veilCamM.a, veilCamM.b, veilCamM.c, veilCamM.d, veilCamM.e, veilCamM.f,
               bi.dx, bi.dy, bi.dw, bi.dh),
             (mc) => { mc.setTransform(veilCamM); mc.drawImage(bi.canvas, 0, 0, bi.sw, bi.sh, bi.dx, bi.dy, bi.dw, bi.dh); });
-        } : undefined);
+        } : undefined, glEmit);
       } catch { /* 单条带失败不拖垮帧 */ }
     }
     ctx.restore();
     // GL 条带层上屏（'lighter' 加算——层内已按 XNA Additive 累积,主链直加;黑 texel
-    // rgb=0 加 0 无害,opaque 主画布 alpha 抬升无观感）
+    //  rgb=0 加 0 无害,opaque 主画布 alpha 抬升无观感）。★⑫-b:armed=全幅 additive
+    //  quad(texRefresh 上传 glfx 画布,1:1 NEAREST=2D 同式)
     const gx = this.glfx;
     if (gx && gx.trailDirty && !gx.unavailable) {
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.drawImage(gx.canvas, 0, 0);
-      ctx.restore();
+      const glE = this._trailEmitGL;
+      if (glE) {
+        const t = glE.texRefresh('trail:gx', gx.canvas);
+        if (!t) { this._trailEmitFailed = true; }
+        else {
+          const CW = gx.canvas.width, CH = gx.canvas.height;
+          const vd = new Float32Array(48);
+          const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] => [x, y, u, v];
+          const V = [
+            corner(0, 0, 0, 0), corner(CW, 0, 1, 0), corner(CW, CH, 1, 1),
+            corner(0, 0, 0, 0), corner(CW, CH, 1, 1), corner(0, CH, 0, 1),
+          ];
+          for (let i = 0; i < 6; i++) {
+            vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+            vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+            vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 0;
+          }
+          if (!this.gladdQuadEmit(glE, t, vd, true, false)) this._trailEmitFailed = true;   // ★刀2
+        }
+      } else {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(gx.canvas, 0, 0);
+        ctx.restore();
+      }
       gx.trailDirty = false;
     }
+  }
+
+  /** ★gladd 面⑫-b:BJ278 弹体全亮闭包族（恒 2D——黑晕域禁早调;fb-only 帧自带
+   *  幂等垫底承接原 flushTrailShade 头部语义=拆分零行为变的承重笔）。 */
+  private flushProjFullbright(cam: Camera, z: number, viewW: number, viewH: number): void {
+    if (!this.projFullbrightQueue.length) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.c10eCompositeIntoHud();   // 幂等闩（strips 半已垫=空转;fb-only 帧承重）
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
     // BJ278 弹体全亮冲刷（GL 上屏后=原版 Drawer 先带后头序;相机系同上段公式）。
     // opaque 主画布 'lighter' 加算——头部闭包自代 save/'lighter'/restore。
     const fb = this.projFullbrightQueue;
@@ -18673,6 +19609,9 @@ export class Renderer {
 
   private flushWingGlow(cam: Camera, z: number): void {
     if (!this.wingGlowQueue.length) return;
+    // ★覆盖审计(2026-10-29):主纹理=纯 SO(globalAlpha+drawImage 无 gCO)无黑晕;
+    //  唯一黑晕源=overlay 'lighter'(glowAdd 族)——折叠下沉到 drawWingOverlay 头
+    //  (纯主纹理翼免折=退役覆盖扩大)。
     const atlas = this.atlas;
     const ctx = this.ctx;
     if (!atlas) { this.wingGlowQueue.length = 0; return; }
@@ -18720,7 +19659,23 @@ export class Renderer {
           a = e.settled;                                            // :1032 White×stealth
         }
         // 44 彩虹翼主纹理 = 已烘焙的彩虹图；其余 = Wings 表
-        if (!e.dye && tint >= 0.999) {
+        // ★BJ737-A 刀3(2026-10-29 用户实报「翼淡半透」定谳):mainGlow 主纹理入组
+        //  (SO vCol=(a,a,a,a) 预乘一致)——2D 序=[主纹理 SO]→[overlay 'lighter'];
+        //  GL 单层(glCanvas 垫 HUD 之下)主纹理留 2D(HUD 之上)=overlay 垫到主
+        //  纹理【之下】=层序倒置(39% α 主纹理盖住加算 glow=「非常淡的半透贴图」
+        //  真凶)。两笔同层保序=2D 序精确;主纹理垫在后续 7e SO 内容(恒甲重绘
+        //  7457 等)之下=2D 同序 ✓(premul-over 结合律=组会话根基恒等)。
+        if (this._wingEmitGL) {
+          const tintArr2: [number, number, number] | null = tint < 0.999
+            ? [tint, tint, tint] : null;
+          const sc2 = (!e.dye && tint >= 0.999) ? null
+            : this.wingTexSource(mainTex as ImageBitmap | HTMLImageElement | HTMLCanvasElement,
+              0, e.fr * fh, tw, fh, e.dye, tintArr2);
+          const src2 = (sc2 ?? mainTex) as TexImageSource;
+          // scratch=全幅(0,0);atlas/烘焙表=帧行子矩形(0, fr*fh)
+          this.wingQuad(src2, 0, sc2 ? 0 : e.fr * fh, tw, fh,
+            -tw / 2, -fh / 2, tw, fh, ctx.getTransform(), a, true);
+        } else if (!e.dye && tint >= 0.999) {
           ctx.globalAlpha = a;
           ctx.drawImage(mainTex as CanvasImageSource, 0, e.fr * fh, tw, fh,
             -tw / 2, -fh / 2, tw, fh);
@@ -18808,6 +19763,159 @@ export class Renderer {
     }
     return { x: Math.floor(minX) - 1, y: Math.floor(minY) - 1,
       w: Math.ceil(maxX) - Math.floor(minX) + 2, h: Math.ceil(maxY) - Math.floor(minY) + 2 };
+  }
+
+  /** ★BJ739 实体直绘族水罩位置域旗（缺省开;?veilbox=0 逃生门=谓词回到无条件
+   *  实体触发旧行为）。动因:aether 常驻 Faeling 空中巡飞=每帧 veil 帧恒触发,
+   *  前景液体整帧禁批回 CPU 链+7e 会话全家 2D（用户实报微光湖掉帧+8px 网格
+   *  同根;BJ738 探针:杀 677 后零网格=机制归因）。 */
+  static veilbox = (() => {
+    try {
+      if (typeof location === 'undefined') return false;
+      return new URLSearchParams(location.search).get('veilbox') !== '0';
+    } catch { return false; }
+  })();
+
+  /** ★BJ739 实体直绘族水罩域盒（世界 px;镜像盒单源——677 轨迹包络+sound 外扩,
+   *  谓词（entVeilHitsLiquid）与镜像（drawFaeling 裁剪盒）共用防漂移）。
+   *  677 绘制几何（sound 上界）:拖尾样本中心=(样本+(w/2,h/2))+(vx,vy),
+   *  |vx|≤16·num15≤14.7、vy∈[0,32·num15]≤29.3（num7/num8·num15,cs:26325-26330）,
+   *  精灵 22·scale 旋转 worst=半对角 15.6·scale;本体层脉冲 ×1.1 → ±17·scale
+   *  ⇒ padX=(w/2)+16+18·scale / padY=(h/2)+30+18·scale（旧镜像 pad 40+14·scale
+   *  在 scale>1 恒欠覆盖=罩裁剪窄于绘制域,BJ679 既有偏差随本刀勘正）。
+   *  返回 null=域不定（668=glow 层计划域复杂/259-260=链段下探不定）→谓词保守。
+   *  583-585 仙灵=bbox+40px（镜像=24px 精灵同枢,bbox∪pad 覆盖）。 */
+  static entVeilBox(e: Enemy): { x0: number; y0: number; x1: number; y1: number } | null {
+    const scale = e.vanillaScale || 1;
+    if (e.vanillaId === 677) {
+      const num4 = 60 - 1 - 5;                              // 54（TrailCacheLength[677]=60）
+      const depth = e.historyDepth();
+      let hx0 = e.cx, hx1 = e.cx, hy0 = e.cy, hy1 = e.cy;
+      for (let i = num4; i >= 5; i -= 3) {
+        if (i >= depth) continue;
+        const x = e.histXAt(i), y = e.histYAt(i);
+        if (x < hx0) hx0 = x; if (x > hx1) hx1 = x;
+        if (y < hy0) hy0 = y; if (y > hy1) hy1 = y;
+      }
+      const padX = (e.w || 22) / 2 + 16 + 18 * scale;
+      const padY = (e.h || 22) / 2 + 30 + 18 * scale;
+      return { x0: hx0 - padX, y0: hy0 - padY, x1: hx1 + padX, y1: hy1 + padY };
+    }
+    if (e.vanillaId === 259 || e.vanillaId === 260 || e.vanillaId === 668) return null;
+    const pad = 40;
+    const hw = Math.max(e.w || 24, 24) / 2, hh = Math.max(e.h || 24, 24) / 2;
+    return { x0: e.cx - hw - pad, y0: e.cy - hh - pad, x1: e.cx + hw + pad, y1: e.cy + hh + pad };
+  }
+
+  /** ★BJ739 盒内液体存在性（罩源=前景水 pass 画布=纯液体格——瀑布另链
+   *  waterfalls.draw（:9811）不进罩源,液体格即完备判定域）。盒 ⊇ 镜像绘制域
+   *  ⇒ 盒内无液体=水罩复合对本实体全透明=no-op,跳过=视觉逐位同。 */
+  static boxHasLiquid(st: TileStore, b: { x0: number; y0: number; x1: number; y1: number }): boolean {
+    const tx0 = Math.max(0, Math.floor(b.x0 / 16)), ty0 = Math.max(0, Math.floor(b.y0 / 16));
+    const tx1 = Math.min(st.w - 1, Math.floor(b.x1 / 16)), ty1 = Math.min(st.h - 1, Math.floor(b.y1 / 16));
+    for (let ty = ty0; ty <= ty1; ty++) {
+      const row = ty * st.w;
+      for (let tx = tx0; tx <= tx1; tx++) if (st.liquid[row + tx] > 0) return true;
+    }
+    return false;
+  }
+
+  /** ★BJ742（2026-10-30）：世界绑定逃逸队列位置域——逐队列条目位置盒液检
+   *  （罩源语义同 BJ739 实体臂/BJ741 玩家臂:盒 ⊇ 条目镜像绘制域,盒内无液体=
+   *  罩复合对该条目全透明;全条目无水 → 整帧解除）。
+   *  · itemGlow（手持光源/掉落物光罩——持火把探洞恒非空的最高频面）:op dest
+   *    经 flushItemGlow 同款 (m·invK) 仿射→全幅页位,再逆世界变换（center−
+   *    viewW/2)/z+camR）→世界位;盒=±(半对角·|m|·invK/z+8)（BJ603 旋臂在 op
+   *    域,半对角已含;camR 像素吸附差 ≤0.5/z 由 pad 吸收）。
+   *  · whip=段点 AABB±16（线体纹理宽 ≤12,鞭尖不在此队列）;trail=条带点
+   *    AABB±32（宽条带）;tower=wx,wy,sw,sh 直盒+8;npcWhiteLift=cx,cy±(sw,sh)/2+8
+   *    ——四族条目位均为世界坐标（各 flush 的 worldToScreen/世界变换内 translate
+   *    同判）。 */
+  private veilWorldQHitsLiquid(world: World, cam: Camera, viewW: number, viewH: number, z: number): boolean {
+    const st = world.store;
+    const box = Renderer.boxHasLiquid;
+    const camRX = Math.round(cam.x * z) / z, camRY = Math.round(cam.y * z) / z;
+    for (const e of this.itemGlowQueue) {
+      const m = e.m;
+      const invK = e.k > 0 ? 1 / e.k : 1;
+      const nl = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d)) * invK;
+      for (const o of e.ops) {
+        const w = o.dw ?? o.sw, h = o.dh ?? o.sh;
+        const cxL = o.dx + w / 2, cyL = o.dy + h / 2;
+        const px = (m.a * cxL + m.c * cyL + m.e) * invK;
+        const py = (m.b * cxL + m.d * cyL + m.f) * invK;
+        const wx = (px - viewW / 2) / z + camRX;
+        const wy = (py - viewH / 2) / z + camRY;
+        const r = (Math.hypot(w, h) / 2) * nl / z + 8;
+        if (box(st, { x0: wx - r, y0: wy - r, x1: wx + r, y1: wy + r })) return true;
+      }
+    }
+    for (const q of this.whipFullbrightQueue) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of q.pts) {
+        if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+        if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+      }
+      if (x1 >= x0 && box(st, { x0: x0 - 16, y0: y0 - 16, x1: x1 + 16, y1: y1 + 16 })) return true;
+    }
+    for (const t of this.trailShadeQueue) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of t.pts) {
+        if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+        if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+      }
+      if (x1 >= x0 && box(st, { x0: x0 - 32, y0: y0 - 32, x1: x1 + 32, y1: y1 + 32 })) return true;
+    }
+    for (const t of this.towerGlowQueue) {
+      if (box(st, { x0: t.wx - 8, y0: t.wy - 8, x1: t.wx + t.sw + 8, y1: t.wy + t.sh + 8 })) return true;
+    }
+    for (const q of this.npcWhiteLiftQueue) {
+      const hw = q.sw / 2 + 8, hh = q.sh / 2 + 8;
+      if (box(st, { x0: q.cx - hw, y0: q.cy - hh, x1: q.cx + hw, y1: q.cy + hh })) return true;
+    }
+    return false;
+  }
+
+  /** ★BJ739 677 拖尾位移档单源（cs:26325-26328 (int)num9/5·5/100;drawFaeling 与
+   *  entVeilHitsLiquid 共用防漂移）:num9=54 帧位移/hypot(32,16) 的 5% 档——
+   *  悬停 Faeling num9≈0（spin 幅度∝num9 ⇒ 轨迹贴样本点）;疾飞 num9→1。 */
+  static faelingTrailNum9(e: Enemy): number {
+    const depth = e.historyDepth();
+    if (depth <= 6) return 0;
+    const ox4 = e.histXAt(54), oy4 = e.histYAt(54);
+    const fromMax = Math.hypot(32, 16);
+    const n = Math.max(0, Math.min(1, Math.hypot(ox4 - e.x, oy4 - e.y) / fromMax)) * 100;
+    return Math.floor(n / 5) * 5 / 100;
+  }
+
+  /** ★BJ739 实体绘制域液体命中（谓词判定面;逐帧精确界——比 entVeilBox 最坏
+   *  包络紧）:677=本体+轨迹样本（i=54..5 步 3 同绘制索引域）逐样本盒。
+   *  sound 界（cs:26321-26347）:样本中心=(样本+(w/2,h/2))+(vx,vy),
+   *  |vx|≤16·num9、vy∈[0,32·num9]（num7/num8·num15,单源 faelingTrailNum9）;
+   *  精灵 22·scale 旋转 worst=半对角 15.6·scale,本体层脉冲 ×1.1 → ext=17.2·scale+1。
+   *  ⇒ 悬停（num9≈0）轨迹下探仅 ~29px（最坏 pad 59px 的半）——贴水巡航的
+   *  Faeling 被正确罩住,~30px 外悬停帧解除整帧 CPU 液体+7e 会话。
+   *  583-585=bbox+40;668/259-260=域不定保守 true。 */
+  static entVeilHitsLiquid(e: Enemy, st: TileStore): boolean {
+    const scale = e.vanillaScale || 1;
+    if (e.vanillaId === 677) {
+      const num9 = Renderer.faelingTrailNum9(e);
+      const half0 = (e.w || 22) / 2, halfH0 = (e.h || 22) / 2;
+      const ext = 17.2 * scale + 1;
+      const dx = 16 * num9 + ext, dyDn = 32 * num9 + ext;
+      if (Renderer.boxHasLiquid(st, { x0: e.cx - ext, y0: e.cy - ext, x1: e.cx + ext, y1: e.cy + ext })) return true;
+      const depth = e.historyDepth();
+      for (let i = 54; i >= 5; i -= 3) {
+        if (i >= depth) continue;
+        const x = e.histXAt(i), y = e.histYAt(i);
+        if (Renderer.boxHasLiquid(st, { x0: x + half0 - dx, y0: y + halfH0 - ext, x1: x + half0 + dx, y1: y + halfH0 + dyDn })) return true;
+      }
+      return false;
+    }
+    if (e.vanillaId === 259 || e.vanillaId === 260 || e.vanillaId === 668) return true;
+    const pad = 40;
+    const hw = Math.max(e.w || 24, 24) / 2, hh = Math.max(e.h || 24, 24) / 2;
+    return Renderer.boxHasLiquid(st, { x0: e.cx - hw - pad, y0: e.cy - hh - pad, x1: e.cx + hw + pad, y1: e.cy + hh + pad });
   }
 
   /** ★BJ676 记录一笔逃逸形状（flush 直绘同式镜像重放到 mask 画布;box=页域包络）。
@@ -18921,6 +20029,14 @@ export class Renderer {
         if (!pc.bake) continue;
         const tinted = tintRGBA(pc.bake, lunarArmorFlushTint(pc.cv, e.mul));
         const ff = dollFrameRows(tinted, e.rows);
+        // ★D1:恒甲重绘入组(SO vCol=(g,g,g,g))——甲 glow(under 7468)在 2D 序中
+        //  画在重绘之上;重绘入组后同层保序=精确。tinted=tintRGBA 缓存画布(键稳)
+        //  +armorQuad texRefresh 每拍(行进动画换代)。
+        if (this._lunarArmorEmitGL) {
+          if (!this.armorQuad(this._lunarArmorEmitGL!, ff.img, ff.sx, ff.sy, ff.sw, ff.sh,
+            -ff.sw / 2, -ff.sh + 4, ff.sw, ff.sh, ctx.getTransform(), g, false)) break;
+          continue;
+        }
         ctx.drawImage(ff.img, ff.sx, ff.sy, ff.sw, ff.sh, -ff.sw / 2, -ff.sh + 4, ff.sw, ff.sh);
         // ★BJ676 mask 镜像（恒色甲不透明 over 可结合=罩复合逐位精确;tinted 同对象
         //   同源矩形零重烘,tint 只动 RGB=α 与直绘逐位同）
@@ -18952,6 +20068,14 @@ export class Renderer {
     for (const e of q) {
       const invK = e.k > 0 ? 1 / e.k : 1;
       ctx.setTransform(invK, 0, 0, invK, 0, 0);
+      // ★D1:被盖层 blit 入组(纯会话画布×invK 页域回贴)——2D 序中被盖(7499)画在
+      //  under glow(7468)/盾/载体之上、②/arm 之下;入组后同层保序。cv=池化会话
+      //  画布(≤8 身份)+texRefresh 每拍。
+      if (this._lunarCoverEmitGL) {
+        if (!this.armorQuad(this._lunarCoverEmitGL!, e.cv, 0, 0, e.w, e.h, e.ox, e.oy, e.w, e.h,
+          ctx.getTransform(), 1, false)) break;
+        continue;
+      }
       ctx.drawImage(e.cv, 0, 0, e.w, e.h, e.ox, e.oy, e.w, e.h);
       // ★BJ676 mask 镜像（被盖层=手持物/身前配饰/坐骑前层,原版 18-38 层组
       //   DrawDataCache 主链=水应罩;blit 轴对齐 scale 变换,box=worldCanvas 域
@@ -18983,6 +20107,88 @@ export class Renderer {
     this.heldProjCarrierQueue = [];
     const ctx = this.ctx;
     if (!ctx) return;
+    // ★刀A 盲区收口(2026-10-29 覆盖审计):'lighter'(A=0 纯加算支)落透明 HUD=黑晕
+    //  ——consumer-pull 按需折(闩幂等)。★五面桥(同日):armed=记录 ctx 支(㊸ 跳折)。
+    if (this._hprojEmitGL) {
+      const glE = this._hprojEmitGL;
+      const camRX = Math.round(cam.x * z) / z;
+      const camRY = Math.round(cam.y * z) / z;
+      const vw2 = Math.round(viewW / 2), vh2 = Math.round(viewH / 2);
+      let m = [z, 0, 0, z, vw2 - z * camRX, vh2 - z * camRY];
+      let ga = 1, gco = 'source-over', smooth = false;
+      const mStack: Array<[number[], number, string, boolean]> = [];
+      const fail = (): void => { this._hprojEmitFailed = true; };
+      const mul = (m2: number[]): void => {
+        m = [
+          m[0] * m2[0] + m[2] * m2[1], m[1] * m2[0] + m[3] * m2[1],
+          m[0] * m2[2] + m[2] * m2[3], m[1] * m2[2] + m[3] * m2[3],
+          m[0] * m2[4] + m[2] * m2[5] + m[4], m[1] * m2[4] + m[3] * m2[5] + m[5],
+        ];
+      };
+      const emit = (img: TexImageSource, sx: number, sy: number, sw: number, sh: number,
+        dx: number, dy: number, dw: number, dh: number): void => {
+        if (this._hprojEmitFailed) return;
+        if (!(img as { width?: number }).width || !(img as { height?: number }).height) { fail(); return; }
+        // ★D1(BJ737-A 刀2 同病同修):texRefresh 每拍重传——载体源含 scratch 画布
+        //  (内容逐拍换血),身份缓存仅首拍=内容冻结。
+        let hkey = this._hprojTexKeys.get(img);
+        if (!hkey) { hkey = `hproj:tex:${this._hprojTexN++}`; this._hprojTexKeys.set(img, hkey); }
+        const t = glE.texRefresh(hkey, img as TexImageSource);
+        if (!t) { fail(); return; }
+        const additive = gco === 'lighter';
+        if (gco !== 'lighter' && gco !== 'source-over') { fail(); return; }
+        const u0 = sx / t.w, v0 = sy / t.h, u1 = (sx + sw) / t.w, v1 = (sy + sh) / t.h;
+        const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+          [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5], u, v];
+        const V = [
+          corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+          corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+        ];
+        const vd = new Float32Array(48);
+        for (let i = 0; i < 6; i++) {
+          vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+          vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+          vd[i * 8 + 4] = ga; vd[i * 8 + 5] = ga; vd[i * 8 + 6] = ga; vd[i * 8 + 7] = additive ? 0 : ga;
+        }
+        if (!this.gladdQuadEmit(glE, t, vd, additive, smooth)) fail();
+      };
+      const rec: Record<string, unknown> = {
+        save: () => { mStack.push([[...m], ga, gco, smooth]); },
+        restore: () => { const st2 = mStack.pop(); if (!st2) return; [m, ga, gco, smooth] = st2 as unknown as [number[], number, string, boolean]; },
+        translate: (x: number, y: number) => { mul([1, 0, 0, 1, x, y]); },
+        rotate: (ang: number) => { const c2 = Math.cos(ang), s2 = Math.sin(ang); mul([c2, s2, -s2, c2, 0, 0]); },
+        scale: (x: number, y: number) => { mul([x, 0, 0, y, 0, 0]); },
+        setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => { m = [a, b, c, d, e, f]; },
+        drawImage: (img: TexImageSource, a1: number, b1: number, c1?: number, d1?: number, e1?: number, f1?: number, g1?: number, h1?: number) => {
+          if (c1 === undefined) emit(img, 0, 0, (img as { width: number }).width, (img as { height: number }).height, a1, b1, (img as { width: number }).width, (img as { height: number }).height);
+          else if (e1 === undefined) emit(img, 0, 0, (img as { width: number }).width, (img as { height: number }).height, a1, b1, c1, d1!);
+          else emit(img, a1, b1, c1, d1!, e1, f1!, g1!, h1!);
+        },
+      };
+      const recProxy = new Proxy(rec, {
+        get(t, k) {
+          if (typeof k === 'string' && k in t) return t[k];
+          if (k === 'globalAlpha') return ga;
+          if (k === 'globalCompositeOperation') return gco;
+          if (k === 'imageSmoothingEnabled') return smooth;
+          fail();
+          return undefined;
+        },
+        set(t, k, v) {
+          if (k === 'globalAlpha') { ga = Number(v); return true; }
+          if (k === 'globalCompositeOperation') { gco = String(v); return true; }
+          if (k === 'imageSmoothingEnabled') { smooth = Boolean(v); return true; }
+          fail();
+          return true;
+        },
+      });
+      for (const paint of q) {
+        try { paint(recProxy as unknown as CanvasRenderingContext2D); } catch { fail(); break; }
+        if (this._hprojEmitFailed) break;
+      }
+      return;   // 成功=队列已换空(消费);失败=驱动器回滚
+    }
+    this.c10eCompositeIntoHud();
     const camRX = Math.round(cam.x * z) / z;
     const camRY = Math.round(cam.y * z) / z;
     ctx.save();
@@ -19015,6 +20221,10 @@ export class Renderer {
         return armOps.length ? [{ ...e, ops: armOps }] : [];
       });
     }
+    // ★刀A 盲区收口(2026-10-29 覆盖审计):'lighter' 拍(R==A 快路径/boost 补差)
+    //  落透明 HUD=黑晕(月套甲位 glow 逃逸族)——consumer-pull 按需折(闩幂等)。
+    //  ★五面桥(同日):armed=GL 支(㊸ 跳折)。
+    if (!this._armorEmitGL) this.c10eCompositeIntoHud();
     this.armorGlowCollected = new WeakSet();
     if (!q.length || !this.atlas) return;
     const ctx = this.ctx;
@@ -19058,6 +20268,24 @@ export class Renderer {
               : null;
             ctx.globalCompositeOperation = pass.comp;
             ctx.globalAlpha = pass.g;
+            // ★五面桥 sink:三 draw 位分支化(rot 支=变换读 M;plain=入口矩阵已设)
+            if (this._armorEmitGL) {
+              const gl = this._armorEmitGL;
+              const additive = pass.comp === 'lighter';
+              const texSrc = (src ?? img) as TexImageSource;
+              const tsx = src ? 0 : op.sx, tsy = src ? 0 : sy;
+              if (op.rot && op.pivot) {
+                ctx.save();
+                ctx.translate(op.pivot[0] + jx, op.pivot[1] + jy);
+                ctx.rotate(op.rot);
+                const M = ctx.getTransform();
+                ctx.restore();
+                if (!this.armorQuad(gl, texSrc, tsx, tsy, op.sw, op.sh,
+                  op.dx - op.pivot[0], op.dy - op.pivot[1], op.sw, op.sh, M, pass.g, additive)) break;
+              } else if (!this.armorQuad(gl, texSrc, tsx, tsy, op.sw, op.sh,
+                op.dx + jx, op.dy + jy, op.sw, op.sh, ctx.getTransform(), pass.g, additive)) break;
+              continue;
+            }
             if (op.rot && op.pivot) {
               ctx.save();
               ctx.translate(op.pivot[0] + jx, op.pivot[1] + jy);
@@ -19120,6 +20348,7 @@ export class Renderer {
     this.itemGlowQueue = [];
     this.itemGlowHeldCollected = new WeakSet();
     if (!q.length || !this.atlas) return;
+    this.c10eCompositeIntoHud();   // ★刀A:恒 2D 消费位按需折(consumer-pull;闩幂等)
     const ctx = this.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -19484,6 +20713,15 @@ export class Renderer {
       ctx.rotate(e.rot);
       if (e.facing === -1) ctx.scale(-1, 1);   // playerEffect 水平翻转（纹理空间）
       ctx.globalAlpha = SOLAR_SHIELD_ALPHA;
+      // ★D1:盾球入组(SO)——2D 序中盾(7479)画在 under glow(7468)之上、载体(7489)
+      //  之下;入组后同层保序。
+      if (this._solarShieldEmitGL) {
+        const M = ctx.getTransform();
+        ctx.restore();
+        if (!this.armorQuad(this._solarShieldEmitGL!, e.src, 0, 0, e.tw, e.th, -e.tw / 2, -e.th / 2, e.tw, e.th,
+          M, SOLAR_SHIELD_ALPHA, false)) break;
+        continue;
+      }
       ctx.drawImage(e.src, -e.tw / 2, -e.th / 2);
       ctx.restore();
       // ★BJ676 mask 镜像（盾球=原版 DrawPlayer_26_SolarShield PlayerDrawLayers.cs
@@ -19515,6 +20753,9 @@ export class Renderer {
   private flushEyebrellaCloud(cam: Camera, z: number): void {
     if (!this.eyebrellaQueue.length) return;
     const ctx = this.ctx;
+    // ★覆盖审计翻案(2026-10-29):本面=纯 source-over(globalAlpha+drawImage 无
+    //  gCO)——SO 落透明 HUD=DOM 合成语义本正确,无黑晕,免折叠(刀A 保守加的
+    //  头折=白付折叠税,摘除;同族判语:lunarArmor/solarShield/lunarCovered)。
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     // ★BJ679 水罩镜像基座（眼球伞云盖=原版 PlayerDrawLayers.cs:4157
@@ -19525,6 +20766,15 @@ export class Renderer {
       const [sx, sy] = cam.worldToScreen(e.wx, e.wy);
       const w = e.cw * z, h = e.ch * z;
       const drawCopy = (ox: number, oy: number, mul: number) => {
+        // ★D1:眼球伞入组(SO,×z 缩放 dest)——2D 序中眼球伞(7519)画在 ②/arm glow
+        //  之上、鞭(7521)之下;入组后同层保序(鞭/狱火解门的前提)。
+        if (this._eyebrellaEmitGL) {
+          this._eyebrellaIdM ??= new DOMMatrix();   // 屏域绝对 dest=恒等基阵(只读)
+          if (!this.armorQuad(this._eyebrellaEmitGL!, e.src as TexImageSource, 0, 0, e.cw, e.ch,
+            sx + (ox * z) - w / 2, sy + (oy * z) - h / 2, w, h,
+            this._eyebrellaIdM, (100 / 255) * mul, false)) this._eyebrellaEmitFailed = true;
+          return;
+        }
         ctx.save();
         ctx.globalAlpha = (100 / 255) * mul;
         ctx.drawImage(e.src as CanvasImageSource,
@@ -19634,41 +20884,100 @@ export class Renderer {
     return this.hallowBake;
   }
 
-  /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布 */
+  /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布
+   *  ★任务#27（2026-10-27）:路由 bakeSliceCached（帧内缓存+池+恒等快路径,机制见
+   *  其块头注;?bakecache=0 逃生门=旧单槽 wingTintScratch 逐位路径）。 */
   private tintSlice(img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     tint: number, alphaMul: number): HTMLCanvasElement | null {
-    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
-    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
-    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-    sctx.clearRect(0, 0, sw, sh);
-    sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    if (tint < 0.999 || alphaMul < 0.999) {
-      const id = sctx.getImageData(0, 0, sw, sh);
-      for (let i = 0; i < id.data.length; i += 4) {
-        id.data[i] *= tint; id.data[i + 1] *= tint; id.data[i + 2] *= tint;
-        id.data[i + 3] *= alphaMul;
-      }
-      sctx.putImageData(id, 0, 0);
-    }
-    return sc;
+    return this.bakeSliceCached(img, sx, sy, sw, sh, [tint, tint, tint], alphaMul, null, null);
   }
 
-  /** 逐通道 RGB scratch（星璇 secondColor tint / extra38 光采样 tint 用） */
+  /** 逐通道 RGB scratch（星璇 secondColor tint / extra38 光采样 tint / 甲辉 bake-boost 用）
+   *  ★任务#27:路由 bakeSliceCached（同上）。 */
   private tintSliceRGB(img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     rgb: [number, number, number], alphaMul: number): HTMLCanvasElement | null {
-    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    return this.bakeSliceCached(img, sx, sy, sw, sh, rgb, alphaMul, null, null);
+  }
+
+  // ---- ★烘焙帧内缓存（任务#27,2026-10-27 常驻债热点#1 收口） ----
+  // 定谳（用户实机 trace --probe 调用栈归因,--digest 存档）:addScratch/tintSliceRGB/
+  // tintSlice 逐帧 CPU 重烘（clearRect+drawImage+getImageData+逐 texel 乘+putImageData）
+  // ≈68ms/s（0.57ms/帧）——两大调用族:drawWingOverlay（flushWingGlow 主绘 +
+  // escapeVeilStroke 水罩镜像【同帧同输入双烘】）与 flushArmorGlow（mtPulse 相位 tint
+  // 逐拍变）。刀三面,全部【精确等价】:
+  //  ① 恒等快路径:rgb≈[1,1,1]∧alphaMul≈1∧无染料 → 免 getImageData/逐 texel 乘/
+  //    putImageData,仅 drawImage 拷贝——Uint8Clamped x*1.0===x 全值域逐位（tests/
+  //    bake-slice-cache 全值域锚）;addScratch 此前【恒烘】（无 <0.999 门）=翼
+  //    selfAdd/glowAdd 常数 [1,1,1] 档的大头。
+  //  ② 帧内 key→池画布缓存:同帧同 key（源矩形+rgb 逐位+tint 通道+染料 vid+lit 态）
+  //    =同一画布复用——翼主绘/水罩镜像双烘减半（镜像同帧同 mc/fr/tint/uTime,输入
+  //    确定性=烘焙确定性:纯乘+SM2 染料字节码确定性）。BJ719-B 水罩 mask 语义:镜像
+  //    拍命中同键=拿同一画布（比旧「重烘同槽」更同）。
+  //  ③ 池画布帧首回池（上限 8,翼主/镜像+extra38+甲辉 bake/boost≈4-6 键/帧）=零稳态
+  //    分配;池画布非共享单槽 → 甲辉 bake/boost「两烘不得并行预持」约束天然解除
+  //    （各拿各的池画布,先画后烘序仍照旧兼容）。
+  // 逃生门 ?bakecache=0=旧单槽 wingTintScratch 路径逐位。BJ485 摘除登记沿用（烘→画
+  // 相邻即读,窗内零消费点）。 */
+  private _bakeCache = new Map<string, HTMLCanvasElement>();
+  private _bakePool: HTMLCanvasElement[] = [];
+  private _bakeFrame = -1;
+  /** ?bakecache=0 逃生门（node/测试域 URL 缺席恒开——测试可直驱 baker） */
+  private static bakeCacheOn = (() => {
+    try {
+      if (typeof location === 'undefined') return true;
+      return new URLSearchParams(location.search).get('bakecache') !== '0';
+    } catch { return true; }
+  })();
+
+  /** 烘焙核心（tintSlice/tintSliceRGB/addScratch/dyeScratch 统一入口）:
+   *  rgb×RGB + alphaMul×A,染料两型（dye 常规/ dyeLitTint 非空=extra38 lit 型带 tint）。 */
+  private bakeSliceCached(img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    rgb: readonly [number, number, number], alphaMul: number,
+    dye: DyeApply | null, dyeLitTint: readonly [number, number, number] | null): HTMLCanvasElement | null {
+    const identity = !dye && rgb[0] >= 0.999 && rgb[1] >= 0.999 && rgb[2] >= 0.999 && alphaMul >= 0.999;
+    // 逃生门:恒等支不受门约束（x*1===x 逐位数学事实,非行为面）;缓存/池受门
+    const useCache = Renderer.bakeCacheOn && !identity;
+    let key = '';
+    if (useCache) {
+      if (this._bakeFrame !== this._diagFrame) {   // 帧首:清表回池
+        this._bakeFrame = this._diagFrame;
+        for (const c of this._bakeCache.values()) this._bakePool.push(c);
+        this._bakeCache.clear();
+      }
+      key = bakeKeyOf(img, sx, sy, sw, sh, rgb, alphaMul, dye, dyeLitTint);
+      const hit = this._bakeCache.get(key);
+      if (hit) return hit;
+    }
+    // 烘焙目标画布:缓存路径=池取;逃生/恒等=共享单槽（旧语义）
+    let sc: HTMLCanvasElement;
+    if (useCache) {
+      sc = this._bakePool.pop() ?? document.createElement('canvas');
+      if (this._bakePool.length > 8) this._bakePool.length = 8;   // 池上限守门(异常帧防爆)
+    } else {
+      sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    }
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
     const sctx = sc.getContext('2d', { willReadFrequently: true })!;
     sctx.clearRect(0, 0, sw, sh);
     sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    if (rgb[0] < 0.999 || rgb[1] < 0.999 || rgb[2] < 0.999 || alphaMul < 0.999) {
+    if (!identity) {
       const id = sctx.getImageData(0, 0, sw, sh);
       for (let i = 0; i < id.data.length; i += 4) {
         id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
         id.data[i + 3] *= alphaMul;
       }
+      if (dye) {
+        if (dyeLitTint !== null) {
+          this.applyDyeLitToImageData(id.data, sw, sh, dye, dyeLitTint as [number, number, number],
+            { sx, sy, sheetW: img.width, sheetH: img.height });
+        } else {
+          this.applyDyeToImageData(id.data, sw, sh, dye,
+            { sx, sy, sheetW: img.width, sheetH: img.height });
+        }
+      }
       sctx.putImageData(id, 0, 0);
     }
+    if (useCache) this._bakeCache.set(key, sc);
     return sc;
   }
 
@@ -20428,6 +21737,10 @@ export class Renderer {
     const atlas = this.atlas;
     if (!atlas || !d.overlay) return;
     const ctx = tgt ?? this.ctx;
+    // ★折叠下沉位(2026-29):overlay='lighter' glowAdd 族=黑晕源——本位按需折
+    //  (主纹理纯 SO 翼不达此=免折;tgt 镜像支不折——mask 画布自含底)。
+    //  ★五面桥(同日):armed='lighter' 位已入组、余 case 全 SO=HUD 侧零黑晕,免折。
+    if (!tgt && !this._wingEmitGL) this.c10eCompositeIntoHud();
     const notGrappling = !p.grappleProjs.some((g) => g.latched);
     const ov = d.overlay;
     const slice = (file: string) => {
@@ -20436,25 +21749,12 @@ export class Renderer {
       const fh = Math.floor(img.height / d.frames);
       return { img, fh, sy: fr * fh, sw: img.width, sh: fh };
     };
-    /** tintSlice + 染料折叠（cWings 对全部叠画 DrawData 生效，:699/:722 等同绑） */
+    // ★任务#27:染料并入 bakeSliceCached 单次读回（旧=tintSlice 读回+染料再读回
+    //  双程,任务#27 归并）;BJ485 摘除登记迁移后仍成立（烘→画相邻即读,窗内零消费
+    //  点,tests/bj485-dead-registration-sweep）。
     const dyeScratch = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
-      tint: number): HTMLCanvasElement | null => {
-      const sc = this.tintSlice(img, sx, sy, sw, sh, tint, 1);
-      if (sc && dye) {
-        const c = sc.getContext('2d', { willReadFrequently: true })!;
-        const id = c.getImageData(0, 0, sw, sh);
-        this.applyDyeToImageData(id.data, sw, sh, dye,
-          { sx, sy, sheetW: img.width, sheetH: img.height });
-        c.putImageData(id, 0, 0);
-      }
-      // ★BJ485（2026-10-03 定谳摘除登记）:drawWingOverlay 唯一调用方=flushWingGlow
-      //  （render 7e,compositeLight finishAccFrame 收口之后）恒 raw 主画布 2D——
-      //  uploadScratchNow 窗关自判 no-op,wingTintScratch 亦无 shim 窗内 drawImage
-      //  （:15052 翼案约束:本槽仅限窗外消费者）=登记零消费点零收益;raw 2D 烘→画
-      //  相邻,drawImage 即时读当前字节,本就正确。tests/bj485-dead-registration-sweep。
-      //  （旧「变体① flush 期读末次字节」前提=blit 被桥接,不成立——同 bv 判。）
-      return sc;
-    };
+      tint: number): HTMLCanvasElement | null =>
+      this.bakeSliceCached(img, sx, sy, sw, sh, [tint, tint, tint], 1, dye, null);
     /** 纯加色 scratch（Color(255³,0)·f 族——A=0 预乘 = 纯加色，StringLine.ts 同法）：
      *  ★BJ719-A（2026-10-25 用户实报「星尘之翼入水出现蓝色矩形影」定谳）：保形
      *  RGB×tint（原 alpha 原样保留）'lighter' 单笔——贡献=tex.rgb×tex.a×f = XNA
@@ -20467,24 +21767,13 @@ export class Renderer {
      *  探针 _bj719a-wing-veil.mjs：修前 mask n255=6072/nSemi=0 全矩形,修后=形状）。
      *  消费面 29 selfAdd/31 nebula（Wings 二值 α）/32 glowAdd（Glow_183 半透明）
      *  三站一刀全修。 */
+    // ★任务#27（2026-10-27）:路由 bakeSliceCached——恒等快路径（[1,1,1]∧无染料=免
+    // 读回,x*1===x 逐位——addScratch 旧实现【恒烘】无 <0.999 门,翼 selfAdd/glowAdd
+    // 常数档的大头）+帧内缓存（翼主绘/水罩镜像同帧同输入双烘→单烘）。BJ719-A
+    // alpha 不摊平语义在 baker 体内原样保留（乘 RGB 不动 A）;染料并入单次读回。
     const addScratch = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
-      rgb: [number, number, number]): HTMLCanvasElement | null => {
-      const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
-      if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
-      const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-      sctx.clearRect(0, 0, sw, sh);
-      sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-      const id = sctx.getImageData(0, 0, sw, sh);
-      for (let i = 0; i < id.data.length; i += 4) {
-        id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
-        // ★BJ719-A：alpha 不摊平（保形——透明域贡献 0；摊平会污染水罩 mask 成全矩形）
-      }
-      if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
-        { sx, sy, sheetW: img.width, sheetH: img.height });
-      sctx.putImageData(id, 0, 0);
-      // ★BJ485:登记摘除（窗外零消费点,判据见 dyeScratch 支锚注）
-      return sc;
-    };
+      rgb: [number, number, number]): HTMLCanvasElement | null =>
+      this.bakeSliceCached(img, sx, sy, sw, sh, rgb, 1, dye, null);
     switch (ov.kind) {
       case 'selfAdd':
       case 'glowAdd': {  // 29 自身切片 / 32 Glow_183：A=0 预乘 = 纯加色 'lighter' ×1.06
@@ -20497,6 +21786,11 @@ export class Renderer {
         if (!sc) return;
         const f = (ov.stealthSq ? settled * settled : settled) * (1 - 0);   // ×(1−shadow)
         const k = ov.scale ?? 1;             // 1.06 放大（origin=Size/2 随 scale）
+        if (this._wingEmitGL && !tgt) {
+          this.wingQuad(sc, 0, 0, s.sw, s.sh, -s.sw * k / 2, -s.sh * k / 2, s.sw * k, s.sh * k,
+            ctx.getTransform(), f * ((ov.alpha ?? 255) / 255));
+          break;
+        }
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = f * ((ov.alpha ?? 255) / 255);
@@ -20519,6 +21813,16 @@ export class Renderer {
         // 轨道半径 r = cos(2π·mc/60)·0.5+0.5 ∈ [0,1]；vector22 = (r,0).RotatedBy(n·π/2)
         // ——世界空间偏移（原版未 ×direction）→ 镜像空间局部 X 反补偿 facing
         const r = Math.cos(Math.PI * 2 * (p.miscCounter / 60)) * 0.5 + 0.5;
+        if (this._wingEmitGL && !tgt) {
+          const M = ctx.getTransform();
+          for (let n = 0; n < 4; n++) {
+            const ang = n * Math.PI / 2;
+            const dx = r * Math.cos(ang) * p.facing, dy = r * Math.sin(ang);
+            if (!this.wingQuad(sc, 0, 0, s.sw, s.sh, dx - s.sw / 2, dy - s.sh / 2, s.sw, s.sh, M, f * 0.5)) break;
+          }
+          this.wingQuad(sc, 0, 0, s.sw, s.sh, -s.sw / 2, -s.sh / 2, s.sw, s.sh, M, f);
+          break;
+        }
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
         for (let n = 0; n < 4; n++) {
@@ -20590,21 +21894,13 @@ export class Renderer {
         //   White,0.5) 即 v0 本体（:713-722），tint 预乘会把光照喂进 s0 采样面
         //   （v0 中段非线性消费下 两序不等，见 fx-sm2-v0-commute）。非受累 tech
         //   两序逐位等价（尾乘族），维持旧链零变化。
+        // ★任务#27:tint+染料并入 bakeSliceCached 单次读回（旧=tintSliceRGB 读回+
+        //  染料再读回双程;序=乘→染,与旧逐位同——旧第二程 getImageData 读的正是
+        //  乘后字节）。lit 型染料带 tint 入参（applyDyeLitToImageData 消费）。
         const litDye = dye !== null && isV0MidTech(dye.tech);
-        const sc = this.tintSliceRGB(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, litDye ? [1, 1, 1] : tint, 1);
+        const sc = this.bakeSliceCached(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2,
+          litDye ? [1, 1, 1] : tint, 1, dye, litDye ? tint : null);
         if (sc) {
-          if (dye) {
-            const c38 = sc.getContext('2d', { willReadFrequently: true })!;
-            const id38 = c38.getImageData(0, 0, s.sw - 2, s.sh - 2);
-            if (litDye) {
-              this.applyDyeLitToImageData(id38.data, s.sw - 2, s.sh - 2, dye, tint,
-                { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
-            } else {
-              this.applyDyeToImageData(id38.data, s.sw - 2, s.sh - 2, dye,
-                { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
-            }
-            c38.putImageData(id38, 0, 0);
-          }
           // ★BJ485:登记摘除（窗外零消费点,判据见 dyeScratch 支锚注）
           ctx.save();
           ctx.globalAlpha = imA;
@@ -25149,6 +26445,10 @@ export class Renderer {
    *  ——纹理【发射前】全量预验,begin 后零失败面）。零 glow 帧=免开会话（比 2D
    *  路径还省 save/restore）。 */
   private _coatGlowTex = new Map<string, { src: HTMLCanvasElement; e: TexEntry }>();
+  /** ★gladd 面③:本帧 GL 会话结果（null=失败/旗关走 2D;非 null=已发射,7-shine 段 2D 跳过）
+   *  GLSpriteLayer|null 与「失败」的区分:drawTileShineAdditiveGL 返回 gl(成功含 empty)|
+   *  null(失败)。empty 档返回 gl 但零发射——2D 同样应跳过（零 add 层=无内容可画）。 */
+  private _shineAddGl: GLSpriteLayer | null = null;
   /** 探针面（?gladd=1 验收）:gl=会话发射（含零 glow 空)）/empty=零 glow 免开/fb=回 2D */
   gladdCoatStats = { gl: 0, empty: 0, fb: 0 };
   private drawCoatGlowGridGL(
@@ -25217,6 +26517,1593 @@ export class Renderer {
     gl.end(true, true);   // over present:推屏栈+premul-SO 叠合 glCanvas（bg<world<coatglow）
     this.gladdCoatStats.gl++;
     return gl;
+  }
+
+  /** ★gladd Phase 1 面③（2026-10-28,task#22）:tileShine +0.39 平加层 GL 会话桥——
+   *  drawTileShineAdditive 的 quadBatchRgba 直出版。面①孪生结构（chunk 网格/设备
+   *  矩形逐字同式）;差异仅混合语义:2D 'lighter'×α1 对 opaque 垫底无衰减 ↔ GL
+   *  blendAdditive+premul vCol=(1,1,1,【α=0 纯加法习语】)——over-present 域带真 α
+   *  的加算会把 glCanvas 世界按 (1−α) 衰减（面②亮场景缺口翻案判例）;α=0 over
+   *  合成=rgb 纯加+dst α 零触碰 ≙ 2D 'lighter'（HUD α 抬升在 opaque 垫底无观感）。
+   *  纹理键 `shineadd:cx:cy`:源=e.add 画布（shineCache 烘焙产物,重烘新建画布=
+   *  身份即版本号,与 coatglow 同纪律——texFromImage 键命中不刷新,身份变→
+   *  texRefresh 重传;add 层消失=drop 防泄漏）。失败面/会话序/验收纪律全同面①
+   *  （预验后零失败面;end(true,true) over present 推屏栈,后续垫底 drawImage
+   *  (glCanvas) 收编——调用点在 ①② 同块=同一屏栈态,收集语义已验）。 */
+  private _shineAddTex = new Map<string, { src: HTMLCanvasElement; e: TexEntry }>();
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零 add 层免开/fb=回 2D */
+  gladdShineStats = { gl: 0, empty: 0, fb: 0 };
+  private drawTileShineAdditiveGL(
+    chunks: ChunkCache, cam: Camera, world: World, viewW: number, viewH: number, z: number,
+  ): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdShineStats.fb++; return null; }
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const wKg = this._worldLowK || 1;
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
+    const zz = z * wKg;
+    const bx0 = Math.floor((cam.x - viewW / 2 / z) / (CHUNK * TILE)) - 1;
+    const bx1 = Math.floor((cam.x + viewW / 2 / z) / (CHUNK * TILE)) + 1;
+    const by0 = Math.floor((cam.y - viewH / 2 / z) / (CHUNK * TILE)) - 1;
+    const by1 = Math.floor((cam.y + viewH / 2 / z) / (CHUNK * TILE)) + 1;
+    const S = CHUNK * TILE;
+    // ① 选集+纹理预验（发射前全量——B2b 判例;设备矩形与 2D/面① 同式逐字）
+    const plans: Array<{ e: TexEntry; xd0: number; yd0: number; dw: number; dh: number }> = [];
+    for (let cy = by0; cy <= by1; cy++) {
+      for (let cx = bx0; cx <= bx1; cx++) {
+        if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
+        const key = `shineadd:${cx}:${cy}`;
+        const add = shineAddLayerOf(chunks.get(cx, cy));
+        if (!add) {
+          if (this._shineAddTex.has(key)) {   // add 层消失（Gemspark 格被挖）:drop 防泄漏
+            gl.dropTexture(key);
+            this._shineAddTex.delete(key);
+          }
+          continue;
+        }
+        let t = this._shineAddTex.get(key);
+        if (!t || t.src !== add) {
+          const e = t ? gl.texRefresh(key, add) : gl.texFromImage(key, add, false, true);
+          if (!e) { this.gladdShineStats.fb++; return null; }
+          t = { src: add, e };
+          this._shineAddTex.set(key, t);
+        } else if (!gl.texAlive(t.e)) {   // LRU 逐出/层重建:重传自愈
+          const e = gl.texRefresh(key, add);
+          if (!e) { this.gladdShineStats.fb++; return null; }
+          t = { src: add, e };
+          this._shineAddTex.set(key, t);
+        }
+        const xd0 = ox + Math.round((cx * CHUNK * TILE - camRX) * zz);
+        const yd0 = oy + Math.round((cy * CHUNK * TILE - camRY) * zz);
+        const xd1 = ox + Math.round(((cx + 1) * CHUNK * TILE - camRX) * zz);
+        const yd1 = oy + Math.round(((cy + 1) * CHUNK * TILE - camRY) * zz);
+        const dw = xd1 - xd0, dh = yd1 - yd0;
+        if (dw <= 0 || dh <= 0) continue;   // 2D 同款退化矩形（round 重合）=不可见
+        plans.push({ e: t.e, xd0, yd0, dw, dh });
+      }
+    }
+    if (!plans.length) { this.gladdShineStats.empty++; return gl; }   // 零 add 层:免开会话
+    // ② 会话+发射（预验后零失败面;quadBatchRgba 假=防御支,end(false) 弃 FBO 回 2D）
+    gl.begin('shineadd');
+    if (gl.unavailable) { this.gladdShineStats.fb++; return null; }
+    const vd = new Float32Array(48);   // 6 顶点 × 8 float（x,y,u,v,r,g,b,a）——面②同 stride
+    for (const pl of plans) {
+      // 角点=轴对齐设备矩形;uv=全跨度(纹理即 e.add 整幅);vCol=(1,1,1,α=0 纯加)
+      const { xd0: x0, yd0: y0, dw, dh } = pl;
+      const x1 = x0 + dw, y1 = y0 + dh;
+      const V = [x0, y0, 0, 0, x1, y0, 1, 0, x1, y1, 1, 1, x0, y0, 0, 0, x1, y1, 1, 1, x0, y1, 0, 1];
+      for (let i = 0; i < 6; i++) {
+        vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1];
+        vd[i * 8 + 2] = V[i * 4 + 2]; vd[i * 8 + 3] = V[i * 4 + 3];
+        vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 0;
+      }
+      const ok = this.gladdQuadEmit(gl, pl.e, vd, true, false);   // ★刀2:合批
+      if (!ok) {
+        gl.end(false);
+        this.gladdShineStats.fb++;
+        return null;
+      }
+    }
+    gl.end(true, true);   // over present:推屏栈+加算叠合 glCanvas（面①同收集语义）
+    this.gladdShineStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面④（2026-10-28,task#22）:晨昏镜头光斑 GL 会话桥——
+   *  sky.drawWorldFx 的 quadBatchRgba 直出版。收集器=sky.worldFxFrame（单源,采样
+   *  副作用内含=两路径恒等;GL 失败回落 2D 重放 worldFxFrame 幂等——采样读 store
+   *  不读画布）。差异面 vs ③:元素=【仿射角点】（translate(px,py)·rotate(θ)·
+   *  (±w/2,±h/2)——面②判例:rotate 非均匀禁 quadSprite 分解,角点全仿射）;强度=
+   *  vCol.rgb=(α,α,α)（2D globalAlpha 缩放预乘源 rgb）+vCol.a=0 纯加习语（③判例:
+   *  over-present 域带真 α 会衰减 glCanvas 世界）;smooth=true（2D 侧
+   *  imageSmoothingEnabled=true 对应 LINEAR——③ 2D 侧平滑关=其 smooth 缺省 false）。
+   *  纹理键 `flare:<tintKey>`（tint 缓存键 texId|rgb,非画布对象——tintedFlareSprite
+   *  池化画布可被回收重写;src 身份比对+换代 texRefresh,③同纪律）。采样序=混合
+   *  输入面只读 store/sunScreen/sunVisibility（sky.draw 早帧已定）,早调(①②③ 块)
+   *  与 2D 位(7164)恒等。层序登记:GL 序光斑在 shine/voidlens/moonlord 2D 面之下、
+   *  2D 序在其上——纯加面可交换=逐位（面②层序登记同判语）;over 支重叠域微差=
+   *  受控场景无重叠。失败面/会话序/验收纪律全同①③（预验后零失败面;end(true,true)
+   *  over present 推屏栈,后续垫底 drawImage(glCanvas) 收编——①②③同块同屏栈态）。 */
+  private _flareTex = new Map<string, { src: HTMLCanvasElement; e: TexEntry }>();
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零光斑免开/fb=回 2D */
+  gladdFlareStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面④:本帧 GL 会话结果（null=失败/旗关走 2D;非 null=已发射,7164 位
+   *  2D 跳过——帧界单消费同③）。 */
+  private _flareGl: GLSpriteLayer | null = null;
+  private drawWorldFxGL(cam: Camera, viewW: number, viewH: number, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdFlareStats.fb++; return null; }
+    const quads = this.sky.worldFxFrame(cam.x, cam.y, z, viewW, viewH);
+    if (!quads || !quads.length) { this.gladdFlareStats.empty++; return gl; }   // 零光斑:免开会话
+    // ① 纹理预验（发射前全量——B2b 判例;tintKey 键+src 身份比对——池化画布回收重
+    //    烘=新对象→失配→texRefresh 重传;LRU 逐出/层重建=texAlive 自愈）
+    const plans: Array<{ e: TexEntry; q: FlareQuad }> = [];
+    for (const q of quads) {
+      const key = `flare:${q.tintKey}`;
+      let t = this._flareTex.get(key);
+      if (!t || t.src !== q.sprite) {
+        // ★noMip=true(实测判例:LINEAR 更近 2D Skia——mipmap 三线 GA 差 15010px
+        //  vs LINEAR 6804px,Skia 中度缩放(0.24-1×)走双线性支而非盒式;④残差
+        //  归属 census 另定谳);③的 1:1 chunk 画布同 noMip=true。
+        const e = t ? gl.texRefresh(key, q.sprite) : gl.texFromImage(key, q.sprite, false, true);
+        if (!e) { this.gladdFlareStats.fb++; return null; }
+        t = { src: q.sprite, e };
+        this._flareTex.set(key, t);
+      } else if (!gl.texAlive(t.e)) {
+        const e = gl.texRefresh(key, q.sprite);
+        if (!e) { this.gladdFlareStats.fb++; return null; }
+        t = { src: q.sprite, e };
+        this._flareTex.set(key, t);
+      }
+      plans.push({ e: t.e, q });
+    }
+    // ② 会话+发射（预验后零失败面;quadBatchRgba 假=防御支,end(false) 弃 FBO 回 2D）
+    gl.begin('flare');
+    if (gl.unavailable) { this.gladdFlareStats.fb++; return null; }
+    const vd = new Float32Array(48);   // 6 顶点 × 8 float——③同 stride
+    for (const pl of plans) {
+      // 角点=translate·rotate·(±hw,±hh) 与 2D 变换栈逐位同式;uv=(dx/w+0.5,dy/h+0.5)
+      const { x, y, w, h, rot, alpha } = pl.q;
+      const c = Math.cos(rot), s = Math.sin(rot);
+      const hw = w / 2, hh = h / 2;
+      const corner = (dx: number, dy: number): [number, number, number, number] => [
+        x + dx * c - dy * s, y + dx * s + dy * c, dx / w + 0.5, dy / h + 0.5,
+      ];
+      const V = [
+        corner(-hw, -hh), corner(hw, -hh), corner(hw, hh),
+        corner(-hw, -hh), corner(hw, hh), corner(-hw, hh),
+      ];
+      for (let i = 0; i < 6; i++) {
+        vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+        vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+        vd[i * 8 + 4] = alpha; vd[i * 8 + 5] = alpha; vd[i * 8 + 6] = alpha; vd[i * 8 + 7] = 0;
+      }
+      const ok = this.gladdQuadEmit(gl, pl.e, vd, true, true);   // ★刀2:合批(smooth=2D 平滑开)
+      if (!ok) {
+        gl.end(false);
+        this.gladdFlareStats.fb++;
+        return null;
+      }
+    }
+    gl.end(true, true);   // over present:推屏栈+加算叠合 glCanvas（①同收集语义）
+    this.gladdFlareStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑤（2026-10-28,task#22）:LitNature 晨昏光晕 GL 会话桥——
+   *  2D 面（7a'' 位 createRadialGradient+fillRect）的直出版。渐变=【径向线性
+   *  falloff×常色】——静态烘焙 512² 白色径向纹理(r=256,stop1→0 与 2D 同两档),
+   *  消费=外接矩形 quad（圆外零贡献=fillRect 全屏等价）,vCol.rgb=(1,206/255,
+   *  130/255)×强度+vCol.a=0 纯加习语（③④判例）。门四件（litVis/屏顶地表线/
+   *  occlReady/occl）与 2D 位逐字同源。smooth=true（2D 渐变平滑↔LINEAR）。 */
+  private _litNatureBake: HTMLCanvasElement | null = null;
+  private _litNatureTex: { e: TexEntry } | null = null;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=门关免开/fb=回 2D */
+  gladdLitStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑤:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射)。 */
+  private _litNatureGl: GLSpriteLayer | null = null;
+  private litNatureBakeTex(gl: GLSpriteLayer): TexEntry | null {
+    if (this._litNatureTex && gl.texAlive(this._litNatureTex.e)) return this._litNatureTex.e;
+    if (!this._litNatureBake) {
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 512;
+      const x = c.getContext('2d')!;
+      const g = x.createRadialGradient(256, 256, 0, 256, 256, 256);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = g;
+      x.fillRect(0, 0, 512, 512);
+      this._litNatureBake = c;
+    }
+    const e = this._litNatureTex
+      ? gl.texRefresh('litnature:radial', this._litNatureBake)
+      : gl.texFromImage('litnature:radial', this._litNatureBake, false, true);
+    if (!e) return null;
+    this._litNatureTex = { e };
+    return e;
+  }
+  private drawLitNatureGL(clock: Clock, cam: Camera, viewW: number, viewH: number,
+    z: number, world: World): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdLitStats.fb++; return null; }
+    // 门四件（2D 位 7187-7192 逐字同源）
+    const litVis = litNatureVisibility(clock);
+    if (litVis <= 0.003) { this.gladdLitStats.empty++; return gl; }
+    const screenTopY = cam.y - viewH / 2 / z;
+    if (!(screenTopY / TILE < world.groundLevel + 2 && this.sky.sunOcclusionReady
+      && this.sky.sunOcclusion > 0.003)) { this.gladdLitStats.empty++; return gl; }
+    const occ = this.sky.sunOcclusion;
+    const ft = ((clock.timeOfDay - 0.1875) / 0.625);   // =Main.time/54000(★时基校正)
+    const sunX = Math.max(0, Math.min(1, ft)) * viewW;
+    const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+    const sunY = dip * 250 + 180;
+    const r = viewW * 0.55;
+    const a = litVis * occ * 0.85;
+    if (a <= 0.003) { this.gladdLitStats.empty++; return gl; }
+    const e = this.litNatureBakeTex(gl);
+    if (!e) { this.gladdLitStats.fb++; return null; }
+    gl.begin('litnature');
+    if (gl.unavailable) { this.gladdLitStats.fb++; return null; }
+    const vd = new Float32Array(48);   // 6 顶点 × 8 float——③④同 stride
+    const x0 = sunX - r, x1 = sunX + r, y0 = sunY - r, y1 = sunY + r;
+    const V = [x0, y0, 0, 0, x1, y0, 1, 0, x1, y1, 1, 1, x0, y0, 0, 0, x1, y1, 1, 1, x0, y1, 0, 1];
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1];
+      vd[i * 8 + 2] = V[i * 4 + 2]; vd[i * 8 + 3] = V[i * 4 + 3];
+      vd[i * 8 + 4] = a; vd[i * 8 + 5] = (206 / 255) * a; vd[i * 8 + 6] = (130 / 255) * a; vd[i * 8 + 7] = 0;
+    }
+    const ok = this.gladdQuadEmit(gl, e, vd, true, true);   // ★刀2:合批
+    if (!ok) { gl.end(false); this.gladdLitStats.fb++; return null; }
+    gl.end(true, true);   // over present（③④同收集语义）
+    this.gladdLitStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑥（2026-10-28,task#22）:虚空透镜补差+回声 GL 会话桥——
+   *  烘焙上传制(㉚判例:canvas multiply 混合域带 α 边缘项,直采 premul×vCol 不
+   *  等价——GA n=770/maxΔ=91 实证):逐 comp/echo 用【与 2D 逐字同款】烘焙链
+   *  (sprite→multiply tint→dest-in)烤进 _voidLensCompScratch,texRefresh 上传
+   *  (上传=像素拷贝,后续重烤不影响已传),quad vCol=(scale,scale,scale,0) 1:1
+   *  整数采样——烘焙内容即 2D 贡献本体=构造性逐位。scratch 禁经 markDynamic/
+   *  uploadScratchNow(HUD 蒸发判例 :24916 注)——直接 GLSpriteLayer 上传即安全。
+   *  逐帧内容恒变=恒 texRefresh(小画布 ~41×55×2/库/帧,廉价)。成功即排空收集
+   *  表=2D 位零重放;失败不排空→2D flushVoidLensComplements 原位重放兜底(收集
+   *  表=唯一消费账)。 */
+  private _vlensTex = new Map<string, { e: TexEntry; w: number; h: number }>();   // ★烘焙上传制:键=槽位串
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零收集免开/fb=回 2D */
+  gladdVLensStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑥:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射+已排空)。 */
+  private _vlensGl: GLSpriteLayer | null = null;
+  private drawVoidLensGL(): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdVLensStats.fb++; return null; }
+    const comps = this._voidLensComps;
+    const echoes = this._voidLensEchoComps;
+    if (!comps.length && !echoes.length) { this.gladdVLensStats.empty++; return gl; }
+    const scr = this._voidLensCompScratch ??= (typeof document !== 'undefined'
+      ? document.createElement('canvas') : null);
+    const sc = scr?.getContext('2d') ?? null;
+    if (!scr || !sc) { this.gladdVLensStats.fb++; return null; }
+    const bake = (img: CanvasImageSource, sx: number, sy: number,
+      dw: number, dh: number, cr: number, cg: number, cb: number): void => {
+      if (scr.width !== dw || scr.height !== dh) { scr.width = dw; scr.height = dh; }
+      else {
+        sc.globalCompositeOperation = 'source-over';
+        sc.clearRect(0, 0, dw, dh);
+      }
+      sc.imageSmoothingEnabled = false;
+      sc.globalCompositeOperation = 'source-over';
+      sc.drawImage(img, sx, sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, dw, dh);
+      sc.globalCompositeOperation = 'multiply';
+      sc.fillStyle = `rgb(${cr},${cg},${cb})`;
+      sc.fillRect(0, 0, dw, dh);
+      sc.globalCompositeOperation = 'destination-in';
+      sc.drawImage(img, sx, sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, dw, dh);
+      sc.globalCompositeOperation = 'source-over';
+    };
+    gl.begin('vlens');
+    if (gl.unavailable) { this.gladdVLensStats.fb++; return null; }
+    const vd = new Float32Array(48);   // 6 顶点 × 8 float——③④⑤同 stride
+    let failed = false;
+    let slot = 0;
+    const emitSlot = (x0raw: number, y0raw: number, dw: number, dh: number, scale: number): boolean => {
+      // ★半像素刀(㉜)+㊿-2 勘正(2026-10-29 ⑥根因收官):xd=整数−dw/2 在 dw 奇数
+      //  (echo dw2=37)时含 .5——2D drawImage 落分数位=Skia【几何边缘 AA】(50% 混合
+      //  边带),GL 硬 quad 只能取整侧(floor=最近半,实测 369px<round 593<raw 453)
+      //  =结构性不可复现(0.4α 紫辉边缘±半 texel,不可感)——⑥ 闸按 census 结构族
+      //  收容(④⑧ tie 判例同型);comps 整数位两式恒等零影响。
+      const x0 = Math.floor(x0raw), y0 = Math.floor(y0raw);
+      const key = `vlens:slot${slot++}`;
+      let t = this._vlensTex.get(key);
+      const e = t ? gl.texRefresh(key, scr) : gl.texFromImage(key, scr, false, true);
+      if (!e) return false;
+      if (!t) { t = { e, w: dw, h: dh }; this._vlensTex.set(key, t); }
+      const x1 = x0 + dw, y1 = y0 + dh;
+      const V = [x0, y0, 0, 0, x1, y0, 1, 0, x1, y1, 1, 1, x0, y0, 0, 0, x1, y1, 1, 1, x0, y1, 0, 1];
+      for (let i = 0; i < 6; i++) {
+        vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1];
+        vd[i * 8 + 2] = V[i * 4 + 2]; vd[i * 8 + 3] = V[i * 4 + 3];
+        vd[i * 8 + 4] = scale; vd[i * 8 + 5] = scale; vd[i * 8 + 6] = scale; vd[i * 8 + 7] = 0;
+      }
+      return this.gladdQuadEmit(gl, e, vd, true, false);   // ★刀2:合批(1:1 整数位 NEAREST)
+    };
+    for (const c of comps) {
+      const [cr, cg, cb] = voidLensComplementTint([c.lr, c.lg, c.lb]);
+      if (cr + cg + cb === 0) continue;
+      bake(c.img, c.sx, c.sy, c.dw, c.dh, cr, cg, cb);
+      if (!emitSlot(c.xd, c.yd, c.dw, c.dh, 1)) { failed = true; break; }
+    }
+    if (!failed) {
+      for (const e of echoes) {
+        bake(e.img, e.sx, e.sy, e.dw2, e.dh2, 127, 50, 127);
+        for (let i = 0; i < e.exs.length; i++) {
+          if (!emitSlot(e.exs[i]!, e.eys[i]!, e.dw2, e.dh2, e.alpha)) { failed = true; break; }
+        }
+        if (failed) break;
+      }
+    }
+    if (failed) {
+      gl.end(false);   // 弃 FBO——收集表【未排空】=2D 原位重放兜底
+      this.gladdVLensStats.fb++;
+      return null;
+    }
+    gl.end(true, true);   // over present（③④⑤同收集语义）
+    comps.length = 0;   // ★成功即排空（2D 位零重放;唯一消费账语义）
+    echoes.length = 0;
+    this.gladdVLensStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑦（2026-10-28,task#22）:月总 30% 白斜坡补差 GL 会话桥——
+   *  ⑥烘焙上传制【sink 式零复制】:本面无收集表(直接循环绘制)——驱动器武装
+   *  _mlFloorEmitGL sink,applyMoonLordLightFloor 的尾段 blit 分支化(有 sink=上传
+   *  +quad vCol=(1,1,1,0) 整数 1:1——差值色已烘进画布,与 2D 'lighter' blit 逐位;
+   *  无 sink=原 ctx.drawImage 逐字),烘焙循环(掩膜快照/ctx 交换/世界变换)单源
+   *  共用=零复制漂移。失败=失败旗+弃 FBO,2D 位原样重放(烘焙幂等)。fullbright
+   *  门/部件过滤(396/397/398/400)/RAD 剔除在共用循环内逐字同源。 */
+  private _mlFloorTex = new Map<string, { e: TexEntry }>();
+  private _mlFloorEmitGL: GLSpriteLayer | null = null;
+  private _mlFloorEmitFailed = false;
+  private _mlFloorSlot = 0;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零部件免开/fb=回 2D */
+  gladdMLFloorStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑦:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射)。 */
+  private _mlFloorGl: GLSpriteLayer | null = null;
+  private drawMoonLordFloorGL(
+    entities: Entity[], cam: Camera, viewW: number, viewH: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdMLFloorStats.fb++; return null; }
+    if (this.fullbright) { this.gladdMLFloorStats.empty++; return gl; }   // 2D 位同门
+    const parts = (entities as Enemy[]).filter((n) => n instanceof Enemy && !n.dead
+      && (n.vanillaId === 396 || n.vanillaId === 397 || n.vanillaId === 398 || n.vanillaId === 400));
+    if (!parts.length) { this.gladdMLFloorStats.empty++; return gl; }
+    gl.begin('mlfloor');
+    if (gl.unavailable) { this.gladdMLFloorStats.fb++; return null; }
+    this._mlFloorSlot = 0;
+    this._mlFloorEmitGL = gl;
+    this._mlFloorEmitFailed = false;
+    let ok = true;
+    try {
+      this.applyMoonLordLightFloor(entities, cam, viewW, viewH, lightR, lightG, lightB, lrx, lry, lrw, lrh);
+      ok = !this._mlFloorEmitFailed;
+    } finally {
+      this._mlFloorEmitGL = null;
+      this._mlFloorEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);   // 弃 FBO——2D 位原样重放(烘焙幂等)
+      this.gladdMLFloorStats.fb++;
+      return null;
+    }
+    gl.end(true, true);   // over present（③④⑤⑥同收集语义）
+    this.gladdMLFloorStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑧（2026-10-28,task#22）:食人怪茎蔓下限色 GL 会话桥——⑦
+   *  sink 式同型:驱动器武装 _bvineEmitGL,drawBrightVines 逐段 blit 分支化(有
+   *  sink=段烘焙 texRefresh 上传+旋转仿射 quad vCol=(1,1,1,0)——下限色已 source-
+   *  atop 烘进 scratch;④仿射角点同式,旋转非均匀=census tie 族预登记;水罩
+   *  _veilActive 活跃时置失败旗降级整面 2D(escapeVeil 镜像=2D 专属子系统,
+   *  保守回退)。烘焙循环(链段步进/source-atop 染色)单源共用零复制。 */
+  private _bvineTex = new Map<string, { e: TexEntry }>();
+  private _bvineEmitGL: GLSpriteLayer | null = null;
+  private _bvineEmitFailed = false;
+  private _bvineSlot = 0;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零藤免开/fb=回 2D */
+  gladdBVineStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑧:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射)。 */
+  private _bvineGl: GLSpriteLayer | null = null;
+  private drawBrightVinesGL(
+    entities: Entity[], cam: Camera, z: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdBVineStats.fb++; return null; }
+    const vines = (entities as Enemy[]).filter(
+      (n) => n instanceof Enemy && !n.dead
+        && (n.vanillaId === 259 || n.vanillaId === 260) && n.ai0 >= 0 && n.ai1 >= 0);
+    if (!vines.length || !this.atlas) { this.gladdBVineStats.empty++; return gl; }
+    gl.begin('bvine');
+    if (gl.unavailable) { this.gladdBVineStats.fb++; return null; }
+    this._bvineSlot = 0;
+    this._bvineEmitGL = gl;
+    this._bvineEmitFailed = false;
+    let ok = true;
+    try {
+      this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lrx, lry, lrw, lrh);
+      ok = !this._bvineEmitFailed;
+    } finally {
+      this._bvineEmitGL = null;
+      this._bvineEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);
+      this.gladdBVineStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdBVineStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑩（2026-10-28,task#22）:FadingParticles GL 会话桥——⑦⑧
+   *  sink 同型:驱动器武装 _fpartEmitGL,drawFadingParticles 逐粒子 blit 分支化
+   *  (双拍=blendErase 削底+blendAdditive 主拍;tinted 缓存画布稳定=一次上传/条目;
+   *  水罩活跃降级)。烘焙/乘光逻辑单源共用零复制。 */
+  private _fpartTintTex = new Map<HTMLCanvasElement, TexEntry>();
+  private _fpartRawTex = new Map<string, TexEntry>();
+  private _fpartEmitGL: GLSpriteLayer | null = null;
+  private _fpartEmitFailed = false;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零粒子免开/fb=回 2D */
+  gladdFPartStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑩:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射)。 */
+  private _fpartGl: GLSpriteLayer | null = null;
+  private drawFadingParticlesGL(cam: Camera, player?: Player): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdFPartStats.fb++; return null; }
+    let any = false;
+    for (const f of fadingParticles.each()) { any = true; break; }
+    if (!any) { this.gladdFPartStats.empty++; return gl; }
+    // ★Phase-2 前置扫描:tintA 双拍粒子组模式=中途毒——前置拒组
+    if (this._gladdGroupProxy) {
+      for (const f of fadingParticles.each()) {
+        if (f.tintA > 0) { this.gladdFPartStats.fb++; return null; }
+      }
+    }
+    gl.begin('fpart');
+    if (gl.unavailable) { this.gladdFPartStats.fb++; return null; }
+    this._fpartEmitGL = gl;
+    this._fpartEmitFailed = false;
+    let ok = true;
+    try {
+      this.drawFadingParticles(cam, player);
+      ok = !this._fpartEmitFailed;
+    } finally {
+      this._fpartEmitGL = null;
+      this._fpartEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);
+      this.gladdFPartStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdFPartStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑪（2026-10-28,task#22）:自发光实体族 GL 会话桥——7d' 四
+   *  原语(faelingPremultLayer 双拍/drawFairyBright α0.5 复绘/drawDeerclopsGlow
+   *  逐层 SO/flushNpcWhiteLift BJ504)⑦⑧ sink 同型。域判语:SO 黑剪影/半透明复绘
+   *  在 over-present 域可表达——黑 α quad over 世界=衰减(dst×(1−a·ma)),恰 XNA
+   *  InvSrcAlpha 语义;预乘一致 SO=vCol=(ga,ga,ga,ga)(rgb 同乘=premul src);
+   *  additive 支 vCol=(1,1,1,0)(⑩ 同款)。层序=栈内 ⑩ 之上(2D 位 7d' 在 7d''
+   *  后=同序);夹层内容仅 7261 尘 pass(over-αS 衰减差=②登记族,受控场景无重叠)。
+   *  降级面:_veilActive(escapeVeil 镜像=2D 专属,⑩ 判例)/whiteLift tintA>0
+   *  (destination-out 削底=㊱ FBO 域不可达)。 */
+  private _entGlowGl: GLSpriteLayer | null = null;
+  private _entGlowEmitGL: GLSpriteLayer | null = null;
+  private _entGlowEmitFailed = false;
+  /** 稳定源身份键(NPC 表 ImageBitmap/tintedTex 缓存画布/拖尾桶缓存画布——
+   *  内容不变对象,一次上传终身复用;tintAtlas 共享页禁入(重烘 epoch 域,E51)) */
+  private _entGlowTex = new Map<ImageBitmap | HTMLImageElement | HTMLCanvasElement, TexEntry>();
+  private _entGlowTexN = 0;
+  /** tintAtlas cell 每帧拷贝传输布(deer red/fog 共享页 cell→scratch→texRefresh) */
+  private _entGlowCellScratch: HTMLCanvasElement | null = null;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零对象免开/fb=回 2D */
+  gladdEntGlowStats = { gl: 0, empty: 0, fb: 0 };
+  /** 稳定源→TexEntry(身份键,首次 texFromImage) */
+  private entGlowTexOf(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement): TexEntry | null {
+    const glEmit = this._entGlowEmitGL;
+    if (!glEmit) return null;
+    let t = this._entGlowTex.get(img);
+    if (!t) {
+      const e = glEmit.texFromImage(`entglow:tex:${this._entGlowTexN++}`, img, false, true);
+      if (!e) return null;
+      t = e;
+      this._entGlowTex.set(img, t);
+    }
+    return t;
+  }
+  /** 变换复合子矩形 quad 发射:M=发射位全矩阵(世界变换∘局部 translate/rotate/
+   *  flip,2D 路径逐式复刻);dest 矩形经 M 变换四角,uv=tex 子矩形;blend/vCol
+   *  语义=additive?(1,1,1,0):(ga,ga,ga,ga) 预乘一致 SO(⑧⑩ 判例族)。 */
+  private entGlowQuad(M: DOMMatrix, tex: TexEntry,
+    dx: number, dy: number, dw: number, dh: number,
+    sx: number, sy: number, sw: number, sh: number,
+    vr: number, vg: number, vb: number, va: number, additive: boolean): boolean {
+    const glEmit = this._entGlowEmitGL;
+    if (!glEmit) return false;
+    const u0 = sx / tex.w, v0 = sy / tex.h, u1 = (sx + sw) / tex.w, v1 = (sy + sh) / tex.h;
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    const vd = new Float32Array(48);
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+    }
+    return this.gladdQuadEmit(glEmit, tex, vd, additive, false);   // ★刀2:run-length 合批
+  }
+  /** 驱动器:7d' 块变换逐式复刻+四原语 sink 武装调用;whiteLift 队列快照回滚
+   *  (flush 冲刷尾自清已换新数组,失败须还原原数组重放——数组本体只读未变)。 */
+  private drawEntityGlowGL(cam: Camera, z: number, viewW: number, viewH: number,
+    entities: unknown[], world: World): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdEntGlowStats.fb++; return null; }
+    let any = this.npcWhiteLiftQueue.length > 0;
+    if (!any) {
+      for (const ent of entities) {
+        if (ent instanceof Enemy && !ent.dead
+          && (ent.vanillaId === 677 || ent.vanillaId === 583 || ent.vanillaId === 584
+            || ent.vanillaId === 585 || ent.vanillaId === 668)) { any = true; break; }
+      }
+    }
+    if (!any) { this.gladdEntGlowStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdEntGlowStats.fb++; return null; }   // 水罩域整面 2D(⑩ 判例)
+    // ★Phase-2 前置扫描:whiteLift tintA>0(削底拍㊱)组模式=中途毒——前置拒组
+    if (this._gladdGroupProxy) {
+      for (const q of this.npcWhiteLiftQueue) {
+        if (q.tintA !== undefined && q.tintA > 0) { this.gladdEntGlowStats.fb++; return null; }
+      }
+    }
+    gl.begin('entglow');
+    if (gl.unavailable) { this.gladdEntGlowStats.fb++; return null; }
+    const liftSaved = this.npcWhiteLiftQueue;
+    this._entGlowEmitGL = gl;
+    this._entGlowEmitFailed = false;
+    let ok = true;
+    try {
+      const ctx = this.ctx;
+      if (ctx) {
+        // 7d' 块变换逐式复刻(round 吸附同式;ctx 全程零输出——sink 分支拦绘)
+        ctx.save();
+        ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+        ctx.scale(z, z);
+        ctx.translate(-Math.round(cam.x * z) / z, -Math.round(cam.y * z) / z);
+        ctx.imageSmoothingEnabled = false;
+        for (const ent of entities) {
+          if (ent instanceof Enemy && !ent.dead) {
+            if (ent.vanillaId === 677) this.drawFaeling(ent, world);
+            else if (ent.vanillaId === 583 || ent.vanillaId === 584 || ent.vanillaId === 585) {
+              this.drawFairyBright(ent);
+            } else if (ent.vanillaId === 668) this.drawDeerclopsGlow(ent);
+          }
+        }
+        ctx.restore();
+      }
+      this.flushNpcWhiteLift(cam, z, viewW, viewH);
+      ok = !this._entGlowEmitFailed;
+    } finally {
+      this._entGlowEmitGL = null;
+      this._entGlowEmitFailed = false;
+    }
+    if (!ok) {
+      this.npcWhiteLiftQueue = liftSaved;   // 队列回滚(2D 位 7309 原样重放)
+      gl.end(false);
+      this.gladdEntGlowStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdEntGlowStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑨（2026-10-28,task#22）:全亮尘 pass GL 会话桥——原语级
+   *  sink(策略①:分支只算参数,原语落笔):drawVanillaDustPass(true) 的 A=0 加性族
+   *  三分支(恒等快路径/恒乘数缓存/通用烘焙)汇入 dbA 收集器——sink 武装时收集器
+   *  走 gladd 变体(同 pushImg/pushBake/flush 接口,分支站点零改):恒等=Dust.png
+   *  atlas 页一批,烘焙=每 (fx,fy|乘数) 内容签名一桶(逐桶烘焙+上传,桶纹理跨帧
+   *  复用=签名即内容恒等免刷新);blend=additive vCol=(1,1,1,0)(dbEmit 的
+   *  (1,1,1,1) 在 over-present FBO 域累积 α 衰减世界=禁复用,gladd 专用发射)。
+   *  非桥分支(sparkle 双臂/mod 尘 SO/43/66 二画/premul 对尾含拖影/染料/331/
+   *  colorPass 通用)置失败旗 skip→整面降级 2D 重放(pass 副作用幂等:烘焙环推进
+   *  /出界失活/恒乘数缓存换代均二跑安全)。域判例㉟:shim 批(world-FBO 吃光)与
+   *  gladd 批(乘光后全亮)双后端并存互斥——armed 时 shim 收集器让位。 */
+  private _vdustGl: GLSpriteLayer | null = null;
+  private _vdustEmitGL: GLSpriteLayer | null = null;
+  private _vdustEmitFailed = false;
+  private _vdustAtlasTex: TexEntry | null = null;
+  /** 烘焙内容签名→桶(签名=(fx,fy|乘数),内容恒等→桶纹理跨帧复用零刷新;LRU 256
+   *  逐条淘汰+dropTexture(层 texs 键随桶蒸发防无界驻留) */
+  private _vdustBakeTex = new Map<string, { c: HTMLCanvasElement; t: TexEntry; key: string }>();
+  /** premul 对→合并面纹理(dustPremulBake.gl 字节=(rgb=aR 预乘,a=e),texFromData
+   *  原样上传禁二次预乘;对缓存内容键恒定=纹理稳定复用) */
+  private _vdustPmTex = new Map<{ add: HTMLCanvasElement; erase: HTMLCanvasElement }, TexEntry>();
+  private _vdustPmTexN = 0;
+  /** 稳定源身份键(染料静态缓存画布)→纹理 */
+  private _vdustSrcTex = new Map<HTMLCanvasElement, TexEntry>();
+  private _vdustSrcTexN = 0;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零尘免开/fb=回 2D */
+  gladdVDustStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★gladd 面⑨:vdust 域变换复合 quad(entGlowQuad 同式,层=_vdustEmitGL) */
+  private vdustQuad(M: DOMMatrix, tex: TexEntry,
+    dx: number, dy: number, dw: number, dh: number,
+    sx: number, sy: number, sw: number, sh: number,
+    vr: number, vg: number, vb: number, va: number, additive: boolean): boolean {
+    const glEmit = this._vdustEmitGL;
+    if (!glEmit) return false;
+    const u0 = sx / tex.w, v0 = sy / tex.h, u1 = (sx + sw) / tex.w, v1 = (sy + sh) / tex.h;
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    const vd = new Float32Array(48);
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+    }
+    if (additive) glEmit.blendAdditive(true);
+    const ok = glEmit.quadBatchRgba(tex, vd, 1, false);
+    if (additive) glEmit.blendAdditive(false);
+    return ok;
+  }
+  /** 稳定画布源身份键纹理 */
+  private vdustTexOf(img: HTMLCanvasElement): TexEntry | null {
+    const glEmit = this._vdustEmitGL;
+    if (!glEmit) return null;
+    let t = this._vdustSrcTex.get(img);
+    if (!t) {
+      const e = glEmit.texFromImage(`vdust:src:${this._vdustSrcTexN++}`, img, false, true);
+      if (!e) return null;
+      t = e;
+      this._vdustSrcTex.set(img, t);
+    }
+    return t;
+  }
+  private drawVanillaDustGL(cam: Camera, player?: Player): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdVDustStats.fb++; return null; }
+    let any = false;
+    for (const d of this.vanillaDust!.each(true)) { any = true; break; }
+    if (!any) { this.gladdVDustStats.empty++; return gl; }
+    gl.begin('vdust');
+    if (gl.unavailable) { this.gladdVDustStats.fb++; return null; }
+    this._vdustEmitGL = gl;
+    this._vdustEmitFailed = false;
+    let ok = true;
+    try {
+      this.drawVanillaDustPass(true, cam, player);
+      ok = !this._vdustEmitFailed;
+    } finally {
+      this._vdustEmitGL = null;
+      this._vdustEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);   // 弃 FBO——2D 位原样重放(pass 副作用幂等)
+      this.gladdVDustStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdVDustStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑫-a（2026-10-28,task#22）:1034 星辰鞭线体 GL 会话桥——
+   *  ⑪ faelingPremultLayer 同型克隆:段双拍(black tintedTex SO α=a/255 世界衰减
+   *  +tinted additive α=1 染色全额,㊵ SO 衰减 over-present 可表达判例)+段变换
+   *  (translate/rotate(atan2−π/2)/scale(z) 同式读 M)+tintedTex 缓存画布身份键。
+   *  队列尾清空(非换数组)→失败回滚须【拷贝】快照(whiteLift 引用回滚判例的反面
+   *  ——length=0 原地清空,引用快照=空数组)。水罩活跃=整面降级(qm 镜像支不达,
+   *  ⑩ 判例)。层序=⑪ 之上(2D 位 7e' 在 7d' 后同序);towerGlow/wingGlow 等
+   *  7321+ 槽 2D 内容与鞭 SO 衰减的重叠域=②登记族微差(受控场景无重叠)。 */
+  private _whipGl: GLSpriteLayer | null = null;
+  private _whipEmitGL: GLSpriteLayer | null = null;
+  private _whipEmitFailed = false;
+  private _whipTexCache = new Map<HTMLCanvasElement, TexEntry>();
+  private _whipTexN = 0;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零段免开/fb=回 2D */
+  gladdWhipStats = { gl: 0, empty: 0, fb: 0 };
+  private whipTexOf(img: HTMLCanvasElement): TexEntry | null {
+    const glEmit = this._whipEmitGL;
+    if (!glEmit) return null;
+    let t = this._whipTexCache.get(img);
+    if (!t) {
+      const e = glEmit.texFromImage(`whip:tex:${this._whipTexN++}`, img, false, true);
+      if (!e) return null;
+      t = e;
+      this._whipTexCache.set(img, t);
+    }
+    return t;
+  }
+  /** ★gladd 面⑫-a:whip 域变换复合 quad(entGlowQuad 同式,层=_whipEmitGL) */
+  private whipQuad(M: DOMMatrix, tex: TexEntry,
+    dx: number, dy: number, dw: number, dh: number,
+    sx: number, sy: number, sw: number, sh: number,
+    vr: number, vg: number, vb: number, va: number, additive: boolean): boolean {
+    const glEmit = this._whipEmitGL;
+    if (!glEmit) return false;
+    const u0 = sx / tex.w, v0 = sy / tex.h, u1 = (sx + sw) / tex.w, v1 = (sy + sh) / tex.h;
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    const vd = new Float32Array(48);
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+    }
+    if (additive) glEmit.blendAdditive(true);
+    return this.gladdQuadEmit(glEmit, tex, vd, additive, false);   // ★刀2:run-length 合批
+  }
+  private drawWhipGlowGL(cam: Camera, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdWhipStats.fb++; return null; }
+    if (!this.whipFullbrightQueue.length) { this.gladdWhipStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdWhipStats.fb++; return null; }
+    gl.begin('whip');
+    if (gl.unavailable) { this.gladdWhipStats.fb++; return null; }
+    const saved = this.whipFullbrightQueue.slice();   // 尾清空=原地 length=0→拷贝快照
+    this._whipEmitGL = gl;
+    this._whipEmitFailed = false;
+    let ok = true;
+    try {
+      this.flushWhipFullbright(cam, z);
+      ok = !this._whipEmitFailed;
+    } finally {
+      this._whipEmitGL = null;
+      this._whipEmitFailed = false;
+    }
+    if (!ok) {
+      this.whipFullbrightQueue = saved;   // 回滚(2D 位 7e' 原样重放)
+      gl.end(false);
+      this.gladdWhipStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdWhipStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑫-c-wires（2026-10-28,task#22）:7g 导线 Bright 档 GL 会话桥
+   *  ——双子矩形批(drawWiresPass 两 draw 站点:线段 WiresNew 帧+致动器 Actuator,
+   *  全批共享单一相机变换=⑨ 恒等批同型;SO vCol=(ga,ga,ga,ga) 预乘一致——
+   *  fadeAlpha(蓝绿黄 1/n)×modeAlpha(Faded 0.5)折进顶点色)。空视口零 quad
+   *  =零上传免享(纹理惰性 texFromImage);批在 pass 尾冲(图集句柄在 pass 域)。 */
+  private _wiresGl: GLSpriteLayer | null = null;
+  private _wiresEmitGL: GLSpriteLayer | null = null;
+  private _wiresEmitFailed = false;
+  private _wiresQuadV: number[] = [];
+  private _wiresActV: number[] = [];
+  private _wiresM: DOMMatrix | null = null;
+  private _wiresTex: TexEntry | null = null;
+  private _wiresActTex: TexEntry | null = null;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零线免开/fb=回 2D */
+  gladdWiresStats = { gl: 0, empty: 0, fb: 0 };
+  /** 批 push:dest=(dx,dy,ts,ts) 经共享 M 变换四角;uv=(sx,sy,16,16)/(tw,th) */
+  private wiresPushQuad(v: number[], sx: number, sy: number, dx: number, dy: number,
+    ga: number, tw: number, th: number): void {
+    const M = this._wiresM!;
+    const u0 = sx / tw, v0 = sy / th, u1 = (sx + 16) / tw, v1 = (sy + 16) / th;
+    const corner = (x: number, y: number, u: number, vv: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, vv];
+    const ts = TILE;
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + ts, dy, u1, v0), corner(dx + ts, dy + ts, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + ts, dy + ts, u1, v1), corner(dx, dy + ts, u0, v1),
+    ];
+    for (let i = 0; i < 6; i++) {
+      v.push(V[i][0], V[i][1], V[i][2], V[i][3], ga, ga, ga, ga);
+    }
+  }
+  private drawWiresGL(world: World, cam: Camera, viewW: number, viewH: number, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdWiresStats.fb++; return null; }
+    if (!this.showWires) { this.gladdWiresStats.empty++; return gl; }
+    gl.begin('wires');
+    if (gl.unavailable) { this.gladdWiresStats.fb++; return null; }
+    this._wiresEmitGL = gl;
+    this._wiresEmitFailed = false;
+    this._wiresQuadV.length = 0;
+    this._wiresActV.length = 0;
+    this._wiresM = null;
+    let ok = true;
+    try {
+      this.drawWiresBright(world, cam, viewW, viewH, z);
+      ok = !this._wiresEmitFailed;
+    } finally {
+      this._wiresEmitGL = null;
+      this._wiresM = null;
+      this._wiresEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);
+      this.gladdWiresStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdWiresStats.gl++;
+    return gl;
+  }
+
+  /** ★gladd Phase 1 面⑫-c-inferno（2026-10-28,task#22）:7h 狱火药水火圈 GL 会话桥
+   *  ——drawInfernoRings 可选 emit 钩(缺省 2D 零变化):层双拍(pass1 SO α=base
+   *  削底+半RGB+pass2 additive α=topup 补足,⑪ ㊵ 判例族);tintedFrame 单画布
+   *  逐层重烘→texRefresh 逐层重传(⑦ 模式)。无内嵌垫底头(㊸ 普查:仅 wires/
+   *  flushTrailShade 带)——驱动位安全。 */
+  private _infernoGl: GLSpriteLayer | null = null;
+  private _infernoEmitGL: GLSpriteLayer | null = null;
+  private _infernoEmitFailed = false;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=无 buff 免开/fb=回 2D */
+  gladdInfernoStats = { gl: 0, empty: 0, fb: 0 };
+  private drawInfernoGL(player: Player, cam: Camera, z: number, viewW: number, viewH: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdInfernoStats.fb++; return null; }
+    const gate = (p: Player): boolean => !p.dead && p.buffs.has(BuffType.Inferno);
+    let any = gate(player);
+    if (!any) for (const rp of this.remotePlayers) if (gate(rp)) { any = true; break; }
+    if (!any) { this.gladdInfernoStats.empty++; return gl; }
+    gl.begin('inferno');
+    if (gl.unavailable) { this.gladdInfernoStats.fb++; return null; }
+    this._infernoEmitGL = gl;
+    this._infernoEmitFailed = false;
+    let ok = true;
+    try {
+      const emit = (M: DOMMatrix, frame: CanvasImageSource, half: number, base: number, topup: number): boolean => {
+        const glE = this._infernoEmitGL!;
+        const t = glE.texRefresh('inferno:frame', frame as HTMLCanvasElement);
+        if (!t) { this._infernoEmitFailed = true; return false; }
+        const u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+        const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+          [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+        const emitQ = (vr: number, vg: number, vb: number, va: number, additive: boolean): boolean => {
+          const V = [
+            corner(-half, -half, u0, v0), corner(half, -half, u1, v0), corner(half, half, u1, v1),
+            corner(-half, -half, u0, v0), corner(half, half, u1, v1), corner(-half, half, u0, v1),
+          ];
+          const vd = new Float32Array(48);
+          for (let i = 0; i < 6; i++) {
+            vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+            vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+            vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+          }
+          return this.gladdQuadEmit(glE, t, vd, additive, true);   // ★刀2(BJ65 smooth 对位)
+        };
+        let okQ = true;
+        if (base > 0) okQ = emitQ(base, base, base, base, false) && okQ;
+        if (topup > 0) okQ = emitQ(topup, topup, topup, 0, true) && okQ;
+        if (!okQ) this._infernoEmitFailed = true;
+        return okQ;
+      };
+      this.drawInfernoRingPass(player, cam, z, viewW, viewH, emit);
+      ok = !this._infernoEmitFailed;
+    } finally {
+      this._infernoEmitGL = null;
+      this._infernoEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);
+      this.gladdInfernoStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdInfernoStats.gl++;
+    return gl;
+  }
+
+  /** ★Phase-2 刀1（2026-10-29,task#22）:gladd 组会话——①-⑫ 全面共享一个
+   *  'gladd' FBO,gladd 块尾【一次】 over-present。数学:premul-over 结合律 +
+   *  加法交换律 = 共享 FBO 有序发射 ≡ 逐面各自 present(同序);加算面 α=0 出流
+   *  dst 零触碰、SO 面衰减按序复合——与现行为逐位等价(8bit 舍入界差±1 LSB=
+   *  闸 census 仲裁)。实现=代理层拦 begin(共享名+首面清,后续续交)/end(present
+   *  档=仅解绑不 present,end(false) 毒标记),块尾 commit 统一 present。
+   *  【毒弃组】任一面中途失败(end(false))=组不 present+全部 _xGl 置 null→各面
+   *  2D 位重放(失败面自回滚✓);消费型面(⑥⑪⑫-a⑫-b)已消费队列当帧损失=残余
+   *  毒窗口——常见失败模式(水罩/混合尘/tintA)由⑧⑨⑩⑪⑫-a 驱动器【前置检查/扫描】
+   *  在开组前/开组后返 null(不开组=无毒),残余=纹理首载 null/闭包未知 op 罕见
+   *  路径,登记(帧首暖机窗吸收)。空组(全 empty 早退)=零 begin 零 present。 */
+  private _gladdGroupProxy: GLSpriteLayer | null = null;
+  private _gladdGroupState: { open: boolean; poisoned: boolean; rollbacks: Array<() => void> } | null = null;
+  private _gladdGroupTarget: GLSpriteLayer | null = null;
+  /** 探针面:commit=组 present 计/poison=毒弃组计 */
+  gladdGroupStats = { commit: 0, poison: 0 };
+  private gladdGroupBegin(): void {
+    if (this._gladdGroupProxy) return;
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) return;
+    const self = this;
+    // ★D1:rollbacks=毒弃跨面复原(面 A 失败毒组时,已成功面队列已被消费=2D 重放
+    //  位见空=内容整帧丢失;各驱动成功时登记复原闭包,commit 毒路径统一回滚)
+    const st = { open: false, poisoned: false, rollbacks: [] as Array<() => void> };
+    const proxy = new Proxy(gl, {
+      get(t: GLSpriteLayer, k: string | symbol) {
+        if (k === 'begin') {
+          return (_name?: string, _clear?: boolean) => { t.begin('gladd', !st.open); st.open = true; };
+        }
+        if (k === 'end') {
+          return (present?: boolean) => {
+            if (present) {
+              if (!self.gladdQuadFlush()) st.poisoned = true;   // ★刀2:冲批(冲失败=毒)
+              t.end(false);   // 组模式:仅解绑(块尾统一 present)
+            } else { st.poisoned = true; t.end(false); }   // 中途失败=毒(不冲=随组弃)
+          };
+        }
+        if (k === 'texRefresh') {
+          return (key: string, img: TexImageSource) => {
+            // ★变异序判例:先冲批【再】上传——冲批须用变异前内容(先 texRefresh
+            //  后断批=挂起 quad 采样末态内容,⑪ 闸 1.5% 二轮实锤)
+            self.gladdQuadFlush();
+            self._gladdTexEpoch++;   // 变异纪元:同 TexEntry 内容换血=断批
+            return t.texRefresh(key, img);
+          };
+        }
+        const v = Reflect.get(t, k);
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+      },
+    }) as unknown as GLSpriteLayer;
+    this._gladdGroupState = st;
+    this._gladdGroupTarget = gl;
+    this._gladdGroupProxy = proxy;
+  }
+  /** ★Phase-2 刀2(2026-10-29):run-length 同纹理合批器——组模式下连续同
+   *  [层+纹理+blend+smooth] 键的 quad 合批一次 quadBatchRgba(GL 图元序保证=
+   *  批内 SO 重叠亦保序;加算本可交换)。跨面续批(层恒同=序=发射序✓)。flush=
+   *  代理 end(present) 统一冲(块尾/逐面 end 都到);毒(end(false))不冲=随组弃。
+   *  单面模式(组未开)=直发今日行为(回退路径性能非关键)。 */
+  private _gqTex: TexEntry | null = null;
+  private _gqAdditive = false;
+  private _gqSmooth = false;
+  private _gqV: number[] = [];
+  private _gqLayer: GLSpriteLayer | null = null;
+  /** ★texRefresh 变异纪元:共享画布重烘焙(tintC/cell/strip/frame 族)=同
+   *  TexEntry 内容换血——合批挂起期间 texRefresh 会使挂起 quad 采样末态内容
+   *  (⑪ 闸 1.83%/mean-25 实锤)。代理拦 texRefresh 自增;键含纪元=即断批。 */
+  private _gladdTexEpoch = 0;
+  private _gqEpoch = 0;
+  private gladdQuadEmit(gl: GLSpriteLayer, tex: TexEntry, vd48: Float32Array,
+    additive: boolean, smooth: boolean): boolean {
+    if (!this._gladdGroupProxy) {
+      if (additive) gl.blendAdditive(true);
+      const ok0 = gl.quadBatchRgba(tex, vd48, 1, smooth);
+      if (additive) gl.blendAdditive(false);
+      return ok0;
+    }
+    if (this._gqLayer !== gl || this._gqTex !== tex
+      || this._gqAdditive !== additive || this._gqSmooth !== smooth
+      || this._gqEpoch !== this._gladdTexEpoch) {
+      const ok = this.gladdQuadFlush();
+      this._gqLayer = gl; this._gqTex = tex; this._gqAdditive = additive; this._gqSmooth = smooth;
+      this._gqEpoch = this._gladdTexEpoch;
+      if (!ok) return false;
+    }
+    for (let i = 0; i < 48; i++) this._gqV.push(vd48[i]);
+    return true;
+  }
+  gladdQuadFlush(): boolean {
+    if (!this._gqV.length) return true;
+    const gl = this._gqLayer!;
+    const tex = this._gqTex!;
+    const quads = this._gqV.length / 48;
+    const data = new Float32Array(this._gqV);
+    this._gqV.length = 0;
+    if (this._gqAdditive) gl.blendAdditive(true);
+    const ok = gl.quadBatchRgba(tex, data, quads, this._gqSmooth);
+    if (this._gqAdditive) gl.blendAdditive(false);
+    if (!ok) { this._gqLayer = null; this._gqTex = null; }
+    return ok;
+  }
+
+  private gladdGroupCommit(): void {
+    const st = this._gladdGroupState;
+    const gl = this._gladdGroupTarget;
+    this._gladdGroupProxy = null;
+    this._gladdGroupState = null;
+    this._gladdGroupTarget = null;
+    if (!st || !gl) return;
+    if (st.poisoned) {
+      this.gladdGroupStats.poison++;
+      // 组弃:不 present(FBO 陈旧内容不入屏,下帧首面 clear);全部面回 2D 位。
+      // ★BJ737-A 刀1(2026-10-29 用户实报「翼淡半透/姿态滞留」定谳):①毒弃须清
+      //  残留 quad——不清=挂起批跨帧存活,下帧 key 变/texRefresh 冲出=陈旧鬼影;
+      //  ②wing/tower 补进弃组清单(五面驱动不调 begin/end,组毒帧其字段不 null=
+      //  2D 位跳过=内容整帧缺失)。
+      this._gqV.length = 0;
+      for (const rb of st.rollbacks) { try { rb(); } catch { /* 复原失败不连环 */ } }
+      this._shineAddGl = null; this._flareGl = null; this._litNatureGl = null;
+      this._vlensGl = null; this._mlFloorGl = null; this._bvineGl = null;
+      this._vdustGl = null; this._fpartGl = null; this._entGlowGl = null;
+      this._whipGl = null; this._wiresGl = null; this._infernoGl = null; this._trailGl = null;
+      this._wingGl = null; this._towerGl = null;
+      this._lunarArmorGl = null; this._lunarCoverGl = null; this._solarShieldGl = null;
+      this._eyebrellaGl = null; this._armorUnderGl = null; this._armorArmGl = null;
+      this._hprojGl = null; this._armorSavedQueue = null;
+      return;
+    }
+    // ★BJ737-A 刀1:尾批当帧冲出+未开组也能 present——五面驱动(wing/tower/heldProj/
+    //  armor)不调 begin/end 只走合批累积器:组尾不冲=尾批滞留 _gqV 跨帧(实测
+    //  gqV 残留恒 1 批/帧=翼 glow 恒迟一拍,旧姿态鬼影);仅五面内容帧无任何
+    //  begin 面=st.open 恒假=组永不 present(翼 glow 整帧缺失)。冲失败=按毒弃。
+    if (this._gqV.length || st.open) {
+      gl.begin('gladd', !st.open);   // 复绑(已开,续交)/首开(未开=FBO 清)
+      if (!this.gladdQuadFlush()) {
+        this.gladdGroupStats.poison++;
+        this._gqV.length = 0;
+        for (const rb of st.rollbacks) { try { rb(); } catch { /* 复原失败不连环 */ } }
+        this._shineAddGl = null; this._flareGl = null; this._litNatureGl = null;
+        this._vlensGl = null; this._mlFloorGl = null; this._bvineGl = null;
+        this._vdustGl = null; this._fpartGl = null; this._entGlowGl = null;
+        this._whipGl = null; this._wiresGl = null; this._infernoGl = null;
+        this._trailGl = null; this._wingGl = null; this._towerGl = null;
+        this._lunarArmorGl = null; this._lunarCoverGl = null; this._solarShieldGl = null;
+        this._eyebrellaGl = null; this._armorUnderGl = null; this._armorArmGl = null;
+        this._hprojGl = null; this._armorSavedQueue = null;
+        return;
+      }
+      gl.end(true, true);   // ★组唯一 present
+      this.gladdGroupStats.commit++;
+    }
+  }
+
+  /** ★gladd Phase 1 面⑫-b（2026-10-28,task#22）:7f 条带拖尾 GL 会话桥——
+   *  flushTrailStrips 半的 sink:①CPU 光栅条带=drawStripTrail glEmit 钩(scratch
+   *  直色 rgb=贡献/α{0,255}→texRefresh premul 上传=贡献本体;additive
+   *  vCol=(1,1,1,0);smooth=true 对位半分辨率上采样)②glfx 层=全幅 additive quad
+   *  (texRefresh 上传,1:1 NEAREST)。闭包族(flushProjFullbright)恒 2D 不在本面
+   *  (黑晕域禁早调——pre-垫底 'lighter' 落透明 HUD=黑晕,⑫-b 拆分的承重笔)。
+   *  回滚:trailShadeQueue 换数组=引用回滚+gx.trailDirty 旗回滚。水罩=失败旗
+   *  (veilCamM 镜像支不达,⑩ 判例)。 */
+  private _trailGl: GLSpriteLayer | null = null;
+  private _trailEmitGL: GLSpriteLayer | null = null;
+  private _trailEmitFailed = false;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零条带免开/fb=回 2D */
+  gladdTrailStats = { gl: 0, empty: 0, fb: 0 };
+  private drawTrailGL(cam: Camera, z: number, viewW: number, viewH: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdTrailStats.fb++; return null; }
+    const gxC = this.glfx;
+    const hasGL = !!(gxC && gxC.trailDirty && !gxC.unavailable);
+    if (!this.trailShadeQueue.length && !hasGL) { this.gladdTrailStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdTrailStats.fb++; return null; }
+    gl.begin('trail');
+    if (gl.unavailable) { this.gladdTrailStats.fb++; return null; }
+    const savedQ = this.trailShadeQueue;
+    const savedDirty = gxC ? gxC.trailDirty : false;
+    const savedFB = this.projFullbrightQueue;
+    this._trailEmitGL = gl;
+    this._trailEmitFailed = false;
+    let ok = true;
+    try {
+      this.flushTrailStrips(cam, z, viewW, viewH);
+      if (!this._trailEmitFailed && this.projFullbrightQueue.length) {
+        this.flushProjFullbrightGL(cam, z, viewW, viewH);
+      }
+      ok = !this._trailEmitFailed;
+    } finally {
+      this._trailEmitGL = null;
+      this._trailEmitFailed = false;
+    }
+    if (!ok) {
+      this.trailShadeQueue = savedQ;   // 换数组=引用回滚(数组本体只读未变)
+      if (gxC) gxC.trailDirty = savedDirty;   // 旗回滚(画布内容未动)
+      this.projFullbrightQueue = savedFB;   // fb 队列回滚(7f 位 2D 重放+垫底)
+      gl.end(false);
+      this.gladdTrailStats.fb++;
+      return null;
+    }
+    gl.end(true, true);
+    this.gladdTrailStats.gl++;
+    return gl;
+  }
+
+  /** ★⑫-b 批化刀(2026-10-29):BJ278 弹头全亮闭包族 GL 桥——记录 ctx 代理:
+   *  闭包 API 面(save/restore/globalAlpha/globalCompositeOperation/
+   *  imageSmoothingEnabled/translate/rotate/scale/drawImage 3/5/9 参)逐调用录制为
+   *  仿射 quad('lighter'→additive vCol=(ga,ga,ga,0)=XNA 加算;source-over→
+   *  vCol=(ga,ga,ga,ga));未知 op/属性=失败旗→整面 2D 回退(7f 位+垫底)。
+   *  消费=队列换空(7f 位 flushProjFullbright 空队早退=其头垫底同skip=逼折消)。
+   *  基阵=flushProjFullbright 同式相机变换(round 吸附);逐拍矩阵手工复合。 */
+  /** ★五面桥·towerGlow(2026-10-29):7d''' 四塔 GlowMask——'lighter' 加算精灵
+   *  (顶点色 α=0 族);sink=⑫-a 型(相机基阵一次读+rot 位变换读;帧头清队列=
+   *  零回滚——GL 成功后 2D 位守卫跳过,失败原位重放队列未动)。 */
+  private _towerGl: GLSpriteLayer | null = null;
+  private _towerEmitGL: GLSpriteLayer | null = null;
+  private _towerEmitFailed = false;
+  private _towerBaseM: DOMMatrix | null = null;
+  private _towerTexCache = new Map<TexImageSource, TexEntry>();
+  private _towerTexN = 0;
+  gladdTowerStats = { gl: 0, empty: 0, fb: 0 };
+  private towerEmit(img2: TexImageSource, sy: number, iw: number, gh: number,
+    dx: number, dy: number, dw: number, dh: number, ga: number, M: DOMMatrix,
+    snap = false): boolean {   // snap=非旋转支原点 floor 量化(⑥ 判例:分数位 NEAREST 相位最近半)
+    const gl = this._towerEmitGL!;
+    let t = this._towerTexCache.get(img2);
+    if (!t) {
+      const e = gl.texFromImage(`tower:tex:${this._towerTexN++}`, img2, false, true);
+      if (!e) { this._towerEmitFailed = true; return false; }
+      t = e;
+      this._towerTexCache.set(img2, t);
+    }
+    const vd = new Float32Array(48);
+    const u0 = 0, v0 = sy / t.h, u1 = iw / t.w, v1 = (sy + gh) / t.h;
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    let V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    if (snap) {
+      const ddx = Math.floor(V[0][0]) - V[0][0], ddy = Math.floor(V[0][1]) - V[0][1];
+      V = V.map((c) => [c[0] + ddx, c[1] + ddy, c[2], c[3]] as [number, number, number, number]);
+    }
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = ga; vd[i * 8 + 5] = ga; vd[i * 8 + 6] = ga; vd[i * 8 + 7] = 0;
+    }
+    if (!this.gladdQuadEmit(gl, t, vd, true, false)) { this._towerEmitFailed = true; return false; }
+    return true;
+  }
+  /** ★五面桥·heldProjCarriers(2026-10-29):坐骑/手持 glow 载体闭包族——记录
+   *  ctx 桥(fb 基建同型复制,零风险隔离);'lighter'/SO 双支;换数组回滚。 */
+  private _hprojGl: GLSpriteLayer | null = null;
+  private _hprojEmitGL: GLSpriteLayer | null = null;
+  private _hprojEmitFailed = false;
+  private _hprojTexKeys = new Map<TexImageSource, string>();
+  private _hprojTexN = 0;
+  gladdHProjStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★五面桥·armorGlow(2026-10-29):甲位 GlowMask 双遍(under<②<arm 2D 序;
+   *  组内 under→arm 连发——② 前移系登记偏差,加算可交换族)。矩阵=e.m×invK 页域
+   *  捕获;passes 双拍('lighter'→additive/SO→vCol=(g×4));单槽烘焙→texRefresh
+   *  逐拍(纪元断批);under 遍 flatMap 队列变换=快照回滚。 */
+  private _armorUnderGl: GLSpriteLayer | null = null;
+  private _armorArmGl: GLSpriteLayer | null = null;
+  private _armorEmitGL: GLSpriteLayer | null = null;
+  private _armorEmitFailed = false;
+  private _armorTexKeys = new Map<TexImageSource, string>();
+  private _armorTexN = 0;
+  gladdArmorStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★D1(2026-10-29 BJ737-A 债收口):甲族通用 quad 发射(texRefresh 每拍重传——
+   *  BJ737-A 刀2 同病同修:身份缓存仅首拍=tintRGBA/池化画布内容冻结;过代理=
+   *  先冲批+纪元断批)。dw/dh dest 尺寸(眼球伞 ×z 缩放;缺省同 sw/sh)。
+   *  D1 全族共用:armorGlow ops/恒甲重绘/盾球/被盖 blit/眼球伞。 */
+  private armorQuad(gl: GLSpriteLayer, src: TexImageSource, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number, M: DOMMatrix, g: number, additive: boolean): boolean {
+    let key = this._armorTexKeys.get(src);
+    if (!key) { key = `armor:tex:${this._armorTexN++}`; this._armorTexKeys.set(src, key); }
+    const t = gl.texRefresh(key, src);
+    if (!t) { this._armorEmitFailed = true; return false; }
+    const u0 = sx / t.w, v0 = sy / t.h, u1 = (sx + sw) / t.w, v1 = (sy + sh) / t.h;
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    const vd = new Float32Array(48);
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = g; vd[i * 8 + 5] = g; vd[i * 8 + 6] = g; vd[i * 8 + 7] = additive ? 0 : g;
+    }
+    if (!this.gladdQuadEmit(gl, t, vd, additive, false)) { this._armorEmitFailed = true; return false; }
+    return true;
+  }
+  /** ★D1(2026-10-29):甲 glow 拆位驱动——under 遍(7468 位=repaint 后/盾前)与
+   *  arm 遍(7515 位=被盖/② 后)在块内分两位发射(FBO 发射序=2D 序)。arm 位失败
+   *  须回滚【全量】原始队列(under 位 flatMap 已消费改写)——_armorSavedQueue
+   *  由 under 位存;毒弃路径统一走 rollbacks 登记。 */
+  private _armorSavedQueue: Array<{ m: DOMMatrix; k: number; ops: ArmorGlowOp[] }> | null = null;
+  private drawArmorGlowGL(armPass: boolean): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdArmorStats.fb++; return null; }
+    // under 位:队列=全量;arm 位:under 成功后=arm-only(under 失败=调用方跳过)
+    const has = armPass
+      ? this.armorGlowQueue.some((e) => e.ops.some((o) => o.arm === true))
+      : this.armorGlowQueue.length > 0;
+    if (!has) { this.gladdArmorStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdArmorStats.fb++; return null; }
+    const saved = this.armorGlowQueue.slice();
+    if (!armPass) this._armorSavedQueue = saved;
+    this._armorEmitGL = gl;
+    this._armorEmitFailed = false;
+    let ok = true;
+    try {
+      this.flushArmorGlow(armPass);
+      ok = !this._armorEmitFailed;
+    } finally {
+      this._armorEmitGL = null;
+      this._armorEmitFailed = false;
+    }
+    if (!ok) {
+      this.armorGlowQueue = (armPass && this._armorSavedQueue) ? this._armorSavedQueue : saved;
+      this._armorSavedQueue = null;
+      gl.end(false);   // 毒组:部分发射随组弃(防 FBO/2D 双绘)
+      this.gladdArmorStats.fb++;
+      return null;
+    }
+    if (armPass) this._armorSavedQueue = null;
+    this._gladdGroupState?.rollbacks.push(() => {
+      this.armorGlowQueue = saved;   // 毒弃跨面复原(2D 重放完整)
+      this._armorSavedQueue = null;
+    });
+    this.gladdArmorStats.gl++;
+    return gl;
+  }
+
+  /** ★五面桥·wingGlow(2026-10-29):翼 'lighter' overlay 域(selfAdd/glowAdd/
+   *  nebula 三块)入组——其余 overlay case+主纹理=纯 SO 无黑晕留 2D;桥后翼面
+   *  HUD 侧零 'lighter'=折叠可免(armed 跳)。队列逐帧头清=零回滚(塔同型)。 */
+  private _wingGl: GLSpriteLayer | null = null;
+  private _wingEmitGL: GLSpriteLayer | null = null;
+  private _wingEmitFailed = false;
+  private _wingTexKeys = new Map<TexImageSource, string>();
+  private _wingTexN = 0;
+  gladdWingStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★BJ737-A 刀2/刀3(2026-10-29):子矩形 uv(atlas 主纹理行)+SO 模式(主纹理
+   *  入组 vCol=(a,a,a,a) 预乘一致,⑪ ㊵ 习语;缺省 additive=(g,g,g,0))+texRefresh
+   *  每拍重传——翼源=bakeSliceCached 恒等支(共享单槽画布)/缓存支(池化画布),
+   *  同 canvas 身份跨拍内容换血;旧身份缓存 texFromImage 仅首拍=纹理冻结首拍
+   *  内容(「保留缓慢下落姿态」真凶之二)。texRefresh 过代理=先冲批再上传+纪元
+   *  断批(㊿ 变异序判例)。 */
+  private wingQuad(sc: TexImageSource, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number, M: DOMMatrix, g: number, so = false): boolean {
+    const gl = this._wingEmitGL!;
+    let key = this._wingTexKeys.get(sc);
+    if (!key) { key = `wing:tex:${this._wingTexN++}`; this._wingTexKeys.set(sc, key); }
+    const t = gl.texRefresh(key, sc);
+    if (!t) { this._wingEmitFailed = true; return false; }
+    const u0 = sx / t.w, v0 = sy / t.h, u1 = (sx + sw) / t.w, v1 = (sy + sh) / t.h;
+    const vd = new Float32Array(48);
+    const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+      [M.a * x + M.c * y + M.e, M.b * x + M.d * y + M.f, u, v];
+    const V = [
+      corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+      corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+    ];
+    for (let i = 0; i < 6; i++) {
+      vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+      vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+      vd[i * 8 + 4] = g; vd[i * 8 + 5] = g; vd[i * 8 + 6] = g; vd[i * 8 + 7] = so ? g : 0;
+    }
+    if (!this.gladdQuadEmit(gl, t, vd, !so, false)) { this._wingEmitFailed = true; return false; }
+    return true;
+  }
+  private drawWingGlowGL(cam: Camera, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdWingStats.fb++; return null; }
+    if (!this.wingGlowQueue.length) { this.gladdWingStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdWingStats.fb++; return null; }
+    // ★BJ737-A 刀2:队列快照回滚——flushWingGlow 尾段 length=0 原地清空,发射
+    //  中途失败时旧「队列帧头清=零回滚」不成立(2D 重放位见空队列=翼整帧缺失);
+    //  拷贝快照回滚+end(false) 毒组(部分发射的 quad 随组弃,防 FBO/2D 双绘)=
+    //  失败帧 2D 原样重放(⑪ whiteLift/armor 同型)。
+    const saved = this.wingGlowQueue.slice();
+    this._wingEmitGL = gl;
+    this._wingEmitFailed = false;
+    let ok = true;
+    try {
+      this.flushWingGlow(cam, z);
+      ok = !this._wingEmitFailed;
+    } finally {
+      this._wingEmitGL = null;
+      this._wingEmitFailed = false;
+    }
+    if (!ok) {
+      this.wingGlowQueue = saved;
+      gl.end(false);   // 毒组:已发射 quad 随组弃(与 2D 重放防双绘)
+      this.gladdWingStats.fb++;
+      return null;
+    }
+    this._gladdGroupState?.rollbacks.push(() => { this.wingGlowQueue = saved; });   // ★D1:毒弃跨面复原
+    this.gladdWingStats.gl++;
+    return gl;
+  }
+
+  // ---- ★D1(2026-10-29 BJ737-A 债收口):7e 族 SO 驻留面入组——恒甲重绘/被盖
+  //  blit/盾球/眼球伞四驱动。发射序=2D 序(repaint→under→shield→carriers→covered
+  //  →②→arm→eyebrella→whip);armorQuad texRefresh 每拍(tintRGBA 缓存画布/池化
+  //  会话布内容逐拍换血)。回滚:换数组面(lunarArmor/lunarCover)引用回滚;in-place
+  //  清空面(shield/eyebrella)slice 回滚;失败=end(false) 毒组+成功面 rollbacks
+  //  登记跨面复原。 ----
+  private _lunarArmorGl: GLSpriteLayer | null = null;
+  private _lunarArmorEmitGL: GLSpriteLayer | null = null;
+  private _lunarArmorEmitFailed = false;
+  gladdLunarArmorStats = { gl: 0, empty: 0, fb: 0 };
+  private drawLunarArmorGL(): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdLunarArmorStats.fb++; return null; }
+    if (!this.lunarArmorQueue.length) { this.gladdLunarArmorStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdLunarArmorStats.fb++; return null; }
+    const saved = this.lunarArmorQueue;   // flush 换数组=引用回滚
+    this._lunarArmorEmitGL = gl;
+    this._lunarArmorEmitFailed = false;
+    let ok = true;
+    try { this.flushLunarArmor(); ok = !this._lunarArmorEmitFailed; }
+    finally { this._lunarArmorEmitGL = null; this._lunarArmorEmitFailed = false; }
+    if (!ok) {
+      this.lunarArmorQueue = saved;
+      gl.end(false);
+      this.gladdLunarArmorStats.fb++;
+      return null;
+    }
+    this._gladdGroupState?.rollbacks.push(() => { this.lunarArmorQueue = saved; });
+    this.gladdLunarArmorStats.gl++;
+    return gl;
+  }
+
+  private _lunarCoverGl: GLSpriteLayer | null = null;
+  private _lunarCoverEmitGL: GLSpriteLayer | null = null;
+  private _lunarCoverEmitFailed = false;
+  gladdLunarCoverStats = { gl: 0, empty: 0, fb: 0 };
+  private drawLunarCoverGL(): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdLunarCoverStats.fb++; return null; }
+    if (!this.lunarCoverQueue.length) { this.gladdLunarCoverStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdLunarCoverStats.fb++; return null; }
+    const saved = this.lunarCoverQueue;
+    this._lunarCoverEmitGL = gl;
+    this._lunarCoverEmitFailed = false;
+    let ok = true;
+    try { this.flushLunarCovered(); ok = !this._lunarCoverEmitFailed; }
+    finally { this._lunarCoverEmitGL = null; this._lunarCoverEmitFailed = false; }
+    if (!ok) {
+      this.lunarCoverQueue = saved;
+      gl.end(false);
+      this.gladdLunarCoverStats.fb++;
+      return null;
+    }
+    this._gladdGroupState?.rollbacks.push(() => { this.lunarCoverQueue = saved; });
+    this.gladdLunarCoverStats.gl++;
+    return gl;
+  }
+
+  private _solarShieldGl: GLSpriteLayer | null = null;
+  private _solarShieldEmitGL: GLSpriteLayer | null = null;
+  private _solarShieldEmitFailed = false;
+  gladdShieldStats = { gl: 0, empty: 0, fb: 0 };
+  private drawSolarShieldGL(cam: Camera, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdShieldStats.fb++; return null; }
+    if (!this.solarShieldQueue.length) { this.gladdShieldStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdShieldStats.fb++; return null; }
+    const saved = this.solarShieldQueue.slice();   // flush 尾 in-place 清=slice 回滚
+    this._solarShieldEmitGL = gl;
+    this._solarShieldEmitFailed = false;
+    let ok = true;
+    try { this.flushSolarShieldQueue(cam, z); ok = !this._solarShieldEmitFailed; }
+    finally { this._solarShieldEmitGL = null; this._solarShieldEmitFailed = false; }
+    if (!ok) {
+      this.solarShieldQueue = saved;
+      gl.end(false);
+      this.gladdShieldStats.fb++;
+      return null;
+    }
+    this._gladdGroupState?.rollbacks.push(() => { this.solarShieldQueue = saved; });
+    this.gladdShieldStats.gl++;
+    return gl;
+  }
+
+  private _eyebrellaGl: GLSpriteLayer | null = null;
+  private _eyebrellaEmitGL: GLSpriteLayer | null = null;
+  private _eyebrellaIdM: DOMMatrix | null = null;
+  private _eyebrellaEmitFailed = false;
+  gladdEyebrellaStats = { gl: 0, empty: 0, fb: 0 };
+  private drawEyebrellaGL(cam: Camera, z: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdEyebrellaStats.fb++; return null; }
+    if (!this.eyebrellaQueue.length) { this.gladdEyebrellaStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdEyebrellaStats.fb++; return null; }
+    const saved = this.eyebrellaQueue.slice();
+    this._eyebrellaEmitGL = gl;
+    this._eyebrellaEmitFailed = false;
+    let ok = true;
+    try { this.flushEyebrellaCloud(cam, z); ok = !this._eyebrellaEmitFailed; }
+    finally { this._eyebrellaEmitGL = null; this._eyebrellaEmitFailed = false; }
+    if (!ok) {
+      this.eyebrellaQueue = saved;
+      gl.end(false);
+      this.gladdEyebrellaStats.fb++;
+      return null;
+    }
+    this._gladdGroupState?.rollbacks.push(() => { this.eyebrellaQueue = saved; });
+    this.gladdEyebrellaStats.gl++;
+    return gl;
+  }
+
+  private drawHeldProjGL(cam: Camera, z: number, viewW: number, viewH: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdHProjStats.fb++; return null; }
+    if (!this.heldProjCarrierQueue.length) { this.gladdHProjStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdHProjStats.fb++; return null; }
+    const saved = this.heldProjCarrierQueue;
+    this._hprojEmitGL = gl;
+    this._hprojEmitFailed = false;
+    let ok = true;
+    try {
+      this.flushHeldProjCarriers(cam, z, viewW, viewH);
+      ok = !this._hprojEmitFailed;
+    } finally {
+      this._hprojEmitGL = null;
+      this._hprojEmitFailed = false;
+    }
+    if (!ok) {
+      this.heldProjCarrierQueue = saved;   // 换数组回滚(2D 位重放)
+      this.gladdHProjStats.fb++;
+      return null;
+    }
+    this.gladdHProjStats.gl++;
+    return gl;
+  }
+
+  /** ★㊿-6 veil 交互修复(2026-10-29):水罩帧 GL 发射的内容不经 mask(水罩层序
+   *  违规面)——_veilActive 旗 7273 才置(gladd 块 7111 在其前=sink 内 veil 守卫
+   *  驱动位恒假死码)。预测=veil676 同式(12 队列非空+fb 闭包)∧水扭曲活跃
+   *  (waterWarp.active≈前景水在场)。预测真→gladd 块整跳(各面 2D 位跑含 mask
+   *  镜像)。保守面:无逃逸内容的水帧不触发(队列空=谓词假);679Ent/Fade 两项
+   *  (远端实体逃逸)未含=MP 稀有面登记。 */
+  private gladdVeilPredict(): boolean {
+    if (!this._waveLiquidInView) return false;   // 视口液体探针旗(缺省 true 保守)
+    if (this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0
+      || this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0
+      || this.itemGlowQueue.length > 0 || this.wingGlowQueue.length > 0
+      || this.eyebrellaQueue.length > 0 || this.whipFullbrightQueue.length > 0
+      || this.trailShadeQueue.length > 0 || this.towerGlowQueue.length > 0
+      || this.npcWhiteLiftQueue.length > 0 || this.heldProjCarrierQueue.length > 0
+      || this.projFullbrightQueue.length > 0) return true;
+    // ★679Ent/Fade(实体直绘族 677/668/583-585/259/260+FadingParticles)——
+    //  8755 同式(veilEntities=fg pass 传参的实体表;7152 位用 entities 等价)
+    let ent = false;
+    for (const n of this._veilPredictEnts ?? []) {
+      if (n instanceof Enemy && !n.dead && (n.vanillaId === 677 || n.vanillaId === 668
+        || n.vanillaId === 583 || n.vanillaId === 584 || n.vanillaId === 585
+        || ((n.vanillaId === 259 || n.vanillaId === 260) && n.ai0 >= 0 && n.ai1 >= 0))) {
+        ent = true; break;
+      }
+    }
+    if (ent) return true;
+    for (const f of fadingParticles.each()) return true;
+    return false;
+  }
+  /** veil 预测的实体表(7152 位=render 作用域 entities 的帧界快照;fg pass 的
+   *  veilEntities 同源) */
+  private _veilPredictEnts: unknown[] | null = null;
+
+  private drawTowerGlowGL(cam: Camera, z: number, viewW: number, viewH: number): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdTowerStats.fb++; return null; }
+    if (!this.towerGlowQueue.length) { this.gladdTowerStats.empty++; return gl; }
+    if (this._veilActive) { this.gladdTowerStats.fb++; return null; }
+    const savedT = this.towerGlowQueue.slice();   // ★D1:毒弃跨面复原(flush 尾 in-place 清,快照须在 flush 前)
+    this._towerEmitGL = gl;
+    this._towerEmitFailed = false;
+    this._towerBaseM = null;
+    let ok = true;
+    try {
+      this.flushTowerGlow(cam, z, viewW, viewH);
+      ok = !this._towerEmitFailed;
+    } finally {
+      this._towerEmitGL = null;
+      this._towerEmitFailed = false;
+      this._towerBaseM = null;
+    }
+    if (!ok) { this.gladdTowerStats.fb++; return null; }   // 队列帧头清=2D 位原样重放
+    this._gladdGroupState?.rollbacks.push(() => { this.towerGlowQueue = savedT; });
+    this.gladdTowerStats.gl++;
+    return gl;
+  }
+
+  private _fbTexCache = new Map<TexImageSource, TexEntry>();
+  private _fbTexN = 0;
+  private flushProjFullbrightGL(cam: Camera, z: number, viewW: number, viewH: number): void {
+    const glE = this._trailEmitGL;
+    if (!glE) return;
+    const fb = this.projFullbrightQueue;
+    if (!fb.length) return;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const vw2 = Math.round(viewW / 2), vh2 = Math.round(viewH / 2);
+    let m = [z, 0, 0, z, vw2 - z * camRX, vh2 - z * camRY];   // 相机基阵
+    let ga = 1, gco = 'source-over', smooth = false;
+    const mStack: Array<[number[], number, string, boolean]> = [];
+    const fail = (): void => { this._trailEmitFailed = true; };
+    const mul = (m2: number[]): void => {
+      m = [
+        m[0] * m2[0] + m[2] * m2[1], m[1] * m2[0] + m[3] * m2[1],
+        m[0] * m2[2] + m[2] * m2[3], m[1] * m2[2] + m[3] * m2[3],
+        m[0] * m2[4] + m[2] * m2[5] + m[4], m[1] * m2[4] + m[3] * m2[5] + m[5],
+      ];
+    };
+    const emit = (img: TexImageSource, sx: number, sy: number, sw: number, sh: number,
+      dx: number, dy: number, dw: number, dh: number): void => {
+      if (this._trailEmitFailed) return;
+      if (!(img as { width?: number }).width || !(img as { height?: number }).height) { fail(); return; }
+      let t = this._fbTexCache.get(img);
+      if (!t) {
+        const e = glE.texFromImage(`fb:tex:${this._fbTexN++}`, img as TexImageSource, false, true);
+        if (!e) { fail(); return; }
+        t = e;
+        this._fbTexCache.set(img, t);
+      }
+      const additive = gco === 'lighter';
+      if (gco !== 'lighter' && gco !== 'source-over') { fail(); return; }
+      const u0 = sx / t.w, v0 = sy / t.h, u1 = (sx + sw) / t.w, v1 = (sy + sh) / t.h;
+      const corner = (x: number, y: number, u: number, v: number): [number, number, number, number] =>
+        [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5], u, v];
+      const V = [
+        corner(dx, dy, u0, v0), corner(dx + dw, dy, u1, v0), corner(dx + dw, dy + dh, u1, v1),
+        corner(dx, dy, u0, v0), corner(dx + dw, dy + dh, u1, v1), corner(dx, dy + dh, u0, v1),
+      ];
+      const vd = new Float32Array(48);
+      const vr = additive ? ga : ga, vg = ga, vb = ga, va = additive ? 0 : ga;
+      for (let i = 0; i < 6; i++) {
+        vd[i * 8] = V[i][0]; vd[i * 8 + 1] = V[i][1];
+        vd[i * 8 + 2] = V[i][2]; vd[i * 8 + 3] = V[i][3];
+        vd[i * 8 + 4] = vr; vd[i * 8 + 5] = vg; vd[i * 8 + 6] = vb; vd[i * 8 + 7] = va;
+      }
+      if (!this.gladdQuadEmit(glE, t, vd, additive, smooth)) fail();   // ★刀2
+    };
+    const rec: Record<string, unknown> = {
+      save: () => { mStack.push([[...m], ga, gco, smooth]); },
+      restore: () => { const st2 = mStack.pop(); if (!st2) return; [m, ga, gco, smooth] = st2 as unknown as [number[], number, string, boolean]; },
+      translate: (x: number, y: number) => { mul([1, 0, 0, 1, x, y]); },
+      rotate: (ang: number) => { const c2 = Math.cos(ang), s2 = Math.sin(ang); mul([c2, s2, -s2, c2, 0, 0]); },
+      scale: (x: number, y: number) => { mul([x, 0, 0, y, 0, 0]); },
+      setTransform: (a: number, b: number, c: number, d: number, e: number, f: number) => { m = [a, b, c, d, e, f]; },
+      drawImage: (img: TexImageSource, a1: number, b1: number, c1?: number, d1?: number, e1?: number, f1?: number, g1?: number, h1?: number) => {
+        if (c1 === undefined) emit(img, 0, 0, (img as { width: number }).width, (img as { height: number }).height, a1, b1, (img as { width: number }).width, (img as { height: number }).height);
+        else if (e1 === undefined) emit(img, 0, 0, (img as { width: number }).width, (img as { height: number }).height, a1, b1, c1, d1!);
+        else emit(img, a1, b1, c1, d1!, e1, f1!, g1!, h1!);
+      },
+    };
+    const recProxy = new Proxy(rec, {
+      get(t, k) {
+        if (typeof k === 'string' && k in t) return t[k];
+        if (k === 'globalAlpha') return ga;
+        if (k === 'globalCompositeOperation') return gco;
+        if (k === 'imageSmoothingEnabled') return smooth;
+        fail();   // 未知成员=闭包 API 面外→整面回退
+        return undefined;
+      },
+      set(t, k, v) {
+        if (k === 'globalAlpha') { ga = Number(v); return true; }
+        if (k === 'globalCompositeOperation') { gco = String(v); return true; }
+        if (k === 'imageSmoothingEnabled') { smooth = Boolean(v); return true; }
+        fail();
+        return true;
+      },
+    });
+    for (const fn of fb) {
+      try { fn(recProxy as unknown as CanvasRenderingContext2D); } catch { fail(); break; }
+      if (this._trailEmitFailed) break;
+    }
+    if (!this._trailEmitFailed) this.projFullbrightQueue = [];   // 消费(7f 位空队早退)
   }
 
   private compositeLight(

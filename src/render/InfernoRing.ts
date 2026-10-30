@@ -178,6 +178,11 @@ export function drawInfernoRings(
   img: CanvasImageSource | null,
   camX: number, camY: number, z: number, viewW: number, viewH: number,
   frameBaker: FlameRingFrameBaker = tintedFrame,
+  /** ★gladd 面⑫-c-inferno（2026-10-28,task#22）:GL 发射钩（缺省 undefined=2D 原路
+   *  零变化）。签名=(M=层变换快照, frame=烘焙帧, half, base, topup)→ok。双拍语义
+   *  同 2D:pass1 SO α=base(削底+半RGB)+pass2 additive α=topup(RGB 补足)——
+   *  ⑪ ㊵ 判例族。 */
+  emit?: (M: DOMMatrix, frame: CanvasImageSource, half: number, base: number, topup: number) => boolean,
 ): void {
   if (!img) return;
   if (frameBaker === tintedFrame && !tintCanvas) {
@@ -217,6 +222,14 @@ export function drawInfernoRings(
       const s = num4;
       ctx.scale(s, s);
       const half = FLAME_RING_FRAME / 2;
+      // ★gladd 面⑫-c-inferno sink:M=层变换快照(同式复刻读),双拍单发射;
+      //  帧画布=tintedFrame 单画布逐层重烘→texRefresh 逐层重传(⑦ 模式)
+      if (emit) {
+        const M = ctx.getTransform();
+        if (!emit(M, frame, half, base, topup)) { ctx.restore(); return; }
+        ctx.restore();
+        continue;
+      }
       // pass1 source-over：InverseSourceAlpha 削底 dst×(1−num5/2) + 半 RGB
       ctx.globalCompositeOperation = 'source-over';
       if (base > 0) {

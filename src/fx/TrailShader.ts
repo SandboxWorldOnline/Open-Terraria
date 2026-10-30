@@ -346,6 +346,14 @@ export function drawStripTrail(
     /** 源矩形（半分辨率档 rw×rh）与页域 dest（世界坐标 bx,by,bw,bh——调用方相机系） */
     sw: number; sh: number; dx: number; dy: number; dw: number; dh: number;
   }) => void,
+  /** ★gladd 面⑫-b（2026-10-28,task#22）:GL 发射钩（缺省 undefined=2D blit 原路
+   *  零变化）。armed 时【跳过 2D blit】改调本钩——info 同 onBlit 形;返回 false=
+   *  发射失败（调用方置失败旗降级）。scratch=直色 rgb(=加算贡献)/α∈{0,255}
+   *  →premul 上传后贡献本体逐位;blend=additive vCol=(1,1,1,0)。 */
+  glEmit?: (info: {
+    canvas: HTMLCanvasElement;
+    sw: number; sh: number; dx: number; dy: number; dw: number; dh: number;
+  }) => boolean,
 ): boolean {
   const pts = spec.pts.filter((q) => Number.isFinite(q.x) && Number.isFinite(q.y));
   if (pts.length < 2) return false;
@@ -674,6 +682,10 @@ export function drawStripTrail(
     }
   }
   scx.putImageData(frame, 0, 0);
+  // ★gladd 面⑫-b sink:armed=GL 发射替代 2D blit(smooth=true 对位 imageSmoothing)
+  if (glEmit) {
+    return glEmit({ canvas: scratch, sw: rw, sh: rh, dx: bx, dy: by, dw: bw, dh: bh });
+  }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.imageSmoothingEnabled = true;

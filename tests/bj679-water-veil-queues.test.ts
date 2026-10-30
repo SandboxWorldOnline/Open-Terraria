@@ -46,6 +46,11 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Renderer } from '../src/render/Renderer';
+import { TileStore } from '../src/world/TileStore';
+import type { Enemy } from '../src/entities/Enemy';
+import type { Camera } from '../src/render/Camera';
+import type { World } from '../src/world/World';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RDR = readFileSync(join(HERE, '..', 'src/render/Renderer.ts'), 'utf8');
@@ -76,9 +81,13 @@ describe('★BJ679 §1 逐队列镜像在位锁（源码锚+escapeVeilStroke 调
     expect(b).toContain('if (!tgt && this._veilActive) {');
     expect(b).toContain('const camM = ctx.getTransform();');
     expect(b).toContain('this.drawFaeling(e, world, mc);');
-    // box=历史轨迹包络（与拖尾同索引域 num4..5 步 3）
+    // box=历史轨迹包络（与拖尾同索引域 num4..5 步 3;★BJ739 单源迁 entVeilBox——谓词/镜像共用防漂移）
     expect(b).toContain('for (let i = num4; i >= 5; i -= 3) {');
-    expect(b).toContain('const pad = 40 + 14 * scale;');
+    expect(b).toContain('const vb = Renderer.entVeilBox(e);');
+    const eb = body(RDR, 'static entVeilBox(e: Enemy)');
+    expect(eb).toContain('const padX = (e.w || 22) / 2 + 16 + 18 * scale;');
+    expect(eb).toContain('const padY = (e.h || 22) / 2 + 30 + 18 * scale;');
+    expect(eb).toContain('for (let i = num4; i >= 5; i -= 3) {');
   });
 
   it("7d' drawFairyBright:仙灵 583-585 镜像（FairyCritter→NPC 链→:63183 水前）", () => {
@@ -148,8 +157,8 @@ describe('★BJ679 §1 逐队列镜像在位锁（源码锚+escapeVeilStroke 调
     expect(b).toContain('mc.drawImage(tinted, 0, 0, tex.width, tex.height,');
   });
 
-  it("7f flushTrailShade:onBlit 钩子镜像（DrawProjectiles :63199 水前;GL 路余债注）", () => {
-    const b = body(RDR, 'private flushTrailShade(cam: Camera, z: number, viewW: number, viewH: number): void', 11000);
+  it("7f flushTrailStrips(⑫-b 拆分承续体):onBlit 钩子镜像（DrawProjectiles :63199 水前;GL 路余债注）", () => {
+    const b = body(RDR, 'private flushTrailStrips(cam: Camera, z: number, viewW: number, viewH: number): void', 11000);
     expect(b).toContain('DrawProjectiles :63199');
     expect(b).toContain('const veilCamM = this._veilActive ? ctx.getTransform() : null;');
     expect(b).toContain('drawStripTrail(ctx, this, spec, veilCamM ? (bi) => {');
@@ -169,17 +178,30 @@ describe('★BJ679 §1 逐队列镜像在位锁（源码锚+escapeVeilStroke 调
 });
 
 describe('★BJ679 §2 谓词扩区+会话域（drawLiquids/render）', () => {
-  it('veil676 谓词含九路新队列+实体直绘族（veilEntities）+FadingParticles', () => {
-    expect(RDR).toContain('|| this.itemGlowQueue.length > 0 || this.wingGlowQueue.length > 0');
-    expect(RDR).toContain('|| this.eyebrellaQueue.length > 0 || this.whipFullbrightQueue.length > 0');
+  it('veil676 谓词含九路新队列+实体直绘族（veilEntities）+FadingParticles;★BJ741 玩家绑定六队列位置域', () => {
+    // ★BJ741 分组:玩家绑定六队列（位置域=玩家域盒液检）∨世界绑定五队列（保守）∨实体∨粒子
+    expect(RDR).toContain('const veilPlayerQ = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0');
+    expect(RDR).toContain('|| this.wingGlowQueue.length > 0 || this.eyebrellaQueue.length > 0;');
+    expect(RDR).toContain('const veilWorldQ = (this.itemGlowQueue.length > 0 || this.whipFullbrightQueue.length > 0');
     expect(RDR).toContain('|| this.trailShadeQueue.length > 0 || this.towerGlowQueue.length > 0');
-    expect(RDR).toContain('|| this.npcWhiteLiftQueue.length > 0 || veil679Ent || veil679Fade;');
+    expect(RDR).toContain('|| this.npcWhiteLiftQueue.length > 0)');
+    // ★BJ742:世界绑定五队列位置域（逐条目盒液检）
+    expect(RDR).toContain('&& (!Renderer.veilbox || this.veilWorldQHitsLiquid(world, cam, viewW, viewH, z));');
+    expect(RDR).toMatch(/private veilWorldQHitsLiquid\(world: World, cam: Camera, viewW: number, viewH: number, z: number\)/);
+    expect(RDR).toContain("const px = (m.a * cxL + m.c * cyL + m.e) * invK;");
+    expect(RDR).toContain('const wx = (px - viewW / 2) / z + camRX;');
+    expect(RDR).toContain('|| veilWorldQ || veil679Ent || veil679Fade;');
+    // 位置域门:veilPlayerBox 缺省=旧行为(bg pass/其他调用方),旗关=旧行为
+    expect(RDR).toContain('veilPlayerBox === undefined || !Renderer.veilbox');
+    expect(RDR).toContain('|| Renderer.boxHasLiquid(world.store, veilPlayerBox)))');
+    // 调用位:玩家域盒 bbox+96 传参
+    expect(RDR).toContain('(player.w || 20) / 2 + 96, phh = (player.h || 42) / 2 + 96');
     // 实体直绘族 ID 面:677/668/583-585/259-260
     expect(RDR).toContain("n.vanillaId === 677 || n.vanillaId === 668");
     expect(RDR).toContain('n.vanillaId === 583 || n.vanillaId === 584 || n.vanillaId === 585');
     // fg pass 传 entities,bg 缺省空表零扫
-    expect(RDR).toContain('veilEntities: Entity[] = []) {');
-    expect(RDR).toContain('this.drawLiquids(world, cam, viewW, viewH, z, false, entities);');
+    expect(RDR).toContain('veilEntities: Entity[] = [],');
+    expect(RDR).toContain('z, false, entities,');
   });
 
   it('drawWingOverlay:tgt/mirrorPass 参数+betsy/trail45 子链跳过（余债登记）', () => {
@@ -255,6 +277,7 @@ describe('★BJ679 §3 行为锁', () => {
       }],
       _veilActive: true,
       escapeVeilStroke: (box: unknown, paint: (mc: CanvasRenderingContext2D) => void) => { strokes.push({ box, paint }); },
+      c10eCompositeIntoHud: () => {},   // ★塔桥㊸ 折叠头(2026-10-29)桩:合成 self 补员
     };
     (Renderer.prototype as unknown as {
       flushNpcWhiteLift: (c: unknown, z: number, vw: number, vh: number) => void;
@@ -295,6 +318,7 @@ describe('★BJ679 §3 行为锁', () => {
       ctx: rec.ctx, towerGlowQueue: [q],
       _veilActive: true,
       escapeVeilStroke: (box: unknown, paint: (mc: CanvasRenderingContext2D) => void) => { strokes.push({ box, paint }); },
+      c10eCompositeIntoHud: () => {},   // ★塔桥㊸ 折叠头(2026-10-29)桩:合成 self 补员
     };
     (Renderer.prototype as unknown as {
       flushTowerGlow: (c: unknown, z: number, vw: number, vh: number) => void;
@@ -328,6 +352,7 @@ describe('★BJ679 §3 行为锁', () => {
         sw: 80, sh: 80, wx: 500, wy: 700, vx: 3, vy: 4, num: 4, xoff: 0, opacity: 1,
       }],
       escapeVeilStroke: (box: unknown, paint: unknown) => { strokes.push({ box, paint }); },
+      c10eCompositeIntoHud: () => {},   // ★塔桥㊸ 折叠头(2026-10-29)桩:合成 self 补员
     };
     (Renderer.prototype as unknown as {
       flushTowerGlow: (c: unknown, z: number, vw: number, vh: number) => void;
@@ -336,4 +361,149 @@ describe('★BJ679 §3 行为锁', () => {
     expect(strokes.length).toBe(0);                                   // 零镜像笔
     expect(rec.ops.some((o) => o.op === 'setTransform')).toBe(false); // 未触 getTransform 域
   }, 120000);
+});
+
+
+// ===================== ★BJ739 位置域检查（veilbox 缺省开;?veilbox=0 逃生门）=====================
+// 【动因】aether 常驻 Faeling 空中巡飞=veil679Ent 恒真→整帧前景液体禁批回 CPU 链
+// +7e 会话全家 2D（BJ738 探针:杀 677 后 8px 网格消失=机制归因）。盒内无液体 ⇒
+// 水罩复合对本实体全透明（fgCanvas 盒内无水像素）=跳过视觉逐位同。
+describe('★BJ739 veil 实体族位置域（entVeilBox/boxHasLiquid/谓词接线）', () => {
+  it('entVeilBox:677=轨迹包络±(40+14·scale)（TrailCache 60,索引 54..5 步 3）;583-585=bbox+40;668/259-260=null（保守不检）', () => {
+    const faeling = {
+      vanillaId: 677, vanillaScale: 2, cx: 1000, cy: 2000, w: 22, h: 22,
+      historyDepth: () => 60,
+      histXAt: (i: number) => 1000 - i * 2,
+      histYAt: () => 2000,
+    } as unknown as Enemy;
+    const b = Renderer.entVeilBox(faeling);
+    expect(b).not.toBeNull();
+    // 轨迹最远点 = histXAt(54)=1000-108=892;sound padX=11+16+36=63,padY=11+30+36=77
+    expect(b!.x0).toBe(892 - 63); expect(b!.x1).toBe(1000 + 63);
+    expect(b!.y0).toBe(2000 - 77); expect(b!.y1).toBe(2077);
+    // 历史不足=恒返本体（histCount=0 → 包络退化为 cx/cy）
+    const still = { ...faeling, historyDepth: () => 0 } as unknown as Enemy;
+    const b2 = Renderer.entVeilBox(still);
+    expect(b2!.x0).toBe(1000 - 63); expect(b2!.x1).toBe(1063);
+    // 仙灵:24px 精灵同枢,bbox+40 覆盖
+    const fairy = { vanillaId: 583, vanillaScale: 1, cx: 300, cy: 400, w: 20, h: 20,
+      historyDepth: () => 0 } as unknown as Enemy;
+    const bf = Renderer.entVeilBox(fairy)!;
+    // hw=max(w,24)/2=12（最小精灵域钳——比 bbox 更保守,正确方向）
+    expect(bf.x0).toBe(300 - 12 - 40); expect(bf.y1).toBe(400 + 12 + 40);
+    // 域不定族=保守 null
+    for (const vid of [668, 259, 260]) {
+      expect(Renderer.entVeilBox({ vanillaId: vid, cx: 0, cy: 0, historyDepth: () => 0 } as unknown as Enemy)).toBeNull();
+    }
+  });
+
+  it('boxHasLiquid:盒内液体格存在性（罩源=前景水=纯液体格,瀑布另链不进罩源）;边界钳制', () => {
+    const st = new TileStore(64, 64);
+    const i = st.idx(30, 30);
+    st.liquid[i] = 255;
+    expect(Renderer.boxHasLiquid(st, { x0: 30 * 16, y0: 30 * 16, x1: 31 * 16, y1: 31 * 16 })).toBe(true);
+    expect(Renderer.boxHasLiquid(st, { x0: 40 * 16, y0: 40 * 16, x1: 41 * 16, y1: 41 * 16 })).toBe(false);
+    // 负坐标/越界盒钳制不炸
+    expect(Renderer.boxHasLiquid(st, { x0: -100, y0: -100, x1: 0, y1: 0 })).toBe(false);
+    expect(Renderer.boxHasLiquid(st, { x0: 63 * 16, y0: 63 * 16, x1: 999 * 16, y1: 999 * 16 })).toBe(false);
+  });
+
+  it('★BJ742 veilWorldQHitsLiquid:itemGlow op 仿射重建世界位(往返恒等+干地/水边分档)+whip/trail/tower/npcWhiteLift 直盒', () => {
+    const st = new TileStore(256, 256);
+    // 液体@tile(125,62)=世界(2000..2016,992..1008)
+    st.liquid[st.idx(125, 62)] = 255;
+    // 帧参:viewW=800 viewH=600 z=2 cam=(1000,500) → camR=(1000,500)
+    const cam = { x: 1000, y: 500 } as unknown as Camera;
+    const W = { store: st } as unknown as World;
+    const r = Object.create(Renderer.prototype) as unknown as Renderer;
+    const setQ = (o: Record<string, unknown>) => Object.assign(r, o);
+    // k=1 世界变换 m=[2,0,0,2,400-2·1000,300-2·500]（tile op 收集域）
+    const M = { a: 2, b: 0, c: 0, d: 2, e: -1600, f: -700 } as unknown as DOMMatrix;
+    const mkOp = (dx: number, dy: number) => ({ tex: 'x', sx: 0, sy: 0, sw: 16, sh: 16, dx, dy,
+      blend: 'add' as const, tint: [1, 1, 1] as [number, number, number], alpha: 1 });
+    // 手持 op（局部域,平移到世界 (2000,1000)）: m'=世界×local(平移 2000,1000)
+    const ML = { a: 2, b: 0, c: 0, d: 2, e: -1600 + 2 * 2000, f: -700 + 2 * 1000 } as unknown as DOMMatrix;
+    // 干地:火把在世界 (3000,1500)（tile 187/93 附近无液）
+    setQ({ itemGlowQueue: [{ m: M, k: 1, ops: [mkOp(3000, 1500)] }], whipFullbrightQueue: [],
+      trailShadeQueue: [], towerGlowQueue: [], npcWhiteLiftQueue: [] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(false);
+    // 水边:火把在世界 (2000,1000)（液格上）
+    setQ({ itemGlowQueue: [{ m: M, k: 1, ops: [mkOp(2000, 1000)] }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(true);
+    // 手持域（local 合成 m'）同点位命中=重建对两种收集域一致
+    setQ({ itemGlowQueue: [{ m: ML, k: 1, ops: [mkOp(0, 0)] }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(true);
+    // 干地+local
+    const MLD = { a: 2, b: 0, c: 0, d: 2, e: -1600 + 2 * 3000, f: -700 + 2 * 1500 } as unknown as DOMMatrix;
+    setQ({ itemGlowQueue: [{ m: MLD, k: 1, ops: [mkOp(0, 0)] }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(false);
+    // whip 段点直盒:干地/水边
+    setQ({ itemGlowQueue: [], whipFullbrightQueue: [{ pts: [{ x: 1995, y: 1000 }, { x: 2010, y: 1005 }], tex: { width: 12, height: 12 } as HTMLImageElement, color: [0, 0, 0, 0] }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(true);
+    setQ({ whipFullbrightQueue: [{ pts: [{ x: 2900, y: 1500 }, { x: 2950, y: 1550 }], tex: { width: 12, height: 12 } as HTMLImageElement, color: [0, 0, 0, 0] }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(false);
+    // tower/npcWhiteLift 直盒
+    setQ({ whipFullbrightQueue: [], towerGlowQueue: [{ vid: 1, tex: 'x', iw: 1, sy: 0, gh: 1, sw: 16, sh: 16, wx: 2000, wy: 1000, vx: 0, vy: 0, num: 1, xoff: 0, opacity: 1 }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(true);
+    setQ({ towerGlowQueue: [], npcWhiteLiftQueue: [{ cx: 3000, cy: 1500, sw: 20, sh: 20, vid: 395, tex: 'x', sy: 0 }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(false);
+    setQ({ npcWhiteLiftQueue: [{ cx: 2005, cy: 1000, sw: 20, sh: 20, vid: 395, tex: 'x', sy: 0 }] });
+    expect(r['veilWorldQHitsLiquid'](W, cam, 800, 600, 2)).toBe(true);
+  });
+
+  it('谓词接线+逃生门（源码锚）:veilbox 旗/entVeilHitsLiquid 谓词面/entVeilBox 镜像单源在位', () => {
+    expect(RDR).toContain("new URLSearchParams(location.search).get('veilbox') !== '0'");
+    expect(RDR).toContain('if (!Renderer.veilbox || Renderer.entVeilHitsLiquid(n, world.store)) {');
+    // 镜像裁剪盒单源（漂移即红:谓词漏罩/过触发双风险）
+    expect(RDR).toContain('const vb = Renderer.entVeilBox(e);');
+  });
+
+  it('entVeilHitsLiquid:677 悬停水面上方(~46px)逐样本不命中;贴水/入水命中;583 干地不命中', () => {
+    const st = new TileStore(64, 64);
+    // 液面 = y=32*16=512(行 32 满液)
+    for (let x = 0; x < 64; x++) st.liquid[st.idx(x, 32)] = 255;
+    // 疾飞(num9=1:54 帧位移 108px>hypot(32,16))悬停 46px 上方:轨迹盒底=样本+11+32+18.2=61.2
+    // → 527.2>512 命中——spin 全幅可探水,罩正确保留
+    const fast = {
+      vanillaId: 677, vanillaScale: 1, cx: 32 * 16, cy: 512 - 46, x: 32 * 16, y: 512 - 46, w: 22, h: 22,
+      historyDepth: () => 60,
+      histXAt: (i: number) => 32 * 16 - i * 2,
+      histYAt: () => 512 - 46,
+    } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(fast, st)).toBe(true);
+    // ★悬停(num9=0:位移≈0,spin 幅度∝num9→0)同 46px 上方:盒底=样本+11+18.2=29.2
+    // → 495.2<512 不命中=解除整帧 CPU 液体(BJ739 收益主面)
+    const still = {
+      vanillaId: 677, vanillaScale: 1, cx: 32 * 16, cy: 512 - 46, x: 32 * 16, y: 512 - 46, w: 22, h: 22,
+      historyDepth: () => 60,
+      histXAt: () => 32 * 16,
+      histYAt: () => 512 - 46,
+    } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(still, st)).toBe(false);
+    // 悬停 25px 上方:495.2+21=... 盒底=(512-25)+29.2=516.2>512 命中(贴水罩保留)
+    const stillLow = { ...still, cy: 512 - 25, histYAt: () => 512 - 25 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(stillLow, st)).toBe(true);
+    // 疾飞 70px 上方:盒底=(512-70)+61.2=503.2<512 不命中
+    const high = { ...fast, cy: 512 - 70, histYAt: () => 512 - 70 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(high, st)).toBe(false);
+    // 贴水(cy=500)
+    const low = { ...fast, cy: 500, histYAt: () => 500 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(low, st)).toBe(true);
+    // 入水
+    const dip = { ...fast, cy: 520, histYAt: () => 520 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(dip, st)).toBe(true);
+    // 轨迹探底而本体高位（轨迹样本盒命中）
+    const trailDip = { ...fast, histYAt: (i: number) => (i > 40 ? 512 - 46 : 505) } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(trailDip, st)).toBe(true);
+    // 仙灵:干地(液面远处)
+    const fairyDry = { vanillaId: 583, vanillaScale: 1, cx: 32 * 16, cy: 200, w: 20, h: 20,
+      historyDepth: () => 0 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(fairyDry, st)).toBe(false);
+    const fairyWet = { ...fairyDry, cy: 512 } as unknown as Enemy;
+    expect(Renderer.entVeilHitsLiquid(fairyWet, st)).toBe(true);
+    // 域不定族恒 true
+    for (const vid of [668, 259, 260]) {
+      expect(Renderer.entVeilHitsLiquid({ vanillaId: vid, cx: 100, cy: 100, historyDepth: () => 0 } as unknown as Enemy, st)).toBe(true);
+    }
+  });
 });

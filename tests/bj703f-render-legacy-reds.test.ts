@@ -377,9 +377,18 @@ describe.skipIf(process.env.SW_BJ703F_MUT)('BJ703-F §F 变异自证', () => {
       () => runCase('hue/白双 bake 保形'), { label: 'BJ703F M3 PrismProj' });
   });
   it('M4 Renderer 1034 染色笔 flatten=false→true（线带回潮）→ §C 恰红', () => {
+    // ★BJ739 勘正（2026-10-30）:⑫-a 批化刀（2026-10-29）把染色笔行复制进 GL sink 分支
+    //  → 触发串两处二义,缺省 replace 只改第一处（GL 分支）而 §C 直调 2D 分支
+    //  =变异打不中→恰绿假阴。改 replaceAll 双分支同变异（判别面更宽:2D/GL 两路
+    //  摊平回潮均须红）。
     withMutation(RENDERER,
       'const tinted = tintedTex(tex as never, [r, g, b], false);',
       'const tinted = tintedTex(tex as never, [r, g, b], true);   // ★BJ703F 变异:摊平回潮',
-      () => runCase('黑形@ga=12/255'), { label: 'BJ703F M4 Renderer 1034' });
+      () => runCase('黑形@ga=12/255'), {
+        label: 'BJ703F M4 Renderer 1034',
+        mutate: (pristine) => pristine.split(
+          'const tinted = tintedTex(tex as never, [r, g, b], false);').join(
+          'const tinted = tintedTex(tex as never, [r, g, b], true);   // ★BJ703F 变异:摊平回潮'),
+      });
   });
 });

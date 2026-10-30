@@ -797,6 +797,23 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
   colorgradientdither: 'Misc_Sunflare_colorgradientdither.png',
 };
 
+/** ★gladd 面④（2026-10-28,task#22）：镜头光斑元素四边形（2D/GL 双消费单源收集器
+ *  collectLensFlare 的产物；GL 侧=Renderer.drawWorldFxGL quadBatchRgba 仿射角点）。 */
+export interface FlareQuad {
+  /** tintedFlareSprite 缓存画布（内容=tex×rgb×α-from-luminance；池化回收可重写） */
+  sprite: HTMLCanvasElement;
+  /** tint 缓存键（texId|rgb）——GL 纹理键纪律用（画布对象可被池回收重写） */
+  tintKey: string;
+  /** 设备坐标（2D translate 锚=元素中心） */
+  x: number; y: number;
+  /** 目标尺寸（tex.width×scale） */
+  w: number; h: number;
+  /** 旋转弧度（baseRot+行 Rotation） */
+  rot: number;
+  /** min(1,a)——2D globalAlpha；GL 侧进 vCol.rgb（α=0 纯加习语） */
+  alpha: number;
+}
+
 /** 镜头元素乘色缓存（lighter 叠加前先 multiply 着色——LensFlareElement.Color :422 等） */
 const flareTintCache = new Map<string, HTMLCanvasElement>();
 /** ★flare 淘汰画布池（2026-10-12 同 tintTex 池判例）：晨昏 sunDim/occlusion 漂移
@@ -1452,20 +1469,9 @@ export class SkyRenderer {
    *  :64032-64057 微光支）。调用位 = Renderer.render 主画布段收尾（本仓管线中
    *  与原版「黑幕→背景水→人工星→地下背景」层序的对应,见 Renderer 侧注） */
   drawShimmerStars(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number, shim: number): void {
-    if (shim <= 0 || this.numStars <= 0) return;
-    const gyIntensity = this.weatherRef?.graveyardVisual ?? 0;
-    const starDim = Math.max(0, 1 - gyIntensity * 1.4);          // :62471-62479 同式
-    if (starDim <= 0) return;
-    // 衰减天空色（:64003-64007 同式——人工/自然同源）+ 可见性门（:64015；
-    // shim→1 时 cots→0 门恒开 = 地下/白昼均见星）
-    const kShim = 1 - shim;
-    const cotsFaded: readonly number[] | null = this.cots
-      ? [this.cots[0] * kShim, this.cots[1] * kShim, this.cots[2] * kShim]
-      : [255, 255, 255];
-    const cotsR = cotsFaded[0];
-    const remixWorldForDraw = !!this.frameCtx?.world?.seedFlags?.remix;
-    const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
-    if (!remixWorldForDraw && visGate <= 0) return;
+    const gate = this.shimmerStarGate(camY, shim);
+    if (!gate) return;
+    const { starDim, cotsFaded } = gate;
     // ★C13 星批化:GL 层在场=批路径（begin('sstars')→原位 blit,层序=veil 后/
     // 世界前的既有位）;GL 不可用帧=2D 逐星回退（原路径逐位）
     const bt = ctx.getTransform();
@@ -1475,8 +1481,10 @@ export class SkyRenderer {
       this.emitStarBatchGL(layer, batch, 'sstars', viewW, viewH);
       // ★blit 恒等变换（同 'sstarn' 位注）。★C10e：星必须落 HUD（veil 在 HUD 之上
       //  才能盖天空栈、星在 veil 后同层序;世界 present 在 glCanvas=HUD 之下——
-      //  星若 glCanvas 直出会被世界 present 盖住=层序破坏）。管线后端 present 为
-      //  blend-off 直写=踩踏屏栈 → blit 后 restackScreen 恢复「glCanvas=屏栈」。
+      //  ★BJ740 勘注:此论域=路由帧（世界 blit 进 HUD）;GL 桥帧（BJ740）黑幕+星
+      //  over-present 落 glCanvas 中栈=世界 present 后落其上=原版「墙/tile 盖星」
+      //  同序（本注旧论按路由帧成立,GL 桥帧走 drawShimmerStarsGL 不经此臂）。
+      //  管线后端 present 为 blend-off 直写=踩踏屏栈 → blit 后 restackScreen 恢复。
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(layer.canvas, 0, 0);
@@ -1490,6 +1498,87 @@ export class SkyRenderer {
       this.drawStar(ctx, i, starDim, viewW, viewH, this._lastStarBgTopY, bt, shim, true, cotsFaded);
     }
     ctx.restore();
+  }
+
+  /** ★BJ740 人工星门单源（drawShimmerStars 2D 臂与 drawShimmerStarsGL GL 臂共用,
+   *  表达式逐字同旧内联——漂移即两臂分叉红）。null=本帧不出星（墓地/云量门/零星）。 */
+  private shimmerStarGate(camY: number, shim: number): { starDim: number; cotsFaded: readonly number[] } | null {
+    if (shim <= 0 || this.numStars <= 0) return null;
+    const gyIntensity = this.weatherRef?.graveyardVisual ?? 0;
+    const starDim = Math.max(0, 1 - gyIntensity * 1.4);          // :62471-62479 同式
+    if (starDim <= 0) return null;
+    // 衰减天空色（:64003-64007 同式——人工/自然同源）+ 可见性门（:64015；
+    // shim→1 时 cots→0 门恒开 = 地下/白昼均见星）
+    const kShim = 1 - shim;
+    const cotsFaded: readonly number[] = this.cots
+      ? [this.cots[0] * kShim, this.cots[1] * kShim, this.cots[2] * kShim]
+      : [255, 255, 255];
+    const remixWorldForDraw = !!this.frameCtx?.world?.seedFlags?.remix;
+    const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsFaded[0] - 25;
+    if (!remixWorldForDraw && visGate <= 0) return null;
+    return { starDim, cotsFaded };
+  }
+
+  /** ★BJ740 黑幕 1×1 白纹素（惰性;node 无 document=null=GL 臂让位） */
+  private _shimVeilCv: HTMLCanvasElement | null = null;
+  private shimVeilPixel(): HTMLCanvasElement | null {
+    if (this._shimVeilCv) return this._shimVeilCv;
+    if (typeof document === 'undefined') return null;
+    const cv = document.createElement('canvas');
+    cv.width = 1; cv.height = 1;
+    const c2 = cv.getContext('2d');
+    if (!c2) return null;
+    c2.fillStyle = '#fff';
+    c2.fillRect(0, 0, 1, 1);
+    this._shimVeilCv = cv;
+    return cv;
+  }
+
+  /** ★BJ740 恒等矩阵/黑幕 quad scratch（GL 臂 HUD 位变换恒等判例;免逐帧分配） */
+  private _idM: DOMMatrix | null = null;
+  private _shimVeilQuad = new Float32Array(48);
+
+  /** ★BJ740（2026-10-30）：微光独石黑幕+人工星 GL 直出——'sstars' 会话 over-present
+   *  落 glCanvas 中栈槽（bg present 后/世界 present 前=lantern/ambgl 桥同款;opresent
+   *  defer 门 shimmer 帧本就禁=bg 已在画布,层序成立）。黑幕=1×1 白纹素全幅 quad
+   *  premul (0,0,0,shim)（原版 MagicPixel Black*shimmerAlpha SO:out=dst×(1−shim)）;
+   *  人工星=buildStarBatch 同源（bt=恒等——HUD 位变换恒等判例）。
+   *  调用方（Renderer BJ740 臂）已预获取 pipe=同实例零失败窗;本方法内失败=该帧
+   *  黑幕/星缺席（帧头预备使其≈不可达;自愈,登记口径）。 */
+  drawShimmerStarsGL(gl: GLSpriteLayer, viewW: number, viewH: number, camY: number, shim: number): void {
+    if (shim <= 0) return;
+    const px = this.shimVeilPixel();
+    if (!px) return;
+    const a = Math.max(0, Math.min(1, shim));
+    gl.resize(viewW, viewH);
+    gl.begin('sstars');
+    if (gl.unavailable) return;
+    const e = gl.texFromImage('shimveil:px', px, false, true);
+    if (e) {
+      // 全幅 quad（TRIANGLES 两三角;stride 8×6=48——batQuad 布局同式,premul rgb=0）
+      const d = this._shimVeilQuad;
+      const W = viewW, H = viewH;
+      const put = (o: number, x: number, y: number, u: number, v: number) => {
+        d[o] = x; d[o + 1] = y; d[o + 2] = u; d[o + 3] = v;
+        d[o + 4] = 0; d[o + 5] = 0; d[o + 6] = 0; d[o + 7] = a;
+      };
+      put(0, 0, 0, 0, 0); put(8, W, 0, 1, 0); put(16, W, H, 1, 1);
+      put(24, 0, 0, 0, 0); put(32, W, H, 1, 1); put(40, 0, H, 0, 1);
+      gl.quadBatchRgba(e, d, 1, true);
+    }
+    const gate = this.shimmerStarGate(camY, shim);
+    if (gate) {
+      this._idM ??= new DOMMatrix();
+      const batch = this.buildStarBatch(true, gate.starDim, viewW, viewH, this._lastStarBgTopY,
+        this._idM, shim, gate.cotsFaded);
+      if (batch) {
+        for (const seg of batch.segments) {
+          const se = gl.texFromImage(seg.key, seg.img, false, true);
+          if (se) gl.quadBatchRgba(se, seg.data, seg.quads, true);
+        }
+      }
+    }
+    gl.end(true, true);   // over-present 落屏栈（世界 present 在后=墙/tile 盖星同原版）
   }
   private cloudTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
@@ -4278,11 +4367,39 @@ export class SkyRenderer {
    *  或其他项——现标量近似即字节码精确等价,非近似。 */
   private drawLensFlare(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     sunset: number, sunrise: number, celestial: number): void {
+    const quads = this.collectLensFlare(viewW, viewH, sunset, sunrise, celestial);
+    if (quads) this.drawLensFlareQuads(ctx, quads);
+  }
+
+  /** ★gladd 面④：元素四边形 2D 直绘（原 drawLensFlare 尾段逐字：外层 save+恒等
+   *  变换+'lighter'+平滑开，逐元素 save/α/translate/rotate/drawImage/restore——
+   *  像素序与原实现逐位同）。 */
+  private drawLensFlareQuads(ctx: CanvasRenderingContext2D, quads: FlareQuad[]): void {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    for (const q of quads) {
+      ctx.save();
+      ctx.globalAlpha = q.alpha;
+      ctx.translate(q.x, q.y);
+      ctx.rotate(q.rot);
+      ctx.drawImage(q.sprite, -q.w / 2, -q.h / 2, q.w, q.h);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** ★gladd 面④：镜头光斑元素收集（原 drawLensFlare 头段数学逐字单源化；2D/GL
+   *  双消费——门/强度门/轴角/残影项与原实现逐字同源）。null=本帧无光斑。 */
+  private collectLensFlare(viewW: number, viewH: number,
+    sunset: number, sunrise: number, celestial: number): FlareQuad[] | null {
     const sun = this.sunScreen;
-    if (!sun) return;
+    if (!sun) return null;
     // SunVisibilityEnabled 门（HorizonHelper.cs:42 = _targetUpToDate）：首帧采样未就绪
     // 时不画光斑（原版同）——进世界后第二帧起生效
-    if (!this.sunVisSampled) return;
+    if (!this.sunVisSampled) return null;
     // AdjustIntensity（:393-408，纯函数 adjustFlareIntensity）：常态
     //  intensity = (temporal×celestial)³；sunScorchCounter>0 分支整体替换为
     //  1−(1−lerp(0,300,counter))² 曲线 ×celestial ×5（吸血鬼种子阳光炽灼档）——
@@ -4293,21 +4410,17 @@ export class SkyRenderer {
     const scorch = this.frameCtx?.player?.sunScorchCounter ?? 0;
     const num = adjustFlareIntensity(sunrise, celestial, scorch) * occ;
     const num2 = adjustFlareIntensity(sunset, celestial, scorch) * occ;
-    if (num <= 0.01 && num2 <= 0.01) return;
+    if (num <= 0.01 && num2 <= 0.01) return null;
     const cx = viewW / 2, cy = viewH / 2;
     // :46-49 轴角 + Main.screenPosition.Y·0.001(世界屏顶 Y——旧误用 sun.y 屏幕坐标)
     const baseRot = Math.atan2(cy - sun.y, cx - sun.x) + this.lastScreenTopY * 0.001;
     // 玩家残影项（LensFlareElement.cs:34-37）：本仓等价 = Player.advancedShadows
     // 位置历史环（翅膀 45 彩虹拖尾同源数据）；无残影（环 ≤1 项）恒 0
     const shadowD = flareShadowTerm(this.frameCtx?.player?.advancedShadows, sun.x, sun.y, cx, cy) * -0.0002;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.imageSmoothingEnabled = true;
-    if (num2 > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num2, 'sunset', shadowD);
-    if (num > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num, 'sunrise', shadowD);
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    const out: FlareQuad[] = [];
+    if (num2 > 0.01) this.collectLensFlareSet(out, sun.x, sun.y, cx, cy, baseRot, num2, 'sunset', shadowD);
+    if (num > 0.01) this.collectLensFlareSet(out, sun.x, sun.y, cx, cy, baseRot, num, 'sunrise', shadowD);
+    return out.length ? out : null;
   }
 
   /** DrawSunsetFlare / DrawSunriseFlare 元素表（:410-541 逐元素 1:1）。
@@ -4315,7 +4428,7 @@ export class SkyRenderer {
    *  scale = ScaleStart+ScaleOverIndex·i；alpha = Color×(1+IntensityOverIndex·i)×intensity；
    *  d = (DistanceStart+DistanceAlongIndex·i+玩家残影项)%1（:43 num2 += num·−0.0002；
    *  %1 保号=C# 语义,残影项可为负→元素沿轴外推）；pos = Lerp(sun,center,d*2)；rot = 轴角+Rotation */
-  private drawLensFlareSet(ctx: CanvasRenderingContext2D, sunX: number, sunY: number,
+  private collectLensFlareSet(out: FlareQuad[], sunX: number, sunY: number,
     cx: number, cy: number, baseRot: number, intensity: number, which: 'sunset' | 'sunrise',
     shadowD = 0): void {
     type Row = [SunflareTex, number, number, number, number, number, [number, number, number], number, number, number];
@@ -4342,6 +4455,10 @@ export class SkyRenderer {
       if (!tex || !texReady(tex)) continue;   // ★texReady：width>0 挡不住半加载窗（方片竞态）
       const sprite = tintedFlareSprite(tex, rgb[0], rgb[1], rgb[2]);   // Color 乘子（lighter 下呈色相）
       if (!sprite) continue;
+      // ★gladd 面④：tintKey 随行——tintedFlareSprite 是【池化画布】（回收可重写），
+      //  GL 纹理键纪律同③：键=tint 缓存键（texId|rgb）非画布对象，src 身份比对+
+      //  换代 texRefresh 重传（池回收重烘=新画布对象→src 失配自愈）。
+      const tintKey = `${texId(tex)}|${rgb[0]},${rgb[1]},${rgb[2]}`;
       for (let i = 0; i < repeat; i++) {
         const scale = scaleStart + scaleOver * i;                       // :40
         const a = mul * (1 + ioi * i) * intensity;                      // :41
@@ -4350,13 +4467,11 @@ export class SkyRenderer {
         d %= 1;                                                         // :44 %1 保号（残影项可负）
         const px = sunX + (cx - sunX) * (d * 2);                        // :45
         const py = sunY + (cy - sunY) * (d * 2);
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, a);
-        ctx.translate(px, py);
-        ctx.rotate(baseRot + rot);                                       // :46-50
-        const w = tex.width * scale, h = tex.height * scale;
-        ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
-        ctx.restore();
+        out.push({
+          sprite, tintKey, x: px, y: py,
+          w: tex.width * scale, h: tex.height * scale,                   // :46-50
+          rot: baseRot + rot, alpha: Math.min(1, a),
+        });
       }
     }
   }
@@ -4371,7 +4486,20 @@ export class SkyRenderer {
    *  月总死亡白闪已挪帧尾（见 drawMoonlordWhiteFlash） */
   drawWorldFx(ctx: CanvasRenderingContext2D, camX: number, camY: number,
     z: number, viewW: number, viewH: number): void {
-    if (!this.frameCtx) return;
+    const quads = this.worldFxFrame(camX, camY, z, viewW, viewH);
+    if (!quads) return;
+    this.drawLensFlareQuads(ctx, quads);
+  }
+
+  /** ★gladd 面④（2026-10-28,task#22）：本帧镜头光斑帧计算——采样副作用+元素
+   *  收集（2D/GL 双消费单源；与原 drawWorldFx 逐字同门：frameCtx/sunScreen/
+   *  sampleSunVisibility/sunVisibilities/lastScreenTopY）。返回 null=本帧无光斑
+   *  （门关/强度零/全纹理未就位）；采样等副作用照跑=两路径恒等（GL 失败回落
+   *  2D 重放 worldFxFrame 幂等——采样读 store 不读画布，重复调用同值）。
+   *  GL 侧消费=Renderer.drawWorldFxGL（quadBatchRgba 仿射角点）。 */
+  worldFxFrame(camX: number, camY: number, z: number, viewW: number, viewH: number):
+    FlareQuad[] | null {
+    if (!this.frameCtx) return null;
     if (this.sunScreen) {
       // SunVisibilityPixel 采样（HorizonHelper.UpdateSunVisibility Main.cs:61769 帧末语义：
       // 本帧采样值下一帧生效——故先画后采，drawLensFlare 读的是上一帧值）
@@ -4381,8 +4509,9 @@ export class SkyRenderer {
         this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0);
       // Main.screenPosition.Y(=屏顶世界 Y,LensFlareElement :49 轴角微扰项)
       this.lastScreenTopY = camY - viewH / 2 / z;
-      this.drawLensFlare(ctx, viewW, viewH, v.sunset, v.sunrise, v.celestial);
+      return this.collectLensFlare(viewW, viewH, v.sunset, v.sunrise, v.celestial);
     }
+    return null;
   }
   /** 上帧屏顶世界 Y(LensFlareElement :49 baseRot 微扰用) */
   private lastScreenTopY = 0;

@@ -126,6 +126,9 @@ function recCtx() {
   return { ctx, ops };
 }
 
+/** 桩图集稳定身份对象（帧内缓存键的 img 维度） */
+const STUB_IMG = { width: 86, height: 248 } as unknown as ImageBitmap;
+
 /** 合成 86×62 切片:3 个标记 texel + 其余全透明（首行前 3 像素） */
 const MARKERS: Array<[number, number, number, number]> = [
   [255, 255, 255, 0],      // 透明白（摊平陷阱:旧病灶会变不透明白=lighter 白矩形）
@@ -142,13 +145,25 @@ function markerHost(): void {
 let rendererMod: Promise<typeof import('../src/render/Renderer')> | null = null;
 const loadRenderer = () => (rendererMod ??= import('../src/render/Renderer'));
 
-async function callWingOverlay(slot: number, settled = 1) {
+async function callWingOverlay(slot: number, settled = 1, selfReuse?: Record<string, unknown>) {
   const { Renderer } = await loadRenderer();
   const tgt = recCtx();
-  const self = {
-    atlas: { ensureVImage: (_k: string) => ({ width: 86, height: 248 }) } as never,
+  // ★任务#27 桩宿补 baker 面:addScratch/dyeScratch 路由 bakeSliceCached——原型
+  // 方法直挂（this=桩）+缓存/池/帧戳字段（node 域 bakeCacheOn 恒 true=走缓存路径）。
+  // selfReuse=复用桩（双调缓存命中锁用——同帧同键第二拍不重烘）。
+  const self = selfReuse ?? {
+    // ★稳定 img 身份(生产 atlas 同键恒同对象;bakeKeyOf 以 WeakMap 身份入键——
+    // 每调新对象=键恒变=帧内缓存恒 miss,双调命中锁会假红)
+    atlas: { ensureVImage: (_k: string) => STUB_IMG } as never,
     wingTintScratch: null,
     ctx: tgt.ctx,
+    _bakeCache: new Map(),
+    _bakePool: [],
+    _bakeFrame: -1,
+    _diagFrame: 0,
+    bakeSliceCached: (Renderer.prototype as unknown as { bakeSliceCached: unknown }).bakeSliceCached,
+    applyDyeToImageData: () => { throw new Error('dye null 路不应触染料'); },
+    applyDyeLitToImageData: () => { throw new Error('dye null 路不应触 lit 染料'); },
   };
   const p = {
     grappleProjs: [] as unknown[], miscCounter: 0, facing: 1, iframes: 0,
@@ -157,25 +172,22 @@ async function callWingOverlay(slot: number, settled = 1) {
     drawWingOverlay: (p: unknown, slot: number, d: unknown, fr: number, cam: unknown,
       settled: number, clamp: number, vt: unknown, dye: unknown, tgt?: unknown, mp?: boolean) => void;
   }).drawWingOverlay.call(self, p, slot, wingDrawOf(slot), 0, null, settled, 1, null, null, tgt.ctx, true);
+  (tgt as unknown as { __self: unknown }).__self = self;
   return tgt;
 }
 
 describe('BJ719-A §B 行为面（addScratch 保形:alpha 不摊平）', () => {
-  it('32 glowAdd:putImageData 终态 alpha 保留 [0,128,255]（摊平回潮即全 255 恰红）', async () => {
+  it('32 glowAdd:恒等快路径免烘焙读回（任务#27:tint=[1,1,1]∧无染料=x*1===x 逐位,putCalls=0）+ 绘制面不变', async () => {
     await loadRenderer();          // 先 import（真 DOM 环境）再装记录仪
     installFakeDom();
     markerHost();
     const tgt = await callWingOverlay(32);
-    expect(putCalls.length).toBe(1);
-    const d = putCalls[0]!;
-    expect([d[3], d[7], d[11]]).toEqual([0, 128, 255]);   // ★保形判别:透明/半透/不透
-    // RGB 不动（glowAdd tint=[1,1,1]）
-    expect([d[0], d[1], d[2]]).toEqual([255, 255, 255]);
-    expect([d[4], d[5], d[6]]).toEqual([10, 20, 30]);
-    expect([d[8], d[9], d[10]]).toEqual([200, 100, 50]);
-    // 主拍/镜像拍同式:'lighter' + globalAlpha=settled（mask 面同函数=同判别）
+    // ★任务#27 恒等契约:常数 [1,1,1] 档不再 getImageData/putImageData（字节不动=
+    // 保形语义的更强形态;摊平类变异在本档不可达,由 31 nebula 真烘焙档守门）
+    expect(putCalls.length).toBe(0);
     const draws = tgt.ops.filter((o) => o.op === 'draw') as Array<{ comp: string; alpha: number; a: unknown[] }>;
     expect(draws.length).toBe(1);
+    // 主拍/镜像拍同式:'lighter' + globalAlpha=settled（mask 面同函数=同判别）
     expect(draws[0]!.comp).toBe('lighter');
     expect(draws[0]!.alpha).toBeCloseTo(1, 9);
     // dest=×1.06 放大（origin=Size/2 随 scale,:1101）
@@ -186,13 +198,12 @@ describe('BJ719-A §B 行为面（addScratch 保形:alpha 不摊平）', () => {
     expect(dh).toBeCloseTo(62 * 1.06, 6);
   }, 120000);
 
-  it('29 selfAdd:alpha 保留 + globalAlpha=0.5（×0.5f :1071=127.5/255）', async () => {
+  it('29 selfAdd:恒等快路径免烘焙（任务#27 [1,1,1] 档）+ globalAlpha=0.5（×0.5f :1071=127.5/255）', async () => {
     await loadRenderer();
     installFakeDom();
     markerHost();
     const tgt = await callWingOverlay(29);
-    const d = putCalls[0]!;
-    expect([d[3], d[7], d[11]]).toEqual([0, 128, 255]);
+    expect(putCalls.length).toBe(0);   // ★恒等契约（同 32 档）
     const draws = tgt.ops.filter((o) => o.op === 'draw') as Array<{ comp: string; alpha: number }>;
     expect(draws.length).toBe(1);
     expect(draws[0]!.comp).toBe('lighter');
@@ -214,6 +225,11 @@ describe('BJ719-A §B 行为面（addScratch 保形:alpha 不摊平）', () => {
     const draws = tgt.ops.filter((o) => o.op === 'draw') as Array<{ comp: string; alpha: number }>;
     expect(draws.length).toBe(5);                          // 4 轨道(×0.5)+全幅(×1)
     expect(draws.every((x) => x.comp === 'lighter')).toBe(true);
+    // ★任务#27 帧内缓存命中锁:同帧同键第二拍（水罩镜像重放语义）不再重烘——
+    // putCalls 恒 1（旧路径镜像拍会二次 getImageData+putImageData）
+    const self = (tgt as unknown as { __self: Record<string, unknown> }).__self;
+    await callWingOverlay(31, 1, self);
+    expect(putCalls.length).toBe(1);
   }, 120000);
 
   it('半透明贡献=premult 语义:XNA One 因子（RGB×a×f）——探针 tgt 直读 rgbSum 与修前逐位同（f=1 时形状域色贡献不变,变的只是透明域 α 污染）', async () => {
@@ -250,19 +266,21 @@ describe('BJ719-A §C 结构锁（flatten token 退役+定谳注在位）', () =
 // ===================== §D 变异自证（摊平回潮恰红） =====================
 describe.skipIf(process.env.SW_BJ719A_MUT)('BJ719-A §D 变异自证', () => {
   it('M1 addScratch flatten 回潮（alpha=255 重注入）→ §B 行为面恰红', () => {
+    // ★任务#27 迁锚:烘焙循环移入 bakeSliceCached(乘 RGB 不动 A);变异注入点随之
+    // 迁移,守门测试=31 nebula 真烘焙档(32/29 恒等档摊平不可达——恒等免烘=更强守卫)
     withMutation(RENDERER,
       `id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
-        // ★BJ719-A：alpha 不摊平（保形——透明域贡献 0；摊平会污染水罩 mask 成全矩形）`,
+        id.data[i + 3] *= alphaMul;`,
       `id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
         id.data[i + 3] = 255;   // ★BJ719A 变异:摊平回潮（水罩 mask 全矩形=蓝矩形复发）`,
       () => {
         const r = spawnSync('npx', ['vitest', 'run', 'tests/bj719a-stardust-wing-veil.test.ts',
-          '--no-file-parallelism', '-t', 'putImageData 终态 alpha 保留'], {
+          '--no-file-parallelism', '-t', '31 nebula:alpha 保留'], {
           cwd: process.cwd(), encoding: 'utf8', timeout: 600_000,
           env: { ...process.env, SW_BJ719A_MUT: '1' },
         });
         expect(r.status, '变异须证红: flatten 回潮=alpha 全 255').not.toBe(0);
-        expect(r.stdout).toContain('putImageData 终态 alpha 保留');
+        expect(r.stdout).toContain('31 nebula:alpha 保留');
       }, { label: 'BJ719A M1 addScratch flatten 回潮' });
   });
 });

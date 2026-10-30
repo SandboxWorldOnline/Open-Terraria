@@ -81,14 +81,17 @@ export function judderMissFrame(gapMs: number, periodMs: number): boolean {
   return gapMs > periodMs * JUDDER_MISS_RATIO && gapMs <= periodMs * JUDDER_MAX_GAP_RATIO;
 }
 
-/** ★juddersmooth 旗（★2026-10-10 已转正缺省开;?smooth=0 逃生门=完全旁路逐位）。
- *  ★转正（用户令;证据=Mac 实机体感验证「挺好的,效果还不错」+机械闸 8 测
- *  （纯判定表/乒乓序列/断流卫生/resize/零拖影累积)+乒乓自毁真 bug 由闸抓出并修）。
- *  node/测试环境恒关（测试经 judderSmoothSetForTest 显式控制）。 */
+/** ★juddersmooth 旗（★2026-10-27 用户令「先禁用」——缺省关,?smooth=1 显式开。
+ *  禁用依据=实机 trace（同日,lightsteady 开+水域+翼装场景）--probe 归因:武装期
+ *  全屏乒乓拷贝 549.6ms/20s=27.3ms/s(0.23ms/帧,drawImage 第一大调用方)——钟抖机
+ *  （tick 早到 27%,错拍率 5.94%,见 memory/mac-tick-clock-jitter-118-124）「跳槽即
+ *  武装+2s 保持」≈常驻武装,每帧两笔全屏拷贝;且其掩盖的钟抖用户仍可感知
+ *  =花费与效果双失。灰度史:2026-10-10 ?smooth=1 灰度→同日转正缺省开→
+ *  2026-10-27 禁用回缺省关（机制代码全保留,?smooth=1 可复开）。 */
 export let judderSmooth = (() => {
   try {
     if (typeof location === 'undefined') return false;
-    return new URLSearchParams(location.search).get('smooth') !== '0';
+    return new URLSearchParams(location.search).get('smooth') === '1';
   } catch { return false; }
 })();
 /** 测试/对拍翻面（生产代码禁调——生产只读 URLSearchParams 一次） */

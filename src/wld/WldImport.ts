@@ -495,6 +495,33 @@ const TE_KIND_SPECS: ReadonlyArray<{ te: 1 | 3 | 4 | 5 | 6 | 8 | 9 | 10; key: st
 export { vanillaChestIsLocked } from '../world/repairIndexFrames';
 import { vanillaChestIsLocked } from '../world/repairIndexFrames';
 
+/** ★BJ734-A（2026-10-27 用户令,尾注方案）：SW 尾注段读取——WldExport 在原版
+ *  .wld 尾部追加 'SWEXT1'+u32 len+JSON{v,w,h,ex}（探索迷雾 b64 RLE,与 SaveData.
+ *  explored 同源）。自文件尾反扫魔数,须【恰为最后字节】(pos+10+len===EOF) 才采信
+ *  ——段数据里的偶然魔数序列恒不满足精确到尾判据;再校验尺寸与解析世界一致。
+ *  任何不满足（纯原版文件无尾注/截断/坏 JSON/尺寸错配）= null = 全 0 迷雾旧行为,
+ *  导入永不因尾注失败。 */
+function readSwExtTail(buf: Uint8Array): { w: number; h: number; ex: string } | null {
+  const M = 'SWEXT1';
+  if (buf.length < 16) return null;
+  // 自尾反扫最后一个魔数出现位（export 恒把尾注写在最末）
+  let pos = -1;
+  for (let i = buf.length - 10 - 1; i >= 0; i--) {
+    let ok = true;
+    for (let j = 0; j < 6; j++) if (buf[i + j] !== M.charCodeAt(j)) { ok = false; break; }
+    if (ok) { pos = i; break; }
+  }
+  if (pos < 0) return null;
+  const len = buf[pos + 6] | (buf[pos + 7] << 8) | (buf[pos + 8] << 16) | (buf[pos + 9] << 24);
+  if (len < 0 || pos + 10 + len !== buf.length) return null;   // 精确到尾判据
+  try {
+    const o = JSON.parse(new TextDecoder().decode(buf.subarray(pos + 10))) as {
+      v?: number; w?: number; h?: number; ex?: string };
+    if (o.v !== 1 || typeof o.ex !== 'string') return null;
+    return { w: o.w ?? -1, h: o.h ?? -1, ex: o.ex };
+  } catch { return null; }
+}
+
 export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wld: WldWorld = parseWld(buf);
   const warnings: string[] = [];
@@ -1069,10 +1096,15 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     paint: bytesToB64(rlePairs(paintArr)),         // 油漆（WF:2571-2574）
     paintWall: bytesToB64(rlePairs(paintWallArr)), // 墙漆（WF:2583-2586）
     coat: bytesToB64(rlePairs(coatArr)),           // 涂层四位（WF:1539-1552）
-    // ★explored 故意不写段（= 全 0 迷雾）：原版地图探索数据存在 .wld 伴档 .twld
-    // （MapHelper.SaveMap），.wld 本体不含——WldParser 只读 .wld，无从回填，
-    // 导入后从头探索（与旧存档行为一致）
-    explored: undefined,
+    // ★BJ734-A 改判史（2026-10-27 用户令,尾注方案）：旧=恒 undefined（原版 .wld
+    //   本体不含探索——探索按玩家目录存 <世界>.map 伴档,MapHelper.cs:3055 亲读;
+    //   旧注「.twld 伴档」系文件名误记,.twld 为 tML 世界格式）。现=WldExport 在
+    //   .wld 尾部追加 SWEXT1 私有段携行迷雾,本侧读回填;纯原版文件/坏尾注/尺寸
+    //   错配 = undefined 全 0 迷雾（旧行为逐位不变）
+    explored: (() => {
+      const t = readSwExtTail(buf);
+      return t && t.w === wld.tilesWide && t.h === wld.tilesHigh ? t.ex : undefined;
+    })(),
     chests,
     // ★七批备案④收尾：334 legacy 武器架持武还原记录（内部 id——本 SaveData 为
     //  v2 内存态，loadSaveData v3=false 同 chests 直读；落盘经 serialize 转稳定 id）

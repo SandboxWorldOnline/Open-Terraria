@@ -214,6 +214,77 @@ export let liqP3 = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('liqp3') !== '0' : true;
 export function liqP3SetForTest(v: boolean): void { liqP3 = v; }
 
+// ---- ★liqtint 微光基色双线性平滑面（2026-10-30 BJ738 网格感定谳刀;缺省开,?liqtint=0 逃生门）----
+// 【病灶】CPU 原链/2D 重放面的微光基色=2×2 子块【常量色】multiply（8×8 世界px 单元,
+//   applyShimmerBaseTint/replayLiqRun2D/replayLiqShimRun2D 三面同构）——微光场平滑
+//   梯度上显 8px 阶梯=「像素网格感/格子间缝隙」（用户实报微光湖;veil 帧（7e 逃逸
+//   队列/679 实体族）前景液体禁批回 CPU 链=C13c FS 平滑路径缺席的帧面）。
+//   探针 scripts/_shimmer-grid-repro.mjs 定谳:自然微光湖深部 {"8":24} 严格 8px 网格;
+//   杀 679 逃逸族实体（Faeling）后零梯度线=机制归因。
+// 【修】原版 SetShimmerVertexColors=四角色置 quad 角+GPU 顶点双线性（LiquidRenderer
+//   :745-759 modulate）——Canvas2D 无顶点色,旧近似=子块常量;新近似=2×2 惰性小画布
+//   写四角色+单笔 drawImage 拉伸（smoothing=bilinear ≙ GPU varying 插值）。裁剪格
+//   （壁值/bob/半格）经【源矩形分数采样】（u/v 归一×2）保持场世界锚定（相邻 tile
+//   小画布共享边角值=跨格连续;与批路径 uL/uR/vT/vB 同域——顶点色路径的裁剪角是
+//   采样点移位,本面是采样窗移位,两者同为 FS 逐像素求值的 C0 近似,census 有界）。
+// 【域】node 无 document=面构造不可达→三面回退旧子块路径（逐位）;测试注入桩面
+//   （tintSurfForTest）可锁新结构。?liqtint=0 同回退（逃生门）。
+export let liqtint = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('liqtint') !== '0' : true;
+export function liqtintSetForTest(v: boolean): void { liqtint = v; }
+
+/** 2×2 双线性面（惰性;node 恒 null=回退臂） */
+let _tintCv: HTMLCanvasElement | null = null;
+let _tintCtx: CanvasRenderingContext2D | null = null;
+let _tintImg: ImageData | null = null;
+function tintQuadSurf(): boolean {
+  if (_tintCtx) return true;
+  if (typeof document === 'undefined') return false;
+  const cv = document.createElement('canvas');
+  cv.width = 2; cv.height = 2;
+  const c2 = cv.getContext('2d');
+  if (!c2) return false;
+  _tintCv = cv; _tintCtx = c2;
+  _tintImg = c2.createImageData(2, 2);
+  return true;
+}
+/** ★测试钩:2×2 面注入（node 无 document=生产构造不可达;测试注入桩面锁新结构,
+ *  调用方 afterEach 注入 undefined 清面恢复生产路径——shimmerSparkBandForTest 同式） */
+export function tintSurfForTest(cv: HTMLCanvasElement | null,
+  c2: { putImageData(img: ImageData, dx: number, dy: number): void } | null,
+  img: { data: Uint8ClampedArray } | null): void {
+  _tintCv = cv;
+  _tintCtx = (c2 ?? null) as CanvasRenderingContext2D | null;
+  _tintImg = (img ?? null) as ImageData | null;
+}
+
+/**
+ * 四角色（0..255）单笔双线性 multiply。u/v=目的窗在「角场归一域」的位置（0..1;
+ * 原链=tile 内裁剪窗归一,重放面=整窗 0,0,1,1——重放环角色已按裁剪角采样）。
+ * 返回 false=面缺席/旗关（调用方回退旧 2×2 子块路径）。
+ * ★全局态约定:globalAlpha=1（原版 modulate 无 α 衰减,与旧子块同款强制）+
+ *   imageSmoothingEnabled=true（仅此一笔;调用域 save/restore 或显式复位兜底）。 */
+function tintBilinearQuad(
+  ctx: CanvasRenderingContext2D,
+  r00: number, g00: number, b00: number, r10: number, g10: number, b10: number,
+  r01: number, g01: number, b01: number, r11: number, g11: number, b11: number,
+  uL: number, vT: number, uR: number, vB: number,
+  dstX: number, dstY: number, w: number, h: number,
+): boolean {
+  if (!liqtint || !tintQuadSurf()) return false;
+  const d = _tintImg!.data;
+  d[0] = r00; d[1] = g00; d[2] = b00; d[3] = 255;
+  d[4] = r10; d[5] = g10; d[6] = b10; d[7] = 255;
+  d[8] = r01; d[9] = g01; d[10] = b01; d[11] = 255;
+  d[12] = r11; d[13] = g11; d[14] = b11; d[15] = 255;
+  _tintCtx!.putImageData(_tintImg!, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(_tintCv!, uL * 2, vT * 2, (uR - uL) * 2, (vB - vT) * 2, dstX, dstY, w, h);
+  return true;
+}
+
 const _lvlLut = new Float32Array(256);
 const _tovLut = new Uint8Array(256);
 for (let j = 0; j < 256; j++) { _lvlLut[j] = j / 255; _tovLut[j] = toVanillaType(j); }
@@ -580,7 +651,10 @@ function flushAddRuns2DAndEmit(
 
 /** 批段（一次发射=同纹理连续 quad 区间;可见批与 gate 重发射共用）。
  *  ★C13c shim=true=stride-11 微光段（源环 _shimRing,gate 重发射走 _gateShimData） */
-interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; shim?: boolean; }
+/** ★BJ743:data=发射数据切片视图（复用臂=_fgReuseRing 缩放后数据/直发臂=环本帧
+ *  数据——消除环歧义:复用帧 _batRing 恒为 bg 未缩放数据,旧偏移读法=gate/罩源
+ *  误读 bg α;gate α×100 饱和域无害罩着,罩源 α 语义面实害）。帧界内有效。 */
+interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; shim?: boolean; data?: Float32Array; }
 /** 前景 pass 批段登记（emitVanillaLiquidGate 消费;帧界由 gateCapture 调用重置） */
 let _fgRuns: LiqRun[] = [];
 /** 坡面足迹四边形（世界坐标;gate 发射时经 wldT 折算设备——fgCanvas 足迹画布退役面） */
@@ -817,10 +891,31 @@ function replayLiqShimRun2D(ctx: CanvasRenderingContext2D, startQuad: number, qu
     ctx.globalAlpha = ga;
     ctx.drawImage(tex, _shimMeta![m], _shimMeta![m + 1], _shimMeta![m + 2], _shimMeta![m + 3],
       D[o], D[o + 1], dw, dh);
-    // 2×2 子块 multiply（场色=子块中心真场;tx 沿 x 线性/ty 沿 y 线性——aTile 线性属性）
+    // ★BJ738 liqtint:四角求值+双线性梯度优先（aTile 角=裁剪角域,角即采样点→源矩形
+    //   整窗 0,0,1,1;sin 在角求值+颜色双线性=FS 逐像素求值的 C0 近似,较子块常量
+    //   严格逼近;smoothing 复位勿泄漏）。面缺席/旗关=旧子块路径逐位。
     const tx0 = D[o + 8], ty0 = D[o + 9];
     const tx1 = D[o + 19];
     const ty3 = D[o + 64];   // v5(BL).ty
+    {
+      const shimCol = (tx: number, ty: number): number => {
+        const wv = Math.sin(((tx + ty / 6) / 10 - tVis / 360) * Math.PI * 2);
+        return 0.1 + wv * 0.4;
+      };
+      const kTL = shimCol(tx0, ty0), kTR = shimCol(tx1, ty0);
+      const kBL = shimCol(tx0, ty3), kBR = shimCol(tx1, ty3);
+      if (tintBilinearQuad(ctx,
+        255 * (SHIM_A_R + SHIM_D_R * kTL), 255 * (SHIM_A_G + SHIM_D_G * kTL), 255 * (SHIM_A_B + SHIM_D_B * kTL),
+        255 * (SHIM_A_R + SHIM_D_R * kTR), 255 * (SHIM_A_G + SHIM_D_G * kTR), 255 * (SHIM_A_B + SHIM_D_B * kTR),
+        255 * (SHIM_A_R + SHIM_D_R * kBL), 255 * (SHIM_A_G + SHIM_D_G * kBL), 255 * (SHIM_A_B + SHIM_D_B * kBL),
+        255 * (SHIM_A_R + SHIM_D_R * kBR), 255 * (SHIM_A_G + SHIM_D_G * kBR), 255 * (SHIM_A_B + SHIM_D_B * kBR),
+        0, 0, 1, 1, D[o], D[o + 1], dw, dh)) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalCompositeOperation = 'source-over';
+        continue;
+      }
+    }
+    // 2×2 子块 multiply（场色=子块中心真场;tx 沿 x 线性/ty 沿 y 线性——aTile 线性属性）
     const subW = Math.ceil(dw / 2), subH = Math.ceil(dh / 2);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'multiply';
@@ -985,6 +1080,16 @@ function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads:
       const r1 = D[o + 12] * unpre, g1 = D[o + 13] * unpre, b1 = D[o + 14] * unpre;
       const r2 = D[o + 20] * unpre, g2 = D[o + 21] * unpre, b2 = D[o + 22] * unpre;
       const r3 = D[o + 44] * unpre, g3 = D[o + 45] * unpre, b3 = D[o + 46] * unpre;
+      // ★BJ738 liqtint:双线性梯度优先（环角色已按裁剪角采样→源矩形整窗 0,0,1,1=
+      //   GPU 顶点色插值的 2D 镜像;smoothing 复位勿泄漏后续纹理 nearest 采样）。
+      if (tintBilinearQuad(ctx,
+        255 * r0, 255 * g0, 255 * b0, 255 * r1, 255 * g1, 255 * b1,
+        255 * r3, 255 * g3, 255 * b3, 255 * r2, 255 * g2, 255 * b2,
+        0, 0, 1, 1, D[o], D[o + 1], dw, dh)) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalCompositeOperation = 'source-over';
+        continue;
+      }
       // 微光调制 quad:2×2 子块 multiply（顶点色域即裁剪角域,u/v 取子块中心）
       const subW = Math.ceil(dw / 2), subH = Math.ceil(dh / 2);
       ctx.globalAlpha = 1;
@@ -1060,10 +1165,13 @@ export function emitVanillaLiquidGate(
       const nF = run.quads * LIQ_SHIM_QUAD_FLOATS;
       const src = run.start * LIQ_SHIM_QUAD_FLOATS;
       const G = _gateShimData!;
+      // ★BJ743:发射数据切片优先（复用臂=_fgReuseShimRing;切片已从 start 起=读下标 0）
+      const RD = run.data ?? _shimRing!;
+      const ro = run.data ? 0 : src;
       for (let i = 0; i < nF; i += LIQ_SHIM_STRIDE) {
-        G[src + i] = _shimRing![src + i];
-        G[src + i + 1] = H - _shimRing![src + i + 1];   // y 镜像（逐顶点）
-        for (let k2 = 2; k2 < LIQ_SHIM_STRIDE; k2++) G[src + i + k2] = _shimRing![src + i + k2];
+        G[src + i] = RD[ro + i];
+        G[src + i + 1] = H - RD[ro + i + 1];   // y 镜像（逐顶点）
+        for (let k2 = 2; k2 < LIQ_SHIM_STRIDE; k2++) G[src + i + k2] = RD[ro + i + k2];
       }
       const e = glw.texFromImage(run.key, run.img as TexImageSource, false, true);
       if (!e || !glw.quadBatchRgba(e, G.subarray(src, src + nF), run.quads)) { ok = false; break; }
@@ -1072,10 +1180,14 @@ export function emitVanillaLiquidGate(
     const nF = run.quads * LIQ_QUAD_FLOATS;
     const src = run.start * LIQ_QUAD_FLOATS;
     const G = _gateData;
+    // ★BJ743:发射数据切片优先（复用臂=_fgReuseRing 缩放后数据——旧读法=bg 未缩放 α,
+    //  gate α×100 饱和域恰无害;数据面钉正。切片已从 start 起=读下标 0）
+    const RD = run.data ?? _batRing;
+    const ro = run.data ? 0 : src;
     for (let i = 0; i < nF; i += LIQ_STRIDE) {
-      G[src + i] = _batRing[src + i];
-      G[src + i + 1] = H - _batRing[src + i + 1];   // y 镜像（逐顶点）
-      for (let k = 2; k < LIQ_STRIDE; k++) G[src + i + k] = _batRing[src + i + k];
+      G[src + i] = RD[ro + i];
+      G[src + i + 1] = H - RD[ro + i + 1];   // y 镜像（逐顶点）
+      for (let k = 2; k < LIQ_STRIDE; k++) G[src + i + k] = RD[ro + i + k];
     }
     const e = glw.texFromImage(run.key, run.img as TexImageSource, false, true);
     if (!e || !glw.quadBatchRgba(e, G.subarray(src, src + nF), run.quads)) { ok = false; break; }
@@ -1086,6 +1198,53 @@ export function emitVanillaLiquidGate(
   if (!ok || !tex) return null;
   // ★R1b-2:句柄携带产生面上下文（GLWorldCompose.compose 跨上下文校验判据）
   return { tex, w: W, h: H, flipY: 0, gl: glw.pipeGl ?? undefined };
+}
+
+/** ★BJ743（2026-10-30）：前景水批数据【不镜像】重发射进独立 GL 层（罩源 GL 化）——
+ *  veil 帧前景液体保持批化（CPU 原链+fgCanvas 离屏绕行退役）。层=独立上下文
+ *  （无 pipe,直绘自家 canvas 背板=C13 星层同范式）,canvas 即水罩源（escapeVeilEnd
+ *  直采;世界层分辨率,消费侧 vk 缩放与 fgCanvas 同语义）。数据=_fgRuns
+ *  （gateCapture 登记,与 'liqgate' 同批）+ _footQuads（足迹先于水=2D fgCanvas 同序;
+ *  【无 y 镜像】——画布正立,镜像仅 FBO GL 朝向需要）。失败=false=调用方该帧罩源
+ *  缺席（层退避重建,自愈;GL 死窗极窄:begin 前置+同图 texFromImage 批路径已解析,
+ *  登记口径）。 */
+export function emitVanillaLiquidVeil(glw: GLSpriteLayer, W: number, H: number): boolean {
+  if (glw.unavailable || W <= 0 || H <= 0) return false;
+  glw.resize(W, H);
+  glw.begin('veil', true);
+  if (glw.unavailable) return false;
+  let ok = true;
+  if (_footQuads.length) {
+    const { a, b, c, d, e, f } = _footWld;
+    for (const q of _footQuads) {
+      const ex0 = a * q.dx + c * q.dy + e, ey0 = b * q.dx + d * q.dy + f;
+      const ex1 = a * (q.dx + q.dw) + c * (q.dy + q.dh) + e, ey1 = b * (q.dx + q.dw) + d * (q.dy + q.dh) + f;
+      const dx = Math.min(ex0, ex1), dy = Math.min(ey0, ey1);
+      const dw = Math.abs(ex1 - ex0), dh = Math.abs(ey1 - ey0);
+      if (dw <= 0 || dh <= 0) continue;
+      if (q.solid) {
+        glw.quadSprite(whiteEntry(glw), 0, 0, 1, 1, dx, dy, dw, dh,
+          { alpha: 0.02, tint: [0.5, 0.5, 0.5] });
+      } else if (q.tex) {
+        const te = glw.texFromRegion(`er:${texId(q.tex)}:${q.sx},${q.sy},${q.sw},${q.sh}`,
+          q.tex, q.sx, q.sy, q.sw, q.sh);
+        if (te) glw.quadSprite(te, 0, 0, q.sw, q.sh, dx, dy, dw, dh, { alpha: 0.02 });
+      }
+    }
+  }
+  setLiqShimmerTVis(visEffectFrames());
+  for (const run of _fgRuns) {
+    const e = glw.texFromImage(run.key, run.img as TexImageSource, false, true);
+    if (!e) { ok = false; break; }
+    // ★BJ743:发射数据切片（复用臂=缩放后 _fgReuseRing——α 0.6 前景语义;缺省回环防御;
+    //  切片已从 start 起=读下标 0）
+    const d = run.data ?? (run.shim ? _shimRing! : _batRing);
+    const stride = run.shim ? LIQ_SHIM_QUAD_FLOATS : LIQ_QUAD_FLOATS;
+    const off = run.data ? 0 : run.start * stride;
+    if (!glw.quadBatchRgba(e, d.subarray(off, off + run.quads * stride), run.quads)) { ok = false; break; }
+  }
+  glw.end(true, false);
+  return ok;
 }
 
 /** ★R1b-8①（2026-09-27 红蓝批 β）坡面足迹 2D 重放：混合帧（bg 批化足迹收集在
@@ -1324,6 +1483,16 @@ function applyShimmerBaseTint(
     r11 = c11[0]; g11 = c11[1]; b11 = c11[2];
   }
   ctx.save();
+  // ★BJ738 liqtint:双线性梯度优先（2×2 角场面+源矩形分数采样=裁剪窗场锚定;
+  //   save/restore 域内 smoothing 复位）。面缺席/旗关=false→旧子块路径逐位。
+  if (tintBilinearQuad(ctx,
+    r00, g00, b00, r10, g10, b10, r01, g01, b01, r11, g11, b11,
+    (dstX - x * 16) / 16, (dstY - y * 16) / 16,
+    (dstX + w - x * 16) / 16, (dstY + h - y * 16) / 16,
+    dstX, dstY, w, h)) {
+    ctx.restore();
+    return;
+  }
   // 原版 SetShimmerVertexColors 的乘法是【无条件 modulate】（纹理×顶点色），不带
   // 透明 pass 的 0.75 衰减——若沿用调用方残留的 globalAlpha，白色基底（表面格
   // Y=1280 整块纯白）只会被"部分染色"，表层色带被冲淡成灰白。故强制 1.0 全乘。
@@ -2135,9 +2304,10 @@ export function drawVanillaLiquids(
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
     const img = runImg, s0 = runStart, nQ = quads, k = runKey, cols = runCols, vt = runVt;
-    bat.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
+    const dataSlice = _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS);
+    bat.emit(img, k, dataSlice, nQ,
       (raw) => replayLiqRun2D(raw, s0, nQ, img, cols));
-    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ });
+    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ, data: dataSlice });
     // ★liqpolish fg 复用:bg 段登记（k=fg α 系数;溢出帧不录=fg 走构造原链）
     if (polish && isBackground && !_batOverflow && !_addOverflow && frameToken !== undefined) {
       // ★BJ705-G26 件3:岩浆段 fg α 系数叠 lavaOpacity（fg 复用臂缩放重发射消费）
@@ -2162,7 +2332,8 @@ export function drawVanillaLiquids(
     _shimOn = false;
     const ok = emitShimRun(bat, s0, nQ, img, k);
     if (!ok) replayLiqShimRun2D(ctx, s0, nQ, img);   // 入口门拒=2D 原位重放
-    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ, shim: true });
+    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ, shim: true,
+      data: _shimRing!.subarray(s0 * LIQ_SHIM_QUAD_FLOATS, (s0 + nQ) * LIQ_SHIM_QUAD_FLOATS) });
     if (polish && isBackground && !_batOverflow && !_addOverflow && frameToken !== undefined) {
       _bgBaseRuns.push({ img, key: k, start: s0, quads: nQ, k: DEFAULT_OPACITY[3], cols: false, shim: true });
       _bgRunsFrame = frameToken;
@@ -2204,9 +2375,10 @@ export function drawVanillaLiquids(
           }
         }
         setLiqShimmerTVis(tVisPass);
-        bat.emit(r.img, r.key, D.subarray(src, src + nF), r.quads,
+        const dShim = D.subarray(src, src + nF);
+        bat.emit(r.img, r.key, dShim, r.quads,
           (raw) => replayLiqShimRun2D(raw, r.start, r.quads, r.img));
-        if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads, shim: true });
+        if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads, shim: true, data: dShim });
         continue;
       }
       const nF = r.quads * LIQ_QUAD_FLOATS, src = r.start * LIQ_QUAD_FLOATS;
@@ -2220,9 +2392,10 @@ export function drawVanillaLiquids(
           D[o + 4] = S[o + 4] * r.k; D[o + 5] = S[o + 5] * r.k; D[o + 6] = S[o + 6] * r.k; D[o + 7] = S[o + 7] * r.k;
         }
       }
-      bat.emit(r.img, r.key, D.subarray(src, src + nF), r.quads,
+      const dSlice = D.subarray(src, src + nF);
+      bat.emit(r.img, r.key, dSlice, r.quads,
         (raw) => replayLiqRun2D(raw, r.start, r.quads, r.img, r.cols, D));
-      if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads });
+      if (gateCapture) _fgRuns.push({ img: r.img, key: r.key, start: r.start, quads: r.quads, data: dSlice });
     }
     if (_bgSpark && bat.emitAdd) {
       const sp = _bgSpark;

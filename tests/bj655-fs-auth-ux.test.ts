@@ -73,7 +73,10 @@ function fakeAuthDirHandle(name: string, opts: {
           close: async () => { f!.content = f!.writes.join(''); },
           abort: async () => {},
         }),
-        text: async () => f!.content,
+        // ★BJ735 改判史（随 Issue#25,2026-10-27）：夹具旧形=句柄级 text() 幻想接口
+        // → 生产码改 (await fh.getFile()).text() 后必抛 TypeError→catch→broken,
+        // C1 恢复链全链红。同步标准 FileSystemFileHandle 形状（同 bj614/bj617/bj618）。
+        getFile: async () => ({ text: async () => f!.content }),
       };
     },
     removeEntry: async (n: string) => {

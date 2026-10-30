@@ -93,7 +93,12 @@ describe('CharacterStore', () => {
     await s.delete(m1.id);
     const m3 = await s.create(defaultAppearance('c'));
     expect(m3.id).toBeGreaterThan(m2.id);
-    expect(s.list().map((x) => x.id)).toEqual([m2.id, m3.id]);
+    // ★BJ735 改判史（2026-10-27）：旧 toEqual([m2.id, m3.id]) 隐含「id 升序=显示
+    // 序」的同毫秒巧合——list() 第二键=lastPlayed 降序（BJ691b 原版锚 UICharacter
+    // Select.cs:146-157 orderby LastPlayed desc）,全量跑高负载下 m2/m3 两次 create
+    // 跨毫秒即翻转 [m3,m2]（单跑同毫秒回落名字序恒绿=伪稳时序面,非生产回归）。
+    // 本用例主旨=id 单调不复用+已删角色出列;显示序面由 bj691 §1 专锁,此处排序无关化。
+    expect(s.list().map((x) => x.id).sort((a, b) => a - b)).toEqual([m2.id, m3.id]);
   });
 
   // 「复制带『副本』后缀」用例已随 R13-F5 死码清扫一并移除（copy() 零生产调用方

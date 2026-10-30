@@ -12,7 +12,7 @@ import type { GLSpriteLayer } from '../src/render/GLSpriteLayer';
 import {
   drawVanillaLiquids, emitVanillaLiquidGate, resetLiquidBatchForFrame,
   shimmerCornerColorsForTest, liqgl, liqglSetForTest,
-  liqC13cSetForTest,
+  liqC13cSetForTest, tintSurfForTest, liqtintSetForTest,
   type LiqBatchEmit,
 } from '../src/render/VanillaLiquidRenderer';
 import { liqpolishSetForTest } from '../src/render/perfFlags';
@@ -141,6 +141,44 @@ describe('★liqgl 批支端到端（drawVanillaLiquids + bat 钩）', () => {
     // 基底层不再逐 tile ctx.drawImage（批化;sparkle 直绘仍走 ctx=少量）
     const draws = calls.filter((c) => c.op === 'drawImage').length;
     expect(draws).toBeLessThan(total);
+  });
+
+  it('★BJ738 liqtint:CPU 原链基色双线性梯度(角场面+分数源矩形=裁剪窗场锚定;逃生门)', () => {
+    const tintData = new Uint8ClampedArray(16);
+    let puts = 0;
+    const FAKE_CV = { width: 2, height: 2 } as HTMLCanvasElement;
+    tintSurfForTest(FAKE_CV, { putImageData: () => { puts++; } }, { data: tintData });
+    resetLiquidBatchForFrame(-1);
+    const { ctx, calls, setLog } = makeCtx();
+    drawVanillaLiquids(ctx, fakeAtlas, makeStore(), 40, 5, 5, 110, 55, 1000, false, 0, 0,
+      undefined, false, undefined, 7, null, null, false);
+    const tintDraws = calls.filter((c) => c.op === 'drawImage' && c.args[0] === FAKE_CV);
+    expect(tintDraws.length).toBeGreaterThan(10);          // 微光池逐 tile 一笔梯度
+    expect(puts).toBe(tintDraws.length);                   // 每笔先写 2×2 角面
+    for (const d of tintDraws) {                           // 源矩形=裁剪窗归一×2∈[0,2]
+      expect(d.args[1]).toBeGreaterThanOrEqual(0); expect(d.args[1]).toBeLessThanOrEqual(2);
+      expect(d.args[2]).toBeGreaterThanOrEqual(0); expect(d.args[2]).toBeLessThanOrEqual(2);
+      expect(d.args[3]).toBeGreaterThan(0); expect(d.args[3]).toBeLessThanOrEqual(2);
+      expect(d.args[4]).toBeGreaterThan(0); expect(d.args[4]).toBeLessThanOrEqual(2);
+    }
+    // 满格主体=整窗 (0,0,2,2)（壁值/半格裁剪格=分数窗）
+    expect(tintDraws.filter((d) => d.args[1] === 0 && d.args[2] === 0
+      && d.args[3] === 2 && d.args[4] === 2).length).toBeGreaterThan(10);
+    const mults = setLog.filter((e) => e.k === 'globalCompositeOperation' && e.v === 'multiply');
+    expect(mults.length).toBeGreaterThan(0);               // multiply modulate 语义保持
+    const smooths = setLog.filter((e) => e.k === 'imageSmoothingEnabled' && e.v === true);
+    expect(smooths.length).toBe(tintDraws.length);         // 梯度笔逐一开双线性
+    // 逃生门:?liqtint=0 → 面零消费,回退子块 fillRect
+    liqtintSetForTest(false);
+    const r2 = makeCtx();
+    const before = puts;
+    drawVanillaLiquids(r2.ctx, fakeAtlas, makeStore(), 40, 5, 5, 110, 55, 1000, false, 0, 0,
+      undefined, false, undefined, 7, null, null, false);
+    expect(puts).toBe(before);                             // 旗关不写面
+    expect(r2.calls.filter((c) => c.op === 'drawImage' && c.args[0] === FAKE_CV).length).toBe(0);
+    expect(r2.calls.filter((c) => c.op === 'fillRect').length).toBeGreaterThan(10);   // 子块回退
+    liqtintSetForTest(true);
+    tintSurfForTest(null, null, null);
   });
 
   it('微光染色 GL 化:批路径零 multiply(applyShimmerBaseTint 退役);CPU 路径保留', () => {

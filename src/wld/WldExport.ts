@@ -455,6 +455,31 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
 //  与 .plr 侧「真档=vid 域外部实证」（PlrImport.ts stableOf 注,Vinlic.plr 实测）
 //  不同源,勿套同一叙事。
 
+// ---- ★BJ734-A 尾注段(战争迷雾携行;格式与互通安全定谳见 exportWld 尾注) ----
+
+/** explored b64 RLE 里是否存在任一已探索格——serialize 恒写段(全零=1 游程 ~7B),
+ *  全零世界不追加尾注(导出字节与旧版逐位同,金标/回环零扰动)。走 varint 对游程
+ *  扫描,任一 value 游程非零即真;坏 b64 容错=按无探索处理(不追加)。 */
+function swExtTailFogHasExplored(b64: string): boolean {
+  try {
+    const bin = atob(b64);
+    let p = 0;
+    while (p < bin.length) {
+      let s = 0;
+      for (;;) { const b = bin.charCodeAt(p++); if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) {
+        const b = bin.charCodeAt(p++);
+        v |= (b & 0x7f) << s;
+        if (!(b & 0x80)) break;
+        s += 7;
+      }
+      if (v !== 0) return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
 // ---- 主出口 ----
 /** SaveData → 自足 .wld 字节(325 格式;本仓 parseWld 可读,原版不保证——见文件头注) */
 export function exportWld(save: SaveData): Uint8Array {
@@ -627,5 +652,24 @@ export function exportWld(save: SaveData): Uint8Array {
   dv.setUint32(0, 325, true);
   dv.setUint16(24, 11, true);
   for (let i = 0; i < 11; i++) dv.setInt32(26 + i * 4, pointers[i] ?? pointers[pointers.length - 1], true);
+  // ★BJ734-A 尾注段（2026-10-27 用户令,尾注方案）：战争迷雾随 .wld 携行。
+  //   原版定谳：.wld 本体不含探索数据（探索按玩家目录存 <世界>.map 伴档,
+  //   MapHelper.cs:3055 亲读）——纯原版 round-trip 必丢;SW↔SW 经尾部私有段恢复。
+  //   互通安全定谳：原版 LoadWorld_Version2（WF:1767-1859）逐段+LoadFooter（:3003-3018）
+  //   后即返回 Ok,**无 EOF/流长校验**——尾注被真客户端与一切按段指针的工具忽略。
+  //   格式：'SWEXT1'(6B) + u32 payloadLen + JSON {v,w,h,ex}——ex=SaveData.explored
+  //   同源 b64 RLE,导入侧零新编解码器直接回填既有解码链。无 explored（原版导入档/
+  //   旧存档）= 不追加,字节与旧版逐位同。
+  const ex = save.explored;
+  if (ex && swExtTailFogHasExplored(ex)) {
+    const enc = new TextEncoder();
+    const payload = enc.encode(JSON.stringify({ v: 1, w: save.header.width, h: save.header.height, ex }));
+    const out = new Uint8Array(bytes.length + 10 + payload.length);
+    out.set(bytes, 0);
+    out.set(enc.encode('SWEXT1'), bytes.length);
+    new DataView(out.buffer).setUint32(bytes.length + 6, payload.length, true);
+    out.set(payload, bytes.length + 10);
+    return out;
+  }
   return bytes;
 }

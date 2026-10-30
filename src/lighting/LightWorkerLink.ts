@@ -61,18 +61,20 @@ export let lwbpFlag = (() => {
 })();
 export function setLwbpEnabled(v: boolean): void { lwbpFlag = v; }
 
-/** ★稳态门旗（任务#26 常驻债#1 收口,2026-10-27）：?lightsteady=1 灰度开（缺省关=
- *  逐位现状）。稳态=快照输入面（除恒动面 clock.timeOfDay/flicker/hourly）与上次
- *  实发全等 ∧ !dirty ∧ !liquidDirty ∧ 写日志空 → 跳发,最多连跳 3 拍（1/4 率,
- *  idle 60→15 发/s;主线程 ~60µs/发 + worker 全周期光照计算 4× 削减——Windows
- *  每 op IPC 税 10-20× 面收益更大,lwbp 注 Trace-225221 判例族）。跳发语义与 lwbp
- *  同族（跳=结果暂陈旧非丢失;本地引擎稳态本就 4-tick 周期=原版 4 帧节奏,呈现
- *  节拍 15Hz 与本地/原版同款）。灰度验收点=火把闪烁/昼夜过渡/迪斯科灯观感无差,
- *  转正后翻转缺省。 */
+/** ★稳态门旗（任务#26 常驻债#1 收口,2026-10-27）：★转正缺省开（2026-10-27 用户令
+ *  「转正」;实机 trace 复核 LightWorker busy 4.1% vs 旗关口径 ~9.6% =2-4× 削减,
+ *  falls=0/lag 2ms 链路健康）;?lightsteady=0 逃生门=逐位现状（每 tick 恒发）。
+ *  稳态=快照输入面（除恒动面 clock.timeOfDay/flicker/hourly）与上次实发全等 →
+ *  跳发,最多连跳 3 拍（1/4 率,idle 60→15 发/s;主线程 ~60µs/发 + worker 全周期
+ *  光照计算 4× 削减——Windows 每 op IPC 税 10-20× 面收益更大,lwbp 注 Trace-225221
+ *  判例族）。跳发语义与 lwbp 同族（跳=结果暂陈旧非丢失;本地引擎稳态本就 4-tick
+ *  周期=原版 4 帧节奏,呈现节拍 15Hz 与本地/原版同款）。灰度史:2026-10-27 当日
+ *  ?lightsteady=1 灰度落地→同日 live A/B(60→15.3 发/s,falls=0)+用户实机 trace
+ *  复核后转正。node/测试域恒 false→测试经 setter 显式开。 */
 export let lightSteadyFlag = (() => {
   try {
     if (typeof document === 'undefined') return false;
-    return new URLSearchParams(location.search).get('lightsteady') === '1';
+    return new URLSearchParams(location.search).get('lightsteady') !== '0';
   } catch { return false; }
 })();
 export function setLightSteadyEnabled(v: boolean): void { lightSteadyFlag = v; }
@@ -102,8 +104,9 @@ const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0, skipped: 0,
   fallsBy: newFallsBy(), respawns: 0,
   // ★lwbp（2026-10-11 刀②）:bpSkips=在飞门跳发 tick 数（F5/探针对账面——跳发率=
   //  worker 消化压力直读;恒 0=worker 不慢,门无感）。
-  // ★稳态门（任务#26,2026-10-27）:steadySkips=稳态跳发 tick 数（灰度 ?lightsteady=1;
-  //  idle 稳态应≈45/s(60→15);恒 0=旗关或输入面恒变——探针/验收对账面）。
+  // ★稳态门（任务#26,2026-10-27,已转正缺省开）:steadySkips=稳态跳发 tick 数
+  //  （?lightsteady=0 逃生门关时恒 0;idle 稳态应≈45/s(60→15);开着却恒 0=输入面
+  //  恒变——探针/验收对账面）。
   bpSkips: 0, steadySkips: 0 };
 /** ★R1b-1:引擎侧世代校验丢弃一个晚到结果时登记（探针/F5 对账面） */
 export function noteLightResultSkipped(): void { lwStat.skipped++; }

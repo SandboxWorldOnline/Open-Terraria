@@ -1,4 +1,4 @@
-// ★juddersmooth 机械闸(2026-10-10,★已转正缺省开,?smooth=0 逃生门)——迟到帧半步混合
+// ★juddersmooth 机械闸(2026-10-10 转正→★2026-10-27 用户令「先禁用」回缺省关,?smooth=1 显式开)
 //  (judder smoothing):
 //  纯判定表+帧尾序列账面(乒乓捕获/跳槽混合/断流卫生/resize 重建)。node 桩画布
 //  (canvasFactory 注入缝);生产 canvasEnv.mkCanvas。像素级等价由实机探针兜底

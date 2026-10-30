@@ -28,6 +28,7 @@ import { Inventory } from '../src/items/Inventory';
 import type { GameHooks } from '../src/entities/types';
 import { Enemy } from '../src/entities/Enemy';
 import { MinionProj } from '../src/entities/MinionProj';
+import { damageVarRoll } from '../src/stats/DamageVar';
 
 /** BJ528 同款夹具（世界/玩家/敌靶） */
 function makeGame(): { hooks: GameHooks; player: Player } {
@@ -124,7 +125,14 @@ describe('BJ637 刃杖 864 真实链四段定谳回归锁（AI_169 忠实相;BJ6
     (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles.push(blade);
     const hp0 = z.hp;
     for (let t = 0; t < 30 && z.hp === hp0; t++) blade.fixedUpdate(1, hooks);
-    expect(hp0 - z.hp).toBe(6);    // 钉值 6+3−3（断供→1 必红）
+    // ★BJ735 改判史（随 BJ716-A R18-F2/BJ723-B,2026-10-25/26）：随从接触环 DamageVar
+    // 首掷（Projectile.cs:12970;874 段 dmgV867）→ hp 差=6 基伤 DV 档域 {5,6,7}
+    // （16×实测分布 5/6/7 与 damageVarRoll 域全吻合;crit 恒 false=无 tag 掷面;
+    // 旧钉 6=平值遗迹,全量棘轮真随机 flaky——非中值档必红）。断供→钳 1 仍必红
+    // （1 不在域）,伤害断供判别力保持。
+    const dvDomain = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain.add(damageVarRoll(6, 0, () => i / 31));
+    expect(dvDomain.has(hp0 - z.hp)).toBe(true);
     expect(st(blade)).toBe(-1);    // 命中受理转返航（:14129-14141 864 特支,ai[0]>0 门）
     expect(z.iframes).toBe(0);     // local 档清窗（BJ436/BJ511 面不回归）
     const ledger = (blade as unknown as { hitCd: { map: Map<number, number> } }).hitCd.map;
