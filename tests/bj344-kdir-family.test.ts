@@ -19,6 +19,7 @@ import { TileStore } from '../src/world/TileStore';
 import {
   hitEnemies, HitCooldown, Boomerang, YoyoProj, CounterweightProj, FlailProj,
 } from '../src/entities/WeaponProj';
+import { damageVarRoll } from '../src/stats/DamageVar';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 160;
@@ -162,7 +163,12 @@ describe('BJ344 F1: 回旋镖 direction 字段/特例族（:13652+:13056-13134�
     b.fixedUpdate(1 / 60, hooks);
     expect(rec.length).toBeGreaterThanOrEqual(1);
     expect(rec[0].kx).toBeCloseTo(3);     // +1×2×1.5
-    expect(rec[0].dmg).toBe(6);           // 10×0.6
+    // ★BJ735 改判史（随 BJ723-B W01,2026-10-26）：hitEnemies 主环 DV 首掷
+    // （Projectile.cs:12970）→ dmg=trunc(DV(10)×0.6) 档域（旧钉 6=10×0.6 平值遗迹,
+    // 全量棘轮真随机 flaky——非中值档必红）;kb 链无 DV,kx 锁不动。
+    const dv383 = new Set<number>();
+    for (let i = 0; i < 31; i++) dv383.add(Math.trunc(damageVarRoll(10, 0, () => i / 31) * 0.6));
+    expect(dv383.has(rec[0].dmg)).toBe(true);
   });
 
   it('⑤902 回收态命中：翻转在 num40 读出前（首中即翻转值,逐命中震荡持久）', () => {

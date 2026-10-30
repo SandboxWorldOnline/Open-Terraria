@@ -78,7 +78,10 @@ function fakeRoDir(name: string, files: Record<string, string>, perm: 'granted' 
         (e as { name?: string }).name = 'NotFoundError';
         throw e;
       }
-      return { text: async () => map.get(n) ?? '' };
+      // ★BJ735 改判史（随 Issue#25,2026-10-27）：夹具旧形=句柄级 text() 幻想接口
+      // → 生产码改 (await fh.getFile()).text() 后 restoreFromBackup 必 broken,
+      // A6 恢复链择源/D2 fsBackupRestoreEvicted 双红。同步标准句柄形状（同 bj617/bj618）。
+      return { getFile: async () => ({ text: async () => map.get(n) ?? '' }) };
     },
     removeEntry: async () => { /* 恢复链不消费 */ },
   };

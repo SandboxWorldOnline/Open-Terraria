@@ -271,7 +271,9 @@ describe('BJ509-D 非四柱 GlowMask 面不回归（收集仅 vel4 分支）', (
 describe("BJ509-E 7d''' 消费面结构锁（光照合成后 lighter 重放）", () => {
   it("7d''' 块在 compositeLight 之后主画布消费队列（npcGlowVel4Offsets 单源+64/255 α;★BJ-C1 F4 方法化 flushTowerGlow 重锚）", () => {
     const src = rendererSrc();
-    const consumer = block(src, 'private flushTowerGlow(', 'private flushTrailShade(');
+    // ★⑫-b 拆分(2026-10-28)后 flushTrailShade→flushTrailStrips/flushProjFullbright:
+    //  块终界锚改用 flushTrailStrips(同区下一 private 方法,span 语义不变)
+    const consumer = block(src, 'private flushTowerGlow(', 'private flushTrailStrips(');
     expect(consumer).toContain('this.towerGlowQueue.length');
     expect(consumer).toContain("ctx.globalCompositeOperation = 'lighter'");
     expect(consumer).toContain('Renderer.npcGlowVel4Offsets(q.vx, q.vy, q.num, q.xoff)');

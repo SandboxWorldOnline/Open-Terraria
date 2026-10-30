@@ -5,6 +5,7 @@
 //  ④雨滴撞格亡/命中敌承 damage
 import { describe, it, expect, vi } from 'vitest';
 import { RainCloudProj } from '../src/entities/WeaponProj';
+import { damageVarRoll } from '../src/stats/DamageVar';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { Player } from '../src/entities/Player';
@@ -137,7 +138,12 @@ describe('雨云/猩红魔杖云弹家族（aiStyle 45）', () => {
     drop.critChance = 0;                                       // 钉 4% 暴击 roll=确定 30
     for (let t = 0; t < 30 && !drop.dead; t++) drop.fixedUpdate(1 / 60, hooks);
     expect(e.hits.length).toBeGreaterThanOrEqual(1);           // 命中承伤
-    expect(e.hits[0]).toBe(30);
+    // ★BJ735 改判史（随 BJ723-B W01,2026-10-26）：hitEnemies 主环接 DamageVar 首掷
+    // （Projectile.cs:12970,31 离散档 ±15%,luck=0 单掷;critChance=0 已钉无 crit 掷）
+    // → 平值钉 30 变 31 档域锁（枚举域自证,同 crystal-serpent ⑪ 改判形）。
+    const dvDomain = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain.add(damageVarRoll(30, 0, () => i / 31));
+    expect(dvDomain.has(e.hits[0])).toBe(true);
     expect(drop.dead).toBe(true);                              // 撞地板亡
   });
 

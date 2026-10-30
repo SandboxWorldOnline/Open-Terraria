@@ -12,9 +12,9 @@ import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTabl
 import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
-import { LightWorkerLink, lightWorkerFlag, lightWorkerStats, noteLightResultSkipped, noteLightWorkerRespawn } from './LightWorkerLink';
+import { LightWorkerLink, lightWorkerFlag, lightWorkerStats, lightSteadyFlag, noteLightResultSkipped, noteLightSteadySkip, noteLightWorkerRespawn } from './LightWorkerLink';
 import { ladderDelayMs, workerRetryEnabled } from '../workers/WorkerGovernance';   // ★看门狗治理(2026-09-28)
-import { buildEngineSnapshot, type DecayArgs, type LightResultMsg, type LightSnapshotMsg } from './LightWorkerProtocol';
+import { SNAPSHOT_PAD, buildEngineSnapshot, buildSteadyFingerprint, type DecayArgs, type EngineCaptureView, type LightResultMsg, type LightSnapshotMsg } from './LightWorkerProtocol';
 
 /** 引擎依赖的最小世界结构(World 结构兼容;单测可注入 fake) */
 export interface LightingWorld {
@@ -386,10 +386,24 @@ export class LightingEngine {
         //  的无状态面,跳发帧照清（防重注册叠加双亮）③dirty/liquidDirty 只在实发时
         //  消费（清早了=差量门把历史写面当本帧=恒全量,注释同下）。?lwbp=0=恒发现状。
         const sent = !live || lw.sendReady();
-        if (sent) {
+        // ★稳态门（任务#26 常驻债#1 收口,2026-10-27）:lwbp 放行沿之上,稳态输入面
+        //  （除恒动面 clock.timeOfDay/flicker/hourly——振荡器/昼夜推进,随实发拍到达）
+        //  与上次实发全等 ∧ !dirty ∧ !liquidDirty ∧ 写日志空 → 跳发,连跳 ≤3 拍
+        //  （idle 60→15 发/s;跳=lwbp 同族语义「结果暂陈旧非丢失」,呈现节拍与本地
+        //  引擎稳态 4-tick 周期(原版 4 帧节奏)同款）。?lightsteady=1 灰度,缺省关。
+        let steadySent = sent;
+        if (sent && live && lightSteadyFlag && this._steadyRun < 3
+          && this.steadyInputsUnchanged(reg)) {
+          steadySent = false;
+          this._steadyRun++;
+          noteLightSteadySkip();
+        }
+        if (steadySent) {
           lw.send(this.buildWorkerSnapshot(reg));
-        } else {
-          lw.noteSendSkip();
+          this._steadyRun = 0;
+          this._steadySig = buildSteadyFingerprint(this.snapshotCap(reg), this.inWindowLogCount(reg));
+        } else if (!sent) {
+          lw.noteSendSkip();   // lwbp 在飞跳发(稳态跳发只计 steadySkips,不双计;run 保持=持续陈旧保守计)
         }
         if (live && this.snapCoveredByPublic()) {
           this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
@@ -466,7 +480,13 @@ export class LightingEngine {
   private buildWorkerSnapshot(reg: { rx: number; ry: number; rw: number; rh: number }): Omit<LightSnapshotMsg, 'op' | 'seq'> {
     const lw = this._lw!;
     const tiles = lw.buildWorkerTiles(reg.rx, reg.ry, reg.rw, reg.rh);
-    return buildEngineSnapshot({
+    return buildEngineSnapshot(this.snapshotCap(reg), tiles, 0);
+  }
+
+  /** 快照捕获视图（buildWorkerSnapshot 与稳态指纹共用单源——字段清单漂移=指纹漏
+   *  记输入面,tests/light-steady-gate 键集锚定守卫） */
+  private snapshotCap(reg: { rx: number; ry: number; rw: number; rh: number }): EngineCaptureView {
+    return {
       rx: reg.rx, ry: reg.ry, rw: reg.rw, rh: reg.rh,
       world: this.world,
       flicker: this.flicker,
@@ -474,7 +494,42 @@ export class LightingEngine {
       buffLights: this.buffLights,
       perFrame: this.perFrame,
       decay: this._lwDecay,
-    }, tiles, 0);
+    };
+  }
+
+  // ---- ★稳态门（任务#26 常驻债#1 收口,2026-10-27;机制全注见 LightWorkerLink
+  //      lightSteadyFlag 声明处）:稳态=输入面（除恒动面 clock.timeOfDay/flicker/
+  //      hourly——振荡器/昼夜推进,随实发拍到达）与上次实发全等 → 跳发,连跳 ≤3 拍
+  //      （1/4 率,idle 60→15 发/s）。tile/liquid 原语写按【窗内】判（窗外世界演化
+  //      不影响结果——实测 idle 主源=植被生长窗外写每 ~2.8 tick 一发,全局 dirty
+  //      判会把稳态打回 38/s）;未记账直写面不进门——≤3 拍陈旧后下次实发经内容
+  //      脏门（dirty∧日志空→全量锚）自愈=有界陈旧,lwbp 同族（跳=延迟非丢失,
+  //      写日志累积到下次实发,锚帧界随发率弹性）。 ----
+  /** 上次实发的稳态指纹（null=未实发过,恒判「已变」） */
+  private _steadySig: string | null = null;
+  /** 连续稳态跳发拍数（实发即清零） */
+  private _steadyRun = 0;
+  /** 快照切片窗内有写日志条目的格数（窗=sliceGeometry 同款 ±SNAPSHOT_PAD 数学,
+   *  与 worker 可见面精确同界——窗外写不进指纹） */
+  private inWindowLogCount(reg: { rx: number; ry: number; rw: number; rh: number }): number {
+    const st = this.world.store;
+    const log = (st as { tileWriteLog?: number[] | null }).tileWriteLog;
+    if (!log || log.length === 0) return 0;
+    const sx = Math.max(0, reg.rx - SNAPSHOT_PAD), sy = Math.max(0, reg.ry - SNAPSHOT_PAD);
+    const ex = Math.min(st.w, reg.rx + reg.rw + SNAPSHOT_PAD), ey = Math.min(st.h, reg.ry + reg.rh + SNAPSHOT_PAD);
+    let n = 0;
+    for (let i = 0; i < log.length; i++) {
+      const idx = log[i];
+      const x = idx % st.w, y = (idx - x) / st.w;
+      if (x >= sx && x < ex && y >= sy && y < ey) n++;
+    }
+    return n;
+  }
+  /** 稳态输入面是否与上次实发全等（指纹含窗内写账;dirty/liquidDirty 不进门——
+   *  未记账面走「下次实发内容脏门全量锚」有界自愈,见块头注） */
+  private steadyInputsUnchanged(reg: { rx: number; ry: number; rw: number; rh: number }): boolean {
+    if (this._steadySig === null) return false;
+    return buildSteadyFingerprint(this.snapshotCap(reg), this.inWindowLogCount(reg)) === this._steadySig;
   }
 
   /** ★C9d：快照【视口】是否被公共采样对完整覆盖（live 态早退门——覆盖=尾随 ≤1 tick

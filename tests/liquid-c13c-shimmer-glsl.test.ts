@@ -14,7 +14,7 @@ import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 import type { GLSpriteLayer } from '../src/render/GLSpriteLayer';
 import {
   drawVanillaLiquids, emitVanillaLiquidGate, resetLiquidBatchForFrame,
-  liqC13cSetForTest, liqC13c, shimmerSparkBandForTest,
+  liqC13cSetForTest, liqC13c, shimmerSparkBandForTest, tintSurfForTest, liqtintSetForTest,
   type LiqBatchEmit,
 } from '../src/render/VanillaLiquidRenderer';
 import { visEffectFrames, stepVisEffectTick } from '../src/entities/Enemy';
@@ -140,6 +140,8 @@ afterEach(() => {
   liqC13cSetForTest(false);   // 旗复位（=?c13c=0 逃生门域;init 缺省开由 liqC13cInit 快照锁）
   liqpolishSetForTest(false); // node 惯例复位（perfFlags 族测试环境恒关）
   shimmerSparkBandForTest(undefined);   // ★三期带钩清面（生产路径恢复）
+  tintSurfForTest(null, null, null);    // ★BJ738 着色面清面（生产路径恢复）
+  liqtintSetForTest(true);              // node init 域复位（location 缺省 true 同款）
   resetLiquidBatchForFrame(-1);
 });
 
@@ -293,6 +295,59 @@ describe('★C13c 微光批环端到端（drawVanillaLiquids + bat 钩,c13c 开�
     expect(draws.length).toBe(shim.quads);
     expect(mults.length).toBe(shim.quads * 4);   // 2×2 子块/quad
   });
+
+  it('★BJ738 liqtint:微光段重放双线性梯度(四角求值+整窗源矩形;子块 fillRect 退役)', () => {
+    c13cArm(true);
+    const tintData = new Uint8ClampedArray(16);
+    let puts = 0;
+    const FAKE_CV = { width: 2, height: 2 } as HTMLCanvasElement;
+    tintSurfForTest(FAKE_CV, { putImageData: () => { puts++; } }, { data: tintData });
+    const st = makeShimmerPool();
+    const caps: BatCap[] = [];
+    const { ctx } = makeCtx();
+    resetLiquidBatchForFrame(95);
+    drawVanillaLiquids(ctx, fakeAtlas, st, 10, 5, 5, 130, 70, 1000, true, 0, 0,
+      undefined, false, undefined, 95, null, mkBat(caps), false);
+    const shim = caps.find((c) => c.key.startsWith('liqshim:'))!;
+    expect(shim).toBeDefined();
+    const rctx = makeCtx();
+    (shim.replay as (c: CanvasRenderingContext2D) => void)(rctx.ctx);
+    const draws = rctx.calls.filter((c) => c.op === 'drawImage');
+    const tints = draws.filter((c) => c.args[0] === FAKE_CV);
+    const texs = draws.filter((c) => c.args[0] !== FAKE_CV);
+    expect(texs.length).toBe(shim.quads);          // 纹理笔不变
+    expect(tints.length).toBe(shim.quads);         // 梯度笔=每 quad 一笔
+    expect(rctx.calls.filter((c) => c.op === 'fillRect').length).toBe(0);   // 子块退役
+    expect(puts).toBe(shim.quads);                 // 每 quad 一写 2×2 面
+    for (const d of tints) {                       // 环角色已按裁剪角采样→源矩形整窗
+      expect(d.args[1]).toBe(0); expect(d.args[2]).toBe(0);
+      expect(d.args[3]).toBe(2); expect(d.args[4]).toBe(2);
+    }
+    // 末 quad 角字节 = FS 同式四角求值（refWave 参照;LIQSHIM_FS SHIM_A/SHIM_DV 常量）
+    const tVis = visEffectFrames();
+    const o = (shim.quads - 1) * 66;
+    const tx0 = shim.data[o + 8], ty0 = shim.data[o + 9];
+    const tx1 = shim.data[o + 19], tyB = shim.data[o + 64];
+    const SA = [0.64705884, 0.50980393, 0.93333333];
+    const SD = [0.80392158 - SA[0], 0.80392158 - SA[1], 1 - SA[2]];
+    const kAt = (tx: number, ty: number): number => 0.1 + refWave(tx, ty, tVis) * 0.4;
+    const cAt = (tx: number, ty: number): number[] => SA.map((a, i) => 255 * (a + SD[i] * kAt(tx, ty)));
+    const exp = [cAt(tx0, ty0), cAt(tx1, ty0), cAt(tx0, tyB), cAt(tx1, tyB)];
+    for (let ci = 0; ci < 4; ci++) {
+      for (let ch = 0; ch < 3; ch++) {
+        expect(tintData[ci * 4 + ch]).toBe(Math.round(exp[ci][ch]));
+      }
+      expect(tintData[ci * 4 + 3]).toBe(255);      // 不透明 α(multiply 全乘语义)
+    }
+    // 逃生门:?liqtint=0 → 面零消费(回退子块路径=上测试域)
+    liqtintSetForTest(false);
+    const rctx2 = makeCtx();
+    (shim.replay as (c: CanvasRenderingContext2D) => void)(rctx2.ctx);
+    const putsAfter = puts;
+    (shim.replay as (c: CanvasRenderingContext2D) => void)(makeCtx().ctx);
+    expect(puts).toBe(putsAfter);                  // 旗关不再写面
+    liqtintSetForTest(true);
+  });
 });
 
 describe('★C13c fg 复用 + gate 重发射（stride 11 同步面）', () => {
@@ -337,7 +392,7 @@ describe('★C13c fg 复用 + gate 重发射（stride 11 同步面）', () => {
     }
   });
 
-  it('gate 重发射:shim 段 y 镜像逐顶点（aTile/aNoise 随镜像不变,§3.3;数据源=bg 环域）', () => {
+  it('gate 重发射:shim 段 y 镜像逐顶点（aTile/aNoise 随镜像不变,§3.3;★BJ743 数据源=run.data 发射切片=fg 缩放域）', () => {
     c13cArm(true);
     const st = makeShimmerPool();
     const bgCaps: BatCap[] = [];
@@ -374,19 +429,19 @@ describe('★C13c fg 复用 + gate 重发射（stride 11 同步面）', () => {
     const handle = emitVanillaLiquidGate(glw, 1280, H);
     expect(handle).not.toBeNull();
     const shimBatches = batches.filter((b) => b.data.length === b.quads * 66);
-    // gate 重发射读 _shimRing（fg 复用臂登记的 run.start=bg 环域,α=bg 值——既有
-    // 主环 reuse 同语义;obj19 ×100 饱和域 α 差无视觉面）
+    // ★BJ743（2026-10-30）勘正:gate 重发射读 run.data=发射数据切片（复用臂
+    // =_fgReuseShimRing 缩放后数据,α=fg 值 0.75——旧读法=bg 环域 α=bg 值,obj19
+    // ×100 饱和域恰无视觉差;罩源 α 语义面（BJ743）要求数据面钉正）
     expect(shimBatches.length).toBe(fgShim.length);   // shim 段走 stride-11 槽
     for (let r = 0; r < fgShim.length; r++) {
-      const bg = bgShim.find((b) => b.key === fgShim[r].key);
-      expect(bg).toBeDefined();
-      expect(shimBatches[r].quads).toBe(bg!.quads);
-      for (let q = 0; q < bg!.quads; q++) {
+      const fg = fgShim[r];
+      expect(shimBatches[r].quads).toBe(fg.quads);
+      for (let q = 0; q < fg.quads; q++) {
         for (let v = 0; v < 6; v++) {
           const s = q * 66 + v * 11;
-          expect(shimBatches[r].data[s]).toBe(bg!.data[s]);
-          expect(shimBatches[r].data[s + 1]).toBeCloseTo(H - bg!.data[s + 1], 6);   // y 镜像
-          for (let k = 2; k < 11; k++) expect(shimBatches[r].data[s + k]).toBe(bg!.data[s + k]);
+          expect(shimBatches[r].data[s]).toBe(fg.data[s]);
+          expect(shimBatches[r].data[s + 1]).toBeCloseTo(H - fg.data[s + 1], 6);   // y 镜像
+          for (let k = 2; k < 11; k++) expect(shimBatches[r].data[s + k]).toBe(fg.data[s + k]);
         }
       }
     }
@@ -617,7 +672,7 @@ describe('★C13c 结构锁', () => {
     expect(VL).toContain('if (bandBatOn && liqC13c) {');
     expect(VL).toContain('_shimKey = `liqshim:${texId(drawTex)}`; }');
     expect(VL).toContain('if (bandBatOn && liqC13c) flushShimBandRun();   // ★C13c:带微光段收尾');
-    expect(VL).toContain('shim?: boolean; }');
+    expect(VL).toContain('shim?: boolean; data?: Float32Array; }');
     expect(VL).toContain('cols: boolean; shim?: boolean }');
     expect(VL).toContain('if (r.shim) {');
     expect(VL).toContain('if (run.shim) {');

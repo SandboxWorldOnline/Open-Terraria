@@ -9375,8 +9375,59 @@ export class Game implements GameHooks {
     bindModTileEntities(this.world.store);   // ★TE 梯队(2026-10-14):世界绑定(放置/破坏自愈)
     runModOnWorldLoad(this);   // ★mod 系统 onWorldLoad（2026-10-04：世界全链就绪、主循环起跑前唯一汇点）
     modUiSetInGame(true);   // ★刀1:mod UI 宿主接管旗(可见面板回挂 vui;读档/换世界沿重同步)
+    // ★?timerloop=1 实验旗(2026-10-27,用户问「不依赖 rAF 自建渲染循环可行性」):
+    // 驱动源 rAF→setInterval(4ms)——timer 不受 beginFrame 门控,持续产生 canvas
+    // damage;若 tick-hole 洞成因=「无 damage→合成器休眠→自适应降档」,timer 驱动
+    // 应消灭洞;若洞在 OS 显示链层(ProMotion/DisplayLink),timer 无效——两种结果
+    // 都是定谳。FrameBeat 累计器照常锁帧率(节流逻辑零改动);rAF 语义差异:
+    // 后台 timer 钳 1Hz(实验档可接受)。停机清 interval(防孤儿);异常熔断同款。
+    const timerLoopOn = (() => {
+      try {
+        if (typeof location === 'undefined') return false;
+        return new URLSearchParams(location.search).get('timerloop') === '1';
+      } catch { return false; }
+    })();
+    let loopTimer: ReturnType<typeof setInterval> | null = null;
+    // ★?rafhybrid=1 实验旗(2026-10-27,timerloop 判别后第二实验):rAF 主驱【不变】+
+    // 4ms timer 兜底——洞期(rAF 到达年龄>12ms)由 timer 补拍。判别目标:洞内补画的
+    // damage 若能唤醒合成器(损伤驱动合成路径)→帧在洞内上屏,掉帧窗收窄;若洞在
+    // OS 显示链层(合成器整段休眠,damage 不唤醒——trace-2 证据:+6.4 commit 后
+    // +6.2→+22 无 DrawFrame)→补拍帧等洞尾上屏=与现状同帧,零恶化零收益=终谳
+    // 「页内无解,锁 60/钉刷新率唯二」。正常态(回调间距≤8.3ms)兜底永不触发=零
+    // 行为变化;洞内补拍受 FrameBeat 门(累计器不 due 不渲)。
+    const rafHybridOn = (() => {
+      try {
+        if (typeof location === 'undefined') return false;
+        return new URLSearchParams(location.search).get('rafhybrid') === '1';
+      } catch { return false; }
+    })();
+    let rafPending = false;
+    let lastDriveAt = 0;
+    let hybridTimer: ReturnType<typeof setInterval> | null = null;
+    const stopLoopTimers = (): void => {
+      if (loopTimer != null) { clearInterval(loopTimer); loopTimer = null; }
+      if (hybridTimer != null) { clearInterval(hybridTimer); hybridTimer = null; }
+    };
+    const reschedule = (fn: (now: number) => void): void => {
+      if (timerLoopOn) {
+        if (loopTimer == null) loopTimer = setInterval(() => fn(performance.now()), 4);
+        return;
+      }
+      if (!rafPending) { rafPending = true; requestAnimationFrame(fn); }
+      if (rafHybridOn && hybridTimer == null) {
+        hybridTimer = setInterval(() => {
+          if (!this.running) { stopLoopTimers(); return; }
+          if (rafPending && performance.now() - lastDriveAt > 12) fn(performance.now());
+        }, 4);
+      }
+    };
     const loop = (now: number) => {
-      if (!this.running) return;
+      rafPending = false;
+      lastDriveAt = now;
+      if (!this.running) {
+        stopLoopTimers();
+        return;
+      }
       try {
         // ★v9.12 稳定锁帧档+方差自适应(2026-10-08 用户产品裁决「宁愿渲染减速也不应
         //  帧数反复抖动」,推翻 v6 帧率优先政策与 v9.11 跟满回归,FrameBeat.ts 头注
@@ -9398,7 +9449,7 @@ export class Game implements GameHooks {
         this.beat.hold(this.paused || this._entryFreeze != null || this._tpVeil);
         this.beat.observeVsync(now, frameCapUrl ?? options.data.frameCap);   // ★?framecap=N URL 覆写(实验口;0=跟满档「禁用调度」)
         if (!this.beat.shouldRender(now)) {
-          requestAnimationFrame(loop);
+          reschedule(loop);
           return;
         }
         this.beat.beginRender(now);
@@ -9424,17 +9475,18 @@ export class Game implements GameHooks {
             return true;
           });
         }
-        requestAnimationFrame(loop);
+        reschedule(loop);
       } catch (err) {
         // 帧循环异常熔断(2026-08-18):未捕获异常曾把 rAF 链静默炸断 = 整页 JS
         // 冻结无现场(用户实报砍树拾取崩溃,trace 证 JS 整体死亡)。完整栈入
         // console.error(→__swErrors 环,F5 报告可取)后停机——不再带病空转
         this.running = false;
+        stopLoopTimers();
         console.error('[Game] 帧循环异常,已停机(F5 报告/控制台可取完整栈):', err);
         this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.FrameError'));
       }
     };
-    requestAnimationFrame(loop);
+    reschedule(loop);
   }
 
   private frame(now: number) {

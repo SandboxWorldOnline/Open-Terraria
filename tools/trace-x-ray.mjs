@@ -33,6 +33,11 @@
 // ═══════════════ 口径（战役 v2 校准,2026-09-25 四柱/雷雨七 trace 战役沉淀）═══════════════
 //   主线程 = CrRendererMain（事件数最多者;--main-tid 可钉死）
 //   渲染帧锚 = 主线程 FireAnimationFrame 且 dur≥3000µs,相邻 >1500µs 去重（v2 口径）
+// ★掉帧窗归因（2026-10-27 增强批）:渲染帧=rAF dur≥0.8ms(FrameBeat skip 回调剔除)→
+//   掉帧窗=渲染距>12.5ms(剔录制伪影窗)→四分类 tick-hole/slow-frame/gpu-stall/mixed
+//   （主忙=调度器顶层 RunTask 时序重叠和;GPU 忙=CrGpuMain 任务重叠和）。判读:
+//   tick-hole 主导=浏览器/OS 不发 beginFrame(ProMotion/DisplayLink 族——页面层不可控,
+//   缓解=锁低档/钉刷新率);slow-frame 主导=游戏帧本体爆长(挖函数可修)。
 //   渲染帧/跳帧 = 主线程 FunctionCall{loop} dur≥1500µs / <1500µs（sw-pass 口径）
 //   drawImage% = drawImage 样本自耗时 / 主线程采样墙钟（sw-pass5 口径,非 span 口径）
 //   GC 三类 = V8.GC_SCAVENGER|MinorGC → minor;V8.GC_MARK_COMPACTOR|MajorGC → major;
@@ -296,6 +301,11 @@ function makeAccumulator(opts) {
     tmin: Infinity, tmax: -Infinity,
     events: 0, bad: 0,
     fires: [],                 // [ts,dur,tid]×n（rAF 全线程收集,锚构建时筛主线程）
+    // ★掉帧窗归因数据源(2026-10-27):主线程调度器顶层 RunTask 时序(主忙口径,
+    // 无嵌套重复计数)+ GPU 主线程(CrGpuMain)任务时序(洞段 GPU 背压判据)
+    runTaskMainTs: [],         // [ts,dur]×n（主线程顶层 RunTask）
+    gpuMainTs: [],             // [ts,dur]×n（CrGpuMain X>200µs）
+    gpuMainKey: null,          // 'pid:tid'（thread_name CrGpuMain 时钉）
     loopFrames: [],            // 主线程 FunctionCall{loop} {ts,dur}
     drawFrameTs: new Map(),    // tid -> [ts]（DrawFrame,合成器;辅助帧距）
     gcEvents: [],              // [ts,dur,kind(0/1/2),tid]×n
@@ -336,6 +346,7 @@ function makeAccumulator(opts) {
         const t = acc.threads.get(k);
         const nm = ev.args?.name || '?';
         if (t) t.name = nm; else acc.threads.set(k, { pid: ev.pid, tid: ev.tid, name: nm, events: 0, busyUs: 0 });
+        if (nm === 'CrGpuMain') acc.gpuMainKey = k;
         if (nm === 'CrRendererMain') {
           acc.seenRendererMain.set(k, 0);
           if (!acc.pinnedResolved && !opts.mainTid) acc.pinnedResolved = k; // 首个钉定,事后复核
@@ -441,6 +452,10 @@ function makeAccumulator(opts) {
       acc.startProfiling.push(ts || 0, ev.dur || 0, tidKey);
       return;
     }
+    // ★掉帧窗归因:GPU 主线程任务时序(与主线程门禁并行收集)
+    if (acc.gpuMainKey && tidKey === acc.gpuMainKey && ev.ph === 'X' && (ev.dur || 0) > 200) {
+      acc.gpuMainTs.push(ts || 0, ev.dur || 0);
+    }
 
     if (!acc.pinnedResolved || tidKey !== acc.pinnedResolved) return;
 
@@ -452,6 +467,7 @@ function makeAccumulator(opts) {
         acc.commitDur.push(ev.dur || 0);
       } else if (name === 'RunTask') {
         acc.runTaskMain.n++; acc.runTaskMain.dur += ev.dur || 0;
+        acc.runTaskMainTs.push(ts || 0, ev.dur || 0);
       } else if (CANVAS_OP_NAMES.has(name)) {
         let a = acc.paintOps.get(name);
         if (!a) { a = []; acc.paintOps.set(name, a); }
@@ -973,6 +989,95 @@ function buildDigest(tracePath, acc, opts, meta) {
   const countedAnchors = includeRecorder ? nA : nA - nArt;
   const effSpanS = includeRecorder || !nArt ? spanS : round(Math.max(spanS - artifactUnionUs / 1e6, 0), 2);
   const fpsDenom = includeRecorder || !nArt ? spanS : effSpanS;
+  // ── ★掉帧窗归因（2026-10-27,用户令「找到掉帧真凶」固化）──
+  // 渲染帧=主线程 rAF dur≥800µs(FrameBeat skip 回调<0.8ms 剔除),去重>1ms(双发对)。
+  // 掉帧窗=渲染距>12.5ms(错过 1+ 槽)且非录制伪影窗。四分类:
+  //  · tick-hole:主忙<35%∧GPU忙<35%——主线程 idle 等不到 beginFrame=浏览器/OS 帧
+  //    调度洞(ProMotion 自适应/DisplayLink 抖动族;页面层不可控,缓解=锁低档/钉刷新率)
+  //  · slow-frame:前帧 rAF 体≥窗 60%——游戏帧本体爆长(可修,挖函数)
+  //  · gpu-stall:GPU忙≥50%∧主闲——GPU 背压压 beginFrame
+  //  · mixed:其余(主忙但非单帧主导——任务/提交/GC 混合)
+  const dropWindows = (() => {
+    const mainTid2 = mainTh ? mainTh.tid : -1;
+    const rl = [];
+    for (let i = 0; i < acc.fires.length; i += 3) {
+      if (acc.fires[i + 2] === mainTid2 && acc.fires[i + 1] >= 800) rl.push([acc.fires[i], acc.fires[i + 1]]);
+    }
+    rl.sort((a, b) => a[0] - b[0]);
+    const rd = [];
+    for (const [ts, dur] of rl) if (!rd.length || ts - rd[rd.length - 1][0] > 1000) rd.push([ts, dur]);
+    // 渲染帧距直方图 + 错拍率
+    const gapHist = { '4.2': 0, '8.3': 0, '12.5': 0, '16.7': 0, '20.8-25': 0, '>25': 0 };
+    let missN = 0;
+    const gaps = [];
+    for (let i = 1; i < rd.length; i++) {
+      const g = rd[i][0] - rd[i - 1][0];
+      gaps.push(g);
+      if (g > 10500) missN++;
+      const k = g <= 5500 ? '4.2' : g <= 10500 ? '8.3' : g <= 14800 ? '12.5' : g <= 19000 ? '16.7' : g <= 27000 ? '20.8-25' : '>25';
+      gapHist[k]++;
+    }
+    // 重叠求和助手:[ts,dur]×n 与窗 [t0,t1) 的覆盖
+    const overlap = (arr, t0, t1) => {
+      let sum = 0;
+      for (let i = 0; i < arr.length; i += 2) {
+        const a = arr[i], b = arr[i] + arr[i + 1];
+        if (b <= t0 || a >= t1) continue;
+        sum += Math.min(b, t1) - Math.max(a, t0);
+      }
+      return sum;
+    };
+    const windows = [];
+    const verdictAgg = {};
+    for (let i = 1; i < rd.length; i++) {
+      const gap = rd[i][0] - rd[i - 1][0];
+      if (gap <= 12500) continue;
+      const t0 = rd[i - 1][0], t1 = rd[i][0];
+      // 录制伪影窗跳过(StartProfiling 期)
+      if (recWindows.some((w) => Math.max(t0, w.ts) < Math.min(t1, w.end))) continue;
+      const prevDur = rd[i - 1][1];
+      const mainBusy = overlap(acc.runTaskMainTs, t0, t1);
+      const gpuBusy = overlap(acc.gpuMainTs, t0, t1);
+      let verdict;
+      if (prevDur >= gap * 0.6) verdict = 'slow-frame';
+      else if (mainBusy < gap * 0.35 && gpuBusy < gap * 0.35) verdict = 'tick-hole';
+      else if (gpuBusy >= gap * 0.5 && mainBusy < gap * 0.35) verdict = 'gpu-stall';
+      else verdict = 'mixed';
+      windows.push({ gapMs: round(gap / 1000, 1), atS: round((t0 - (anchors[0] ?? t0)) / 1e6, 1),
+        verdict, mainBusyMs: round(mainBusy / 1000, 1), gpuBusyMs: round(gpuBusy / 1000, 1), prevFrameMs: round(prevDur / 1000, 1) });
+      verdictAgg[verdict] = verdictAgg[verdict] ?? { n: 0, totalMs: 0 };
+      verdictAgg[verdict].n++;
+      verdictAgg[verdict].totalMs = round(verdictAgg[verdict].totalMs + gap / 1000, 1);
+    }
+    // rAF 洞(相邻回调任意距>12ms,双发对合并)=浏览器不发 beginFrame 的直接读数
+    let maxRafHoleMs = 0, rafHoles12 = 0;
+    const mainFires = [];
+    for (let i = 0; i < acc.fires.length; i += 3) {
+      if (acc.fires[i + 2] === mainTid2) mainFires.push(acc.fires[i]);
+    }
+    mainFires.sort((a, b) => a - b);
+    let last = -1e18;
+    for (const ts of mainFires) {
+      if (ts - last > 1000) {
+        if (last > -1e17) {
+          const h = (ts - last) / 1000;
+          if (h > maxRafHoleMs) maxRafHoleMs = h;
+          if (h > 12) rafHoles12++;
+        }
+        last = ts;
+      }
+    }
+    return {
+      renders: rd.length,
+      missPct: gaps.length ? round((missN / gaps.length) * 100, 2) : null,
+      gapHist,
+      windows,
+      byVerdict: verdictAgg,
+      maxRafHoleMs: round(maxRafHoleMs, 1),
+      rafHoles12,
+    };
+  })();
+
   const frames = {
     method: `FireAnimationFrame@CrRendererMain dur>=${minAnchor}us dedup>1500us`,
     anchors: nA,
@@ -1156,6 +1261,7 @@ function buildDigest(tracePath, acc, opts, meta) {
       heap: heap.points ? heap : { points: 0, note: '本 trace 无 usedHeapSize 采样点' },
     },
     canvas,
+    dropWindows,
     workers: workerRowsOut,
     postMessage,
     contextLostEvents: acc.ctxLost,
@@ -1179,6 +1285,13 @@ export function diffDigests(a, b, labelA = 'A', labelB = 'B') {
   add('frames', 'gap.max', a.frames.gap.max, b.frames.gap.max, 'ms');
   add('frames', 'count33ms', a.frames.count33ms, b.frames.count33ms, '帧');
   add('frames', 'droppedFrames', a.frames.droppedFrames, b.frames.droppedFrames, '');
+  if (a.dropWindows && b.dropWindows) {
+    add('drop', 'renderMissPct', a.dropWindows.missPct, b.dropWindows.missPct, '%');
+    add('drop', 'rafHoles12', a.dropWindows.rafHoles12, b.dropWindows.rafHoles12, '个');
+    for (const k of ['tick-hole', 'slow-frame', 'gpu-stall', 'mixed']) {
+      add('drop', `win.${k}.n`, a.dropWindows.byVerdict[k]?.n ?? 0, b.dropWindows.byVerdict[k]?.n ?? 0, '窗');
+    }
+  }
   const gcm = (d) => d.gc.byThread.find((r) => r.isMain) || {};
   add('gc', 'mainMinor.perSec', gcm(a).minor?.perSec ?? 0, gcm(b).minor?.perSec ?? 0, '/s');
   add('gc', 'mainMajor.n', gcm(a).major?.n ?? 0, gcm(b).major?.n ?? 0, '次');
@@ -1231,6 +1344,19 @@ export function renderMd(d) {
   if (d.frames.recorderArtifactFrames) L.push(`★录制伪影帧 ${d.frames.recorderArtifactFrames} 个已${d.recorder?.excludedFromStats === false ? '标记（--include-recorder,未剔除）' : '剔除出统计'}（StartProfiling 启动成本,非游戏卡顿）`);
   L.push(`loop 帧: render=${d.frames.loop.render} skip=${d.frames.loop.skip}`);
   if (d.frames.drawFrame) L.push(`DrawFrame@${d.frames.drawFrame.name}: n=${d.frames.drawFrame.n} gapP50=${d.frames.drawFrame.gapP50Ms}ms P90=${d.frames.drawFrame.gapP90Ms}ms`);
+  if (d.dropWindows && d.dropWindows.renders) {
+    const dw = d.dropWindows;
+    L.push('');
+    L.push(`## 掉帧窗归因（渲染帧=rAF dur≥0.8ms n=${dw.renders}${dw.missPct != null ? `,错拍率=${dw.missPct}%` : ''};渲染帧距 ${Object.entries(dw.gapHist).filter(([, v]) => v).map(([k, v]) => `${k}ms×${v}`).join(' ')}）`);
+    L.push(`rAF 洞(>12ms)=${dw.rafHoles12} 个,最大=${dw.maxRafHoleMs}ms —— 四分类: ${Object.entries(dw.byVerdict).map(([k, v]) => `${k}=${v.n}窗/${v.totalMs}ms`).join(' ') || '零掉帧窗'}`);
+    L.push(`  · tick-hole=主闲+GPU闲(浏览器/OS 不发 beginFrame——ProMotion/DisplayLink 族,页面层不可控,缓解=锁低档或钉刷新率)`);
+    if (dw.windows.length) {
+      L.push('  最差 6 窗:');
+      for (const w of [...dw.windows].sort((a, b) => b.gapMs - a.gapMs).slice(0, 6)) {
+        L.push(`    gap=${w.gapMs}ms @+${w.atS}s [${w.verdict}] 主忙=${w.mainBusyMs}ms GPU忙=${w.gpuBusyMs}ms 前帧体=${w.prevFrameMs}ms`);
+      }
+    }
+  }
   if (d.frames.slowest.length) {
     L.push('');
     L.push('最慢帧 top10（t=相对毫秒）:');

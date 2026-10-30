@@ -58,11 +58,24 @@ describe('C10e 帧分类与路由（帧头定谳——状态全 settle）', () =
     expect(RDR).toMatch(/this\._c10eFrame = c10eBase && wKc === 1 && !this\.sky\.farInterlayerActive\(cam\.y\);/);
   });
 
-  it('夹层路由（世界→HUD blit）=worldRoute 谓词（去鸟群项——GL 桥化）∨shimmer;读 sky.draw 后状态与 opresent 门同相', () => {
+  it('夹层路由（世界→HUD blit）=worldRoute 谓词（去鸟群项——GL 桥化）∨shimmer(★BJ740 GL 桥臂);读 sky.draw 后状态与 opresent 门同相', () => {
     // ★C10e 二期（2026-10-01 F-inter 收刀,普查 scripts/_c10e-inter-census.mjs:
     //   常态 F-inter 100%=鸟群驻留触发,空转帧 0）:鸟群 'ambgl' quads 落屏栈 bg 侧槽,
     //   鸟帧路由回 F-pure（世界 over-present 叠其上）
-    expect(RDR).toMatch(/this\._c10eWorldToHud = this\._c10eFrame\s*\n\s*&& \(this\.sky\.worldRouteInterlayerPending\(\) \|\| this\.monoFilters\.shimmerAlpha > 0\);/);
+    // ★BJ740（2026-10-30）:shimmer 臂 GL 化——黑幕+人工星 'sstars' over-present 直落
+    //   glCanvas 中栈（lantern 桥同款）,独石帧不再强制世界 blit;_shimStarGl 帧头预备
+    //   （预获取 pipe+照相/全帧变换保守除外）,逃生门 ?shimstargl=0 整臂回旧路由。
+    expect(RDR).toMatch(/this\._c10eWorldToHud = this\._c10eFrame\s*\n\s*&& \(this\.sky\.worldRouteInterlayerPending\(\)\s*\n\s*\|\| \(this\.monoFilters\.shimmerAlpha > 0 && !this\._shimStarGl\)\);/);
+    // BJ740 预备臂+旗+GL 直出调用+2D 回退臂在位
+    expect(RDR).toMatch(/get\('shimstargl'\) !== '0'/);
+    expect(RDR).toContain('this._shimStarGl = null;');
+    expect(RDR).toContain('this.sky.drawShimmerStarsGL(this._shimStarGl, viewW, viewH, cam.y, shimA0);');
+    expect(RDR).toContain('this.sky.drawShimmerStars(ctx, viewW, viewH, cam.y, shimA0);');
+    expect(SKY).toMatch(/drawShimmerStarsGL\(gl: GLSpriteLayer, viewW: number, viewH: number, camY: number, shim: number\)/);
+    expect(SKY).toContain("gl.texFromImage('shimveil:px', px, false, true)");
+    expect(SKY).toContain('gl.end(true, true);');
+    // 门单源（两臂共用防分叉）
+    expect(SKY).toMatch(/private shimmerStarGate\(camY: number, shim: number\)/);
   });
 
   it('★谓词分工锁:worldRoute=opresentInterlayerPending 去鸟群三项+lantern 项（★A3 灯笼夜帧回收——far/near 灯带已全 GL 桥化,灯夜帧世界回归 over present）;旧谓词原样保留（opresent 延迟门+合并门继续用——鸟帧/灯帧禁 pass3 合并/云并会,合并 present=天空+世界单 quad,鸟/灯 quads 无法插入其间会被云盖住;分回合 bg present→夹层 quads→世界 present 才是正确层序）', () => {

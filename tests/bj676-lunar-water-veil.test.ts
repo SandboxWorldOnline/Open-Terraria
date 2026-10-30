@@ -76,16 +76,27 @@ describe('★BJ676 §1 原版层序定谳锁（Main.cs:63194-63266 亲读）', (
 
 describe('★BJ676 §2 水罩源三路统一（drawLiquids 前景 pass）', () => {
   it('veil676 谓词=月套四队列+★BJ679 九路扩区（时序=实体段 4 收集 < 前景水 4.5 恒满足）', () => {
-    expect(RDR).toContain('const veil676 = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0');
+    // ★BJ741（2026-10-30）：谓词分组重构——玩家绑定六队列（位置域液检）∨世界绑定五队列
+    expect(RDR).toContain('const veilPlayerQ = this.lunarArmorQueue.length > 0 || this.armorGlowQueue.length > 0');
     expect(RDR).toContain('|| this.lunarCoverQueue.length > 0 || this.solarShieldQueue.length > 0');
     expect(RDR).toContain('★BJ679 九路扩区（注见上）');
-    expect(RDR).toContain('|| this.npcWhiteLiftQueue.length > 0 || veil679Ent || veil679Fade;');
-    // 实体直绘族经 veilEntities 入谓词（仅 fg pass 传参）
-    expect(RDR).toContain('this.drawLiquids(world, cam, viewW, viewH, z, false, entities);');
+    expect(RDR).toContain('|| veilWorldQ || veil679Ent || veil679Fade;');
+    // 实体直绘族经 veilEntities 入谓词（仅 fg pass 传参;BJ741 增玩家域盒第八参）
   });
 
   it('liqgl 批化帧禁批回 canvas gate 路（fgCanvas 形态层保留）', () => {
-    expect(RDR).toContain('liqMode && !liqRingOverflow() && !veil676 ? this.liqBatchHook() : null');
+    // ★BJ743（2026-10-30）罩源 GL 化灰度债清偿:veil 帧+层在场=保持批化
+    //  （emitVanillaLiquidVeil 批数据不镜像重发射进独立 GL 层=罩源,fgCanvas 形态层退役）
+    expect(RDR).toContain('const bat = liqMode && !liqRingOverflow() && (!veil676 || !!veilLiqGl)');
+    expect(RDR).toContain('const veilLiqGl = veil676 ? this.acquireVeilLiqLayer() : null;');
+    expect(RDR).toContain('&& emitVanillaLiquidVeil(veilLiqGl, this._worldLowW, this._worldLowH)) {');
+    expect(RDR).toContain('this._liqVeil = veilLiqGl.canvas;');
+    // 旗+退避层管理
+    expect(RDR).toContain("new URLSearchParams(location.search).get('veilliq') !== '0'");
+    expect(RDR).toMatch(/private acquireVeilLiqLayer\(\): GLSpriteLayer \| null/);
+    expect(RDR).toContain('if (now - this._veilLiqLayerAt < 5000) return null;');
+    // 2D 回退臂保留（层缺席/旗关/发射失败）
+    expect(RDR).toContain('if (veil676) this._liqVeil = this.waterWarp.gateCanvas();');
   });
 
   it('warpOn canvas 路:endFgPass 后登记 fgCanvas 为罩源（不清屏语义复用）', () => {
@@ -132,7 +143,7 @@ describe('★BJ676 §3 会话序（★BJ679 扩区:7c-7f 开/收位次）', () =
     const iSolar = RDR.indexOf('this.flushSolarShieldQueue(cam, z);');
     const iEye = RDR.indexOf('this.flushEyebrellaCloud(cam, z);');
     const iWhip = RDR.indexOf('this.flushWhipFullbright(cam, z);');
-    const iTrail = RDR.indexOf('this.flushTrailShade(cam, z, viewW, viewH);');
+    const iTrail = RDR.indexOf('this.flushProjFullbright(cam, z, viewW, viewH);');   // ★⑫-b 拆分:trail 双位取末位(闭包族)
     const iEnd = RDR.indexOf('this.escapeVeilEnd();');
     expect(iVines).toBeGreaterThan(-1);
     expect(iArmor).toBeGreaterThan(iVines);

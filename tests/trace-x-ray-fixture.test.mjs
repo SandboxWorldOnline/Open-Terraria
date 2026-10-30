@@ -453,3 +453,63 @@ describe('trace-x-ray recorder 过滤 fixture（StartProfiling 伪影 + 空闲 w
     expect(d.profile.mainSamples).toBe(3);
   });
 });
+
+
+// ─────────────────────────── 掉帧窗归因（2026-10-27 增强批）───────────────────────────
+// 合成三型窗锁四分类:tick-hole(主闲+GPU闲)/slow-frame(前帧体长)/其余 mixed。
+// fixture 无 StartProfiling(非伪影窗)——全部窗入账。
+describe('掉帧窗归因（dropWindows 四分类）', () => {
+  function dropFixture(dir) {
+    const T0 = 1_000_000;
+    const ev = [];
+    const M = (o) => ev.push({ cat: '__metadata', ph: 'M', ts: 0, ...o });
+    M({ name: 'process_name', pid: 7, tid: 0, args: { name: 'Renderer' } });
+    M({ name: 'thread_name', pid: 7, tid: 100, args: { name: 'CrRendererMain' } });
+    M({ name: 'thread_name', pid: 8, tid: 200, args: { name: 'CrGpuMain' } });
+    const X = (name, pid, tid, ts, dur) => ev.push({ name, cat: 'devtools.timeline', ph: 'X', ts, dur, pid, tid, args: {} });
+    // 渲染帧(rAF dur≥800µs):8.3ms 稳拍 ×3 → tick-hole 窗(22ms 洞,主/GPU 全闲) →
+    // 8.3 ×1 → slow-frame 窗(18ms,前帧体 15ms 主忙) → 8.3 ×1 → mixed 窗(15ms,主忙 8ms 非前帧主导)
+    const t = (us) => T0 + us;   // µs 直传
+    // 前段稳拍 4 帧(0,8.3,16.6,24.9)
+    for (const [ts, dur] of [[0, 4000], [8300, 4000], [16600, 4000], [24900, 4000]]) {
+      X('FireAnimationFrame', 7, 100, t(ts), dur);
+    }
+    // tick-hole 窗:下一渲染 46.9(距 22ms);窗内零主忙零 GPU 忙
+    X('FireAnimationFrame', 7, 100, t(46900), 4000);
+    // slow-frame 窗:前帧 55.2 体 15ms(主忙 RunTask 覆盖)→ 下一渲染 73.2(距 18ms)
+    X('FireAnimationFrame', 7, 100, t(55200), 15000);
+    X('RunTask', 7, 100, t(55200), 15000);
+    X('FireAnimationFrame', 7, 100, t(73200), 4000);
+    // mixed 窗:15ms 距,窗内主忙 8ms(rAF 之后的任务,前帧体仅 4ms)
+    X('FireAnimationFrame', 7, 100, t(81500), 4000);
+    X('RunTask', 7, 100, t(83000), 8000);
+    X('FireAnimationFrame', 7, 100, t(96500), 4000);
+    // GPU 任务远离窗(不参与)
+    X('GPUTask', 8, 200, t(90000), 1000);
+    const f = path.join(dir, 'drop-fixture.json');
+    fs.writeFileSync(f, JSON.stringify({ traceEvents: ev }));
+    return f;
+  }
+  it('四分类:tick-hole(主闲GPU闲)/slow-frame(前帧体≥60%)/mixed;渲染帧距直方图+rAF 洞', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xray-drop-'));
+    try {
+      const d = await digestTrace(dropFixture(dir), {});
+      const dw = d.dropWindows;
+      expect(dw.renders).toBe(9);   // 9 发渲染帧(4 稳拍+5 场景)
+      expect(dw.windows.length).toBe(3);
+      const v = Object.fromEntries(dw.windows.map((w) => [w.verdict, w]));
+      expect(v['tick-hole']).toBeTruthy();   // 22ms 窗,主忙 0 GPU 忙 0
+      expect(v['tick-hole'].gapMs).toBe(22);
+      expect(v['tick-hole'].mainBusyMs).toBe(0);
+      expect(v['slow-frame']).toBeTruthy();  // 18ms 窗,前帧体 15ms
+      expect(v['slow-frame'].prevFrameMs).toBe(15);
+      expect(v.mixed).toBeTruthy();          // 15ms 窗,主忙 8ms(前帧体 4ms<60%)
+      expect(v.mixed.mainBusyMs).toBe(8);
+      // 渲染帧距直方图:8.3ms×5 正常拍
+      expect(dw.gapHist['8.3']).toBe(5);
+      // rAF 洞>12ms:22ms 与 18ms 两洞(tick-hole/slow-frame 的回调洞)
+      expect(dw.rafHoles12).toBeGreaterThanOrEqual(2);
+      expect(dw.maxRafHoleMs).toBe(22);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }, 30000);
+});

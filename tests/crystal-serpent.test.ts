@@ -12,6 +12,7 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest';
 import { CrystalSerpentProj, rollCrystalSerpentVelocity, CRYSTAL_SERPENT_PROJ } from '../src/entities/WeaponProj';
+import { damageVarRoll } from '../src/stats/DamageVar';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { LIQUID_TYPE } from '../src/world/TileStore';
@@ -213,7 +214,14 @@ describe('水晶蛇 3210→523（aiStyle 95 独占族）', () => {
     for (let t = 0; t < 30 && !p.dead; t++) p.fixedUpdate(1 / 60, hooks);
     expect(p.dead).toBe(true);                          // penetrate=1(:5936)首中耗尽 → Kill
     expect(e.hits).toHaveLength(1);
-    expect([43, 86]).toContain(e.hits[0]);              // 43 基伤 / ×2 crit(critTotal 语义)
+    // ★BJ735 改判史（随 BJ723-B W01+S02,2026-10-26）：hitEnemies 主环接 DamageVar
+    // 首掷（Projectile.cs:12970 Main.DamageVar 31 离散档 ±15%,luck=0 单掷）+crit ×2
+    // 移 Enemy.hurt 防后（S02）→ mock hurt 记录值=未翻倍 DV 档（旧钉 [43,86]=平值+
+    // 调用侧预倍遗迹;86 域自 S02 起对 mock 记录面不可达）。域锁=31 档全枚举
+    // （damageVarRoll float32 逐级精度面自证,不手算端点防再陈旧）。
+    const dvDomain = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain.add(damageVarRoll(43, 0, () => i / 31));
+    expect(dvDomain.has(e.hits[0])).toBe(true);
     const pt = (e as unknown as { poisonT?: number }).poisonT ?? 0;
     expect(pt).toBeGreaterThanOrEqual(10);              // 60×Next(10,30)t = 10..29s
     expect(pt).toBeLessThanOrEqual(29);

@@ -537,6 +537,13 @@ function releaseShineEntryCanvases(e: ShineChunkEntry): void {
  *  slots.find(e=>e.add)。 */
 const shineCache = new WeakMap<ChunkPair, { q: number; e: ShineChunkEntry }[]>();
 
+/** ★gladd 面③（task#22,2026-10-28）:chunk 的 +0.39 平加层画布访问器（GL 直出桥
+ *  消费;drawTileShineAdditive 2D 路径同源——唯一绘制来源纪律不变,桥只是第二读者）。
+ *  undefined = 本 chunk 无 Gemspark 平加格（GL 桥 drop 面语义与 2D continue 同源）。 */
+export function shineAddLayerOf(pair: ChunkPair): HTMLCanvasElement | undefined {
+  return shineCache.get(pair)?.find((s0) => s0.e.add)?.e.add;
+}
+
 /** ★IIIII252 跨 pair 世代 memo（冰雪掉帧 trace 归因修复）。
  *  【病灶】shineCache 以 ChunkPair 身份为键（WeakMap），而底图【任意】重烘（LRU
  *  驱逐重进视野/任意 markDirty 级联）都恒新建 pair 对象（ChunkCache.ts:532）⇒
