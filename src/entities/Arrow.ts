@@ -165,7 +165,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
-import { rollVanillaHitCrit, dealContacts } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ693 dealContacts=喵刀弹跳 AOE 结算单源
+import { rollVanillaHitCrit, rollVanillaHitCritConsumeTimer, dealContacts } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ693 dealContacts=喵刀弹跳 AOE 结算单源;★G37-A ConsumeTimer=爆面 crit 段完整单源（:12915-28）
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
 /** 网格切片表（Main.cs 逐型特判——竖条 projFrames 模型装不下的多列网格图；
@@ -2242,7 +2242,9 @@ export class Arrow extends Entity {
         //  （:12970 无条件,luck 正向）+crit 三类掷（121-126/597 数据面 magic=true,
         //  P.cs:2111 ApplyGemStaffStats 段亲读——BJ727-A「宝石族无类旗零掷」判语勘误）。
         //  旧臂无 DV/静态 false crit=BJ727-A 登记债 D2 本体。
-        const critGemAoe = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        //  ★G37-A（D5）：TimerCrit :12928 消费接单源（Kill 重跑 Damage() 同段,
+        //  ownedBySomeone 玩家弹无条件消费——旧 rollVanillaHitCrit 只掷类臂）。
+        const critGemAoe = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)) + (snapBonusGemAoe ? Math.trunc(snapBonusGemAoe * 1) : 0), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, critGemAoe, this.pierceInit, true);
       }
     }
@@ -2255,7 +2257,7 @@ export class Arrow extends Entity {
     //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
     //  ★BJ729-A（D2）：settle 同扩 DV+crit（与敌怪臂同链同掷,D2 债清偿条款）。
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, dmg, this.projId, 'playerProj',
-      () => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game), penPercent: this.settlePen }));
+      (tnG37) => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnG37, this.critChance > 0), penPercent: this.settlePen }));   // ★G37-A（D5）：城镇臂 TimerCrit 同扩（settle 逐靶=巫毒窄门后 hurt 前,:12928 同位）
     // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
     const aSpd = Math.hypot(this.vx, this.vy);
     const adx = aSpd < 1 ? 0 : this.vx / aSpd;
@@ -2300,7 +2302,9 @@ export class Arrow extends Entity {
         //  0.04 路由门误当 4% 平率消费（shotArrow 兜底迁移后 617 经该路出生）——暴击掷
         //  =Damage() 面 :12915-12927 magic 臂（617 数据面 magic）owner 装配+:25712 持械
         //  折入,命中拍动态;critChance≤0 关断钉保留。
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        //  ★G37-A（D5）：TimerCrit :12928 消费接单源（Kill Resize+Damage() 重跑同段,
+        //  ownedBySomeone 玩家弹无条件消费——旧 rollVanillaHitCrit 只掷类臂）。
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -2322,9 +2326,9 @@ export class Arrow extends Entity {
     //  多靶 → hitCrittersAll 全结算（受理数入 pveNumHits 与主环同账）。
     this.pveNumHits += hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
-      () => ({
+      (tn617) => ({   // ★G37-A（D5）：城镇臂 TimerCrit 同扩（settle 逐靶=窄门后 hurt 前,:12928 同位）
         dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
-        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn617, this.critChance > 0),
         penPercent: this.armorPen,
       }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -2438,7 +2442,8 @@ export class Arrow extends Entity {
         // ★BJ496①（2026-10-04）爆面掷率收编（同 arcanumDeathBurst 锚）：旧 `||` 面
         //  把 0.04 路由门误当 4% 平率（659 经 shotArrow 兜底出生）→ rollVanillaHitCrit
         //  命中拍动态（659 数据面 magic,:12915-12927 magic 臂）。
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        //  ★G37-A（D5）：TimerCrit :12928 接单源。
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -2457,7 +2462,7 @@ export class Arrow extends Entity {
     //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
-      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn659) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn659, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
         penPercent: this.armorPen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 30; i++) {
@@ -2495,7 +2500,8 @@ export class Arrow extends Entity {
         //  → 掷率迁移 rollVanillaHitCrit（661 ranged 旗,:12915-12927 命中拍动态——
         //  爆=Damage() AoE 同面;critChance>0 门=0.04 路由门/测试 -1 钳同相,旧 `||`
         //  面把 critChance 当全率读、0.04 门值会被误当 4% 平率消费）。
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        //  ★G37-A（D5）：TimerCrit :12928 接单源。
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -2514,7 +2520,7 @@ export class Arrow extends Entity {
     //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
     hitTownNpcsAoeBox(this.cx, this.cy, R661, game, this.damage, this.projId, 'playerProj',
-      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn661) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn661, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
         penPercent: this.settlePen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 4; i++) {                          // 4×d240（UnitY.RotByRandom 盘内）
@@ -2575,7 +2581,8 @@ export class Arrow extends Entity {
         //  数据面 vanilla-itemfunc/vanilla-itemcombat,items.ts 未注册 vi_5460,
         //  legacyItemIndex 5460→vi_4286_Cherry 非发射器,全库无 1023 spawn 支）——面随族
         //  收编;未来建模发射器时 spawn 位须置 critChance=0.04 路由门（族约定）。
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        //  ★G37-A（D5）：TimerCrit :12928 接单源（休眠面随族）。
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         const snapBonusBurst = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
           { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
@@ -2594,7 +2601,7 @@ export class Arrow extends Entity {
     //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷;休眠面随族接线）。
     hitTownNpcsAoeBox(this.cx, this.cy, R23, game, this.damage, this.projId, 'playerProj',
-      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn1023) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn1023, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩（休眠面随族）
         penPercent: this.settlePen }));
     deadCellsBarrelExplosionFx(game, this.cx, this.cy);
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBarrelExplosion,
@@ -4840,6 +4847,117 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // ---- ★BJ746 A29（issue#35,2026-11-01）：664/666/668 烈焰塔弹 Kill 溅射
+    //      （Projectile.Kill :73049-73130——原版缺整面：撞块/直击/寿命死全走此口，
+    //      邻靶 0 伤）。盒=16×num135 居中死亡 Center（num135=6 基档=96 盒；
+    //      setApprenticeT3 暗黑艺术家 → 13=208 盒,:73064-73）;音 Item100。
+    //      免疫/穿透语义（SetDefaults :7155-63 usesLocalNPCImmunity=true+
+    //      localNPCHitCooldown=-1）：读门=localNPCImmunity 数组（直击靶命中写 -1
+    //      :14178 ⇒ 溅射跳过直击靶=hitSet 承载）+全局 immune 门照走（flag3=false,
+    //      usesLocal 无豁免）;命中写=清全局窗+数组 -1（Enemy.hurt pierce=-3 档）。
+    //      penetrate 梯（:14189-96）：撞块/寿命死（penetrate 仍 1）→ 首靶 1→0 ⇒
+    //      keepIterIterating=false 只结算一靶;直击死（penetrate 已 0）→ 全盒逐靶。
+    //      664/666/668 无 melee/magic/ranged 类旗 → 类掷零 RNG（kind=null 捷径）,
+    //      TimerCrit :12928 照消费（rollVanillaHitCritConsumeTimer 单源,283 先例）。 ----
+    if ((this.projId === 664 || this.projId === 666 || this.projId === 668) && !this.hostile) {
+      const plA29 = game.player as unknown as
+        { setApprenticeT3?: boolean; equipStats?: { summonSet?: { apprenticeT3?: boolean } } } | null | undefined;
+      const t3A29 = plA29?.equipStats?.summonSet?.apprenticeT3 === true
+        || plA29?.setApprenticeT3 === true;      // dd2SetFlags 同式双读面（Arrow↔MinionProj 禁新边,projGhostTrail 判例）
+      // 尘/gore 参数档（:73051-73073 基值 + T3 增量）
+      const cA = t3A29 ? 8 : 4;        // num128 尘31 组A
+      const cB = t3A29 ? 40 : 20;      // num129 尘6 组B（α200,scale2.5）
+      const cC = t3A29 ? 5 : 10;       // num130 尘6 组C（UnitX 旋速度向）
+      const cD = t3A29 ? 50 : 20;      // num131 尘(num136) 组D
+      const cE = t3A29 ? 30 : 20;      // num132 尘31 组E（UnitX 旋速度向）
+      const cG = t3A29 ? 8 : 4;        // num133 gore 数
+      const fadeD = t3A29 ? 2.0 : 1.5; // num134 fadeIn
+      const dustD = t3A29 ? 270 : 6;   // num136 组D 尘型（T3 白烟 270）
+      const num135 = t3A29 ? 13 : 6;   // 盒参数
+      const RA29 = (16 * num135) / 2;  // 盒半宽（48 / 104）
+      game.playSfxFile?.('Item_100', 1, this.cx, this.cy);   // SoundID.Item100（:73075）
+      // ---- 伤害面（resize 后 Damage() 重结算,283 三连段同构） ----
+      if (this.damage > 0) {
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as { x: number; y: number; w: number; h: number;
+            dead?: boolean; hurt?: (...a: unknown[]) => boolean; id?: number };
+          if (e.dead || !e.hurt) continue;
+          const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+          if (Math.abs(ecx - this.cx) >= RA29 + e.w / 2 || Math.abs(ecy - this.cy) >= RA29 + e.h / 2) continue;
+          // localNPCImmunity 数组读门：直击靶（命中写 -1 :14178）跳过——hitSet 承载
+          if (this.hitSet.has(e.id ?? -1)) continue;
+          // 全局 immune 门（:12636——usesLocal 族无 flag3 豁免,窗拒拍整跳）
+          if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
+          const critA29 = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+          e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage,
+            ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+            Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen,
+            critA29, -3, true);   // pierce=-3=usesLocal 写档（清全局窗+局部表,:14175-78）
+          // ★G39-A（bj746a D2,2026-11-01）：溅射面 StatusNPC——原版 Kill 的
+          //  Resize+Damage() 重跑过 Damage_PVE_Inner ⇒ StatusNPC(:13634) 每靶照跑;
+          //  664/666/668 表条目（vanilla-projstatus.json :11325-11337 提取——664
+          //  Blackout(24) 1/3 3-5s / 666 Oiled(323) 1/2 3-8s / 668 Oiled 2/3 6-8s）
+          //  直击面经主环 applyProjStatus 在位,溅射环漏=本刀补（同主环无 gate 形）。
+          applyProjStatus(this.projId, e as unknown as Record<string, number>,
+            { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+          // penetrate 梯（:14190-96）：仅撞块/寿命死（pierce 仍 1）首靶后截断
+          if (this.pierce > 0) {
+            this.pierce--;
+            if (this.pierce <= 0) break;   // keepIterating=false
+          }
+        }
+        // critter 臂（victim 循环同链;resize 盒全结算）
+        this.pveNumHits += hitCrittersAll(
+          { x: this.cx - RA29, y: this.cy - RA29, w: RA29 * 2, h: RA29 * 2, projId: this.projId }, game);
+        // 城镇 voodoo 靶（:12618-31 窄门;283/gemAoeBurst 同构）
+        hitTownNpcsAoeBox(this.cx, this.cy, RA29, game, this.damage, this.projId, 'playerProj',
+          (tnA29) => ({ dmg: damageVarRoll(this.damage,
+            ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+            crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnA29, this.critChance > 0),
+            penPercent: this.settlePen }));
+      }
+      // ---- 尘四组 + gore（:73105-73160 逐参） ----
+      const vr = Math.atan2(this.vy, this.vx);
+      for (let i = 0; i < cA; i++) {
+        const d = game.spawnDust?.(this.x, this.y, RA29 * 2, RA29 * 2, 31, 0, 0, 100, null, 1.5, true);
+        if (!d) break;
+        const a = Math.random() * Math.PI * 2;
+        d.x = this.cx + Math.sin(a) * Math.random() * RA29;
+        d.y = this.cy + Math.cos(a) * Math.random() * RA29;
+      }
+      for (let i = 0; i < cB; i++) {
+        const d = game.spawnDust?.(this.x, this.y, RA29 * 2, RA29 * 2, 6, 0, 0, 200, null, 2.5, true);
+        if (!d) break;
+        const a = Math.random() * Math.PI * 2;
+        d.x = this.cx + Math.sin(a) * Math.random() * (RA29 / 5);
+        d.y = this.cy + Math.cos(a) * Math.random() * (RA29 / 5);
+        d.vx *= 16; d.vy *= 16;
+        if (d.vy > -2) d.vy *= -0.4;
+        d.noLight = true;
+      }
+      for (let i = 0; i < cD; i++) {
+        const d = game.spawnDust?.(this.x, this.y, RA29 * 2, RA29 * 2, dustD, 0, 0, 100, null, 1.5, true);
+        if (!d) break;
+        const a = Math.random() * Math.PI * 2;
+        d.x = this.cx + Math.sin(a) * Math.random() * RA29;
+        d.y = this.cy + Math.cos(a) * Math.random() * RA29;
+        d.vx *= 2; d.vy *= 2;
+        d.fadeIn = fadeD;
+      }
+      for (let i = 0; i < cC + cE; i++) {
+        const isC = i < cC;
+        const d = game.spawnDust?.(this.x, this.y, RA29 * 2, RA29 * 2, isC ? 6 : 31, 0, 0, 0, null, isC ? 2.7 : 1.5, true);
+        if (!d) break;
+        // UnitX.RotatedByRandom(π).RotatedBy(velocity.ToRotation()) × width/2
+        const a = (Math.random() * Math.PI - Math.PI / 2) + vr;
+        d.x = this.cx + Math.cos(a) * RA29;
+        d.y = this.cy + Math.sin(a) * RA29;
+        d.vx *= 3; d.vy *= 3;
+      }
+      for (let i = 0; i < cG; i++) {
+        GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.cx, this.cy, 0, 0);
+      }
+    }
     // ---- ★BJ704-G21 R8-F3：502 喵刀 Kill 消散尘（Projectile.Kill :75080-75094）
     //      ——一切 502 死亡路径共段（死亡跳 meowBounceOff→killNow / 寿命尽 / 出界
     //      :10181 均达此口）：oldPos 逐点（零位=未踩点跳过）尘 66（随机 hsl(h,1,0.5)
@@ -5286,7 +5404,7 @@ export class Arrow extends Entity {
           if (!(fwbX < e.x + e.w && fwbX + 192 > e.x && fwbY < e.y + e.h && fwbY + 192 > e.y)) continue;
           if (((ent as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
           if (!idStaticCheck(this.projId, e.id ?? -1, fwCd)) continue;
-          const critFw = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+          const critFw = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D5）：TimerCrit :12928 接单源
           // ★BJ729-A（D2 残差清偿）：Kill 重跑 DV（:12970 无条件逐靶）——烟花敌臂
           //  原无 DV（BJ727-A 登记债 D2）。
           e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
@@ -5304,7 +5422,7 @@ export class Arrow extends Entity {
       //  逐型 1t,同拍异色双发边角差,登记 D3）。
       //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷,D2 债清偿条款）。
       hitTownNpcsAoeBox(this.cx, this.cy, 96, game, this.damage, this.projId, 'playerProj',
-        () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        (tnFw) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnFw, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
           penPercent: this.settlePen }));
     }
     if (this.projId === 617 && !this.dead) this.arcanumDeathBurst(game);
@@ -5444,7 +5562,7 @@ export class Arrow extends Entity {
               //  → Kill 三连 Damage() 重跑逐靶 DV(:12970)+ranged crit 掷（:12920）;
               //  旧臂无 DV/静态 false crit=BJ727-A 登记债 D2 本体（census⑥「仅缺DV」
               //  不完整,⑤「无 DV/crit」为准）。
-              const crit283 = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+              const crit283 = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D5）：TimerCrit :12928 接单源（三连 Damage() 逐段逐靶）
               e.hurt(applyBannerDamageDealt(game, ent, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
                 Math.sign(ecx - seg.cx) * this.knockback, 0, game, this.settlePen, crit283, 1, true);
             }
@@ -5462,7 +5580,8 @@ export class Arrow extends Entity {
               //  fromPlayer DPS 计/Pierce=1 免疫窗豁免全同面）;旧单参 shim 漏
               //  fromPlayer=true 与敌怪支(:4320 全参 true)不一致,一并同构。
               c.hurt(applyBannerDamageDealt(game, cent, Math.max(1, Math.trunc(this.damage))),
-                Math.sign(ccx - seg.cx) * this.knockback, 0, game, this.settlePen, false, 1, true);
+                Math.sign(ccx - seg.cx) * this.knockback, 0, game, this.settlePen,
+                rollVanillaHitCritConsumeTimer(this.projId, game, c), 1, true);   // ★G37-A（D5）：critter 同链 crit 段（:12915-28 victim 循环同链,settleCritterHit 同形）
             }
           }
         }
@@ -5475,10 +5594,10 @@ export class Arrow extends Entity {
           //  三连 Damage() 逐段逐靶语义）。
           hitTownNpcsAoeBox(seg.cx, seg.cy, R283, game,
             this.damage, this.projId, 'playerProj',
-            (tn) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
-              crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+            (tn283) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+              crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn283, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
               penPercent: this.settlePen,
-              kb: Math.sign((tn as unknown as { x: number }).x - seg.cx) * this.knockback }));
+              kb: Math.sign((tn283 as unknown as { x: number }).x - seg.cx) * this.knockback }));
         }
       }
     }
@@ -9524,6 +9643,70 @@ export class Arrow extends Entity {
       // 123 蓝晶深蓝(0,0.1,1.3)/126 钻白 1.3 等;1120 default 支=全白）
       this.lightRGB = GEM_BOLT_LIGHT[this.projId] ?? null;
 
+      // ★BJ746 A35（issue#35,2026-11-01）：特性执行序归位 = Homing → SwirlTwins →
+      //  FastThenSlow（AI_029 原文序 :38562(Homing) → :38616(SwirlTwins) →
+      //  :38631(FastThenSlow)）。旧序 Swirl→FastThenSlow→Homing：多特性组合轨迹错位
+      //  （紫晶弹+翡翠袍：原 Homing 先读初速 40 后减速 → 首帧 (38.8,0)；旧先 ×0.97
+      //  减速再 Homing 读 38.8 → (38.7977,0.419)——低速档转向衰减 Remap(38.8,30,40)
+      //  =0.12 ≠ 0 凭空起竖速）。
+      if (g?.homing) {
+        // :38563-38624 视距 500（FastThenSlow/CanBounce ×2）;FindTargetWithLineOfSight
+        // 取最近有视线目标;速度 <num9(8,FastThenSlow×2) 时 +0.1 提速并 ×1.1;
+        // rotateTowards 转向率 = Remap(距离,视距,0,0,1)×0.1+0.01（近距 +0.05 并
+        // Remap(速度,1,3,10,1) 放大）;近距 150px 内再向目标速度 lerp 0.2
+        const range = 500 * ((g.fastThenSlow || g.canBounce) ? 2 : 1);
+        const tgt = this.nearestEnemyWithLos(game, range);
+        if (tgt) {
+          // ★BJ746 A36（issue#35）：num13=velocity.Length() 取【加速前】快照
+          //  （:38576 先读、:38578-84 才 +0.1×1.1）——两处转向门（:38587 `num13<num9`
+          //  低速增益 + Remap(num13,1,3,10,1)、:38590 FastThenSlow 衰减
+          //  Remap(num13,30,40,1,0)）全读 num13。旧实现加速后重读 sp ⇒ 单特性
+          //  也偏离（速度 1：原角 1.2 输出 (~0.438,1.128)，旧读加速后 1.21 → 角
+          //  1.0866 (~0.563,1.071)）。旋转向量长度仍=加速后终值（rotateTowards
+          //  保长语义,本位 sp 重读）。
+          const sp0 = Math.hypot(this.vx, this.vy);
+          const maxSp = 8 * (g.fastThenSlow ? 2 : 1);
+          if (sp0 < maxSp) {
+            // :38580-38584 先双轴 +0.1×单位向、再双轴 ×1.1（蓝队 R7-10：曾 0.1 项只加
+            // 在 vx、vy 直接 ×1.1——低速近距竖直飞行的法向收敛不对称）
+            const inv = 1 / (sp0 || 1);
+            this.vx += this.vx * inv * 0.1;
+            this.vy += this.vy * inv * 0.1;
+            this.vx *= 1.1;
+            this.vy *= 1.1;
+          }
+          let sp = Math.hypot(this.vx, this.vy);   // rotateTowards 保长 = 加速后终值
+          const dist = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+          // :38591-38601 转向率 = Remap(dist,range,0,0,1)×0.1 + 0.01；低速(<maxSp)
+          //  再 +0.05 后【整项】×Remap(sp0,1,3,10,1)（蓝队 R7-11：曾乘子只作用于 0.05
+          //  加法项且线性近似——speed=1 时我方 0.61 vs 原版 1.6，2.6 倍偏弱）
+          let turn = Math.max(0, 1 - dist / range) * 0.1 + 0.01;
+          if (sp0 < maxSp) {
+            turn = (turn + 0.05) * Math.max(1, Math.min(10, 10 - (sp0 - 1) * 4.5));   // Remap(sp0,1,3,10,1)
+          }
+          // :38598-38601 FastThenSlow 高速段转向衰减 num14 *= Remap(num13,30,40,1,0)
+          // ——×5 出速(40)起步完全不拐弯，减速穿 30 后线性恢复满转向（蓝队 R2-12 补）
+          if (g.fastThenSlow) turn *= Math.max(0, Math.min(1, 1 - (sp0 - 30) / 10));
+          const want = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
+          const cur = Math.atan2(this.vy, this.vx);
+          let diff = want - cur;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          const nv = cur + Math.max(-turn, Math.min(turn, diff));
+          this.vx = Math.cos(nv) * sp;
+          this.vy = Math.sin(nv) * sp;
+          if (dist < 150) {           // :38622-38623 近距收敛 lerp（目标向量 = Zero.MoveTowards
+            //  (敌偏移, maxSp)——偏移长 <maxSp 时返回原偏移向量本身不越界;曾恒取
+            //  单位向×maxSp，dist<8 时目标长 8 > 实际偏移造成过冲振荡。蓝队 R7-12）
+            const k = Math.max(0, 1 - dist / 150) * 0.2;
+            const capped = dist > maxSp;
+            const txv = capped ? ((tgt.cx - this.cx) / dist) * maxSp : (tgt.cx - this.cx);
+            const tyv = capped ? ((tgt.cy - this.cy) / dist) * maxSp : (tgt.cy - this.cy);
+            this.vx = this.vx * (1 - k) + txv * k;
+            this.vy = this.vy * (1 - k) + tyv * k;
+          }
+        }
+      }
       if (g?.swirlTwins) {
         // :38618-38630 num18=ai[1]×π(孪生弹反相);本仓 gemPhase 0/1
         const num18 = this.gemPhase * Math.PI;
@@ -9543,57 +9726,6 @@ export class Arrow extends Entity {
         else {
           this.drawScale -= 0.005;
           if (this.drawScale < 0.1) { this.killNow(game); return; }
-        }
-      }
-      if (g?.homing) {
-        // :38563-38624 视距 500（FastThenSlow/CanBounce ×2）;FindTargetWithLineOfSight
-        // 取最近有视线目标;速度 <num9(8,FastThenSlow×2) 时 +0.1 提速并 ×1.1;
-        // rotateTowards 转向率 = Remap(距离,视距,0,0,1)×0.1+0.01（近距 +0.05 并
-        // Remap(速度,1,3,10,1) 放大）;近距 150px 内再向目标速度 lerp 0.2
-        const range = 500 * ((g.fastThenSlow || g.canBounce) ? 2 : 1);
-        const tgt = this.nearestEnemyWithLos(game, range);
-        if (tgt) {
-          let sp = Math.hypot(this.vx, this.vy);
-          const maxSp = 8 * (g.fastThenSlow ? 2 : 1);
-          if (sp < maxSp) {
-            // :38580-38584 先双轴 +0.1×单位向、再双轴 ×1.1（蓝队 R7-10：曾 0.1 项只加
-            // 在 vx、vy 直接 ×1.1——低速近距竖直飞行的法向收敛不对称）
-            const inv = 1 / (sp || 1);
-            this.vx += this.vx * inv * 0.1;
-            this.vy += this.vy * inv * 0.1;
-            this.vx *= 1.1;
-            this.vy *= 1.1;
-            sp = Math.hypot(this.vx, this.vy);
-          }
-          const dist = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-          // :38591-38601 转向率 = Remap(dist,range,0,0,1)×0.1 + 0.01；低速(<maxSp)
-          //  再 +0.05 后【整项】×Remap(sp,1,3,10,1)（蓝队 R7-11：曾乘子只作用于 0.05
-          //  加法项且线性近似——speed=1 时我方 0.61 vs 原版 1.6，2.6 倍偏弱）
-          let turn = Math.max(0, 1 - dist / range) * 0.1 + 0.01;
-          if (sp < maxSp) {
-            turn = (turn + 0.05) * Math.max(1, Math.min(10, 10 - (sp - 1) * 4.5));   // Remap(sp,1,3,10,1)
-          }
-          // :38598-38601 FastThenSlow 高速段转向衰减 num14 *= Remap(speed,30,40,1,0)
-          // ——×5 出速(40)起步完全不拐弯，减速穿 30 后线性恢复满转向（蓝队 R2-12 补）
-          if (g.fastThenSlow) turn *= Math.max(0, Math.min(1, 1 - (sp - 30) / 10));
-          const want = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
-          const cur = Math.atan2(this.vy, this.vx);
-          let diff = want - cur;
-          while (diff > Math.PI) diff -= Math.PI * 2;
-          while (diff < -Math.PI) diff += Math.PI * 2;
-          const nv = cur + Math.max(-turn, Math.min(turn, diff));
-          this.vx = Math.cos(nv) * sp;
-          this.vy = Math.sin(nv) * sp;
-          if (dist < 150) {           // :38622-38623 近距收敛 lerp（目标向量 = Zero.MoveTowards
-            //  (敌偏移, maxSp)——偏移长 <maxSp 时返回原偏移向量本身不越界;曾恒取
-            //  单位向×maxSp，dist<8 时目标长 8 > 实际偏移造成过冲振荡。蓝队 R7-12）
-            const k = Math.max(0, 1 - dist / 150) * 0.2;
-            const capped = dist > maxSp;
-            const txv = capped ? ((tgt.cx - this.cx) / dist) * maxSp : (tgt.cx - this.cx);
-            const tyv = capped ? ((tgt.cy - this.cy) / dist) * maxSp : (tgt.cy - this.cy);
-            this.vx = this.vx * (1 - k) + txv * k;
-            this.vy = this.vy * (1 - k) + tyv * k;
-          }
         }
       }
     }
@@ -10491,14 +10623,85 @@ export class Arrow extends Entity {
         }
         // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
         if (this.bounce && this.bounceOff(game)) return;
-        // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
-        // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
-        // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——
-        // 到达本分支即已撞实心,按速度主轴定反射面:|vx|>|vy| 水平撞壁反 vx,否则反 vy
-        if (this.gem?.canBounce) {
-          if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx * 0.8;
-          else this.vy = -this.vy * 0.8;
-          if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
+        // ★BJ746 A37（issue#35,2026-11-01）：宝石法珠撞块块 1:1 重写
+        //  （HandleMovement :18105-18164 整块——CanBounce 反弹 + FastThenSlow 贴壁）。
+        //  ①反弹轴=碰撞改变轴（vanilla `velocity.X != lastVelocity.X → −lastVelocity.X
+        //  ×0.8` 两轴独立,角撞双反）——本类裸位移无分轴旗,以 94/chloroBounceOff 同款
+        //  回退探测等价（身后一步格空 ⇒ 该轴位移致撞）。旧按速度主轴猜面:地板撞
+        //  (10,2) 旧反 X 得 (-8,2)、原反 Y (10,-1.6);角撞 (10,10) 旧 (10,-8)、原
+        //  (-8,-8)。②penetrate-- 后 ≤0 → Kill（vanilla flag7=false,:18164）;
+        //  ③Homing 碰后重定向（:18121-18134：FindTargetWithLineOfSight(2400) →
+        //  velocity=方向×|lastVelocity|×0.8——保【反弹前】速率,非反射后值）;
+        //  ④清拖尾 oldPos（:18135-18141 全零写=本仓 gemTrail 清空）;
+        //  ⑤FastThenSlow 贴壁支（:18150-18154：position+=velocity×0.99、速度缩到
+        //  0.0001×lastVelocity 向——不 Kill 不反弹,AI 侧 scale 收缩自然消亡;旧实现
+        //  落通用消亡口=翡翠珠撞墙即死,原版贴墙缓消）;⑥反弹成功（flag7∧flag8）→
+        //  HitTiles+PlaySound(0)（'dig' 键,boulder 撞壁同映射）。
+        if (this.gem?.canBounce || this.gem?.fastThenSlow) {
+          const stG = game.world.store;
+          const lvx = this.vx, lvy = this.vy;               // lastVelocity 快照
+          const spdG = Math.hypot(lvx, lvy);                 // |lastVelocity|（重定向保速）
+          let bounced = false;                               // flag7
+          if (this.gem?.canBounce) {
+            // 轴判定 = 中心跨越归属（`velocity.X != lastVelocity.X` 的仓内等价——
+            // 本类碰撞触发=中心格入实心,归因=单轴移动可达实心）：hitX ⇔ X 单轴
+            // 跨越列带（移动前中心列→移动后中心列,含端）在【移动前中心行】上遇
+            // 实心（原版 X 相用移动前 Y 采样）;hitY ⇔ Y 单轴跨越行带在【移动后
+            // 中心列】上遇实心（原版 Y 相用移动后 X）。角撞两轴各自可达 ⇒ 双反
+            // （issue A37：(10,10) → (-8,-8)）;地板撞仅 Y 可达（X 带在上方自由行）
+            // ⇒ 仅反 Y（(10,2) → (10,-1.6),旧主轴猜面反 X 得 (-8,2)）。
+            const preCx = this.x - lvx + this.w / 2, preCy = this.y - lvy + this.h / 2;
+            const postCx = this.x + this.w / 2, postCy = this.y + this.h / 2;
+            let hitX = false;
+            if (this.vx !== 0) {
+              const cA = Math.floor(preCx / TILE), cB = Math.floor(postCx / TILE);
+              const rX = Math.floor(preCy / TILE);
+              for (let c = Math.min(cA, cB); c <= Math.max(cA, cB); c++) {
+                if (stG.inBounds(c, rX) && stG.isSolid(c, rX)) { hitX = true; break; }
+              }
+            }
+            let hitY = false;
+            if (this.vy !== 0) {
+              const rA = Math.floor(preCy / TILE), rB = Math.floor(postCy / TILE);
+              const cY = Math.floor(postCx / TILE);
+              for (let r = Math.min(rA, rB); r <= Math.max(rA, rB); r++) {
+                if (stG.inBounds(cY, r) && stG.isSolid(cY, r)) { hitY = true; break; }
+              }
+            }
+            if (hitX) { this.vx = -lvx * 0.8; this.x -= lvx; }   // :18114 X 轴反射 + 位移回退
+            if (hitY) { this.vy = -lvy * 0.8; this.y -= lvy; }   // :18116 Y 轴反射（两轴独立,角撞双反）
+            // ★位移回退（94/bounceOff 先例）：原版 TileCollision 反弹拍盒被钳在壁面
+            // 【外】（零入墙）,重定向 LOS 起点=墙外中心;本仓裸位移中心触发模型反弹拍
+            // 中心已入实心 ⇒ ①下拍同格再触发=穿透重复扣;②墙内起点 canHitLine 恒假
+            // =重定向死码。回退一步（=移动前位,通常墙外）两面同修。
+            this.pierce--;                                   // :18118（vanilla 无 >0 前置,0/-1 亦减）
+            bounced = this.pierce > 0;                       // flag7 = penetrate > 0
+            if (this.gem.homing) {                           // :18121-18134 碰后追踪重定向
+              const tgtG = this.nearestEnemyWithLos(game, 2400);
+              if (tgtG) {
+                const dxG = tgtG.cx - this.cx, dyG = tgtG.cy - this.cy;
+                const dlG = Math.hypot(dxG, dyG);
+                if (dlG > 0) {
+                  this.vx = (dxG / dlG) * spdG * 0.8;        // SafeNormalize×|lastVelocity|×0.8
+                  this.vy = (dyG / dlG) * spdG * 0.8;
+                }
+              }
+            }
+            this.gemTrail.length = 0;                        // :18135-41 oldPos 全零（清拖尾）
+          }
+          if (this.gem?.fastThenSlow) {                      // :18150-18154 贴壁支
+            this.x += this.vx * 0.99;
+            this.y += this.vy * 0.99;
+            const nl = Math.hypot(lvx, lvy);
+            this.vx = nl > 0 ? (lvx / nl) * 0.0001 : 0;      // lastVelocity.SafeNormalize(Zero)×1e-4
+            this.vy = nl > 0 ? (lvy / nl) * 0.0001 : 0;
+            bounced = true;                                  // flag7=true（不 Kill）
+          }
+          if (bounced) {
+            if (!this.gem?.fastThenSlow) game.playSfx?.('dig', 1, this.cx, this.cy);   // flag7∧flag8 → HitTiles 音
+            return;
+          }
+          this.killNow(game);                                // :18164 !flag7 → Kill
           return;
         }
         // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
@@ -11652,6 +11855,51 @@ export class Arrow extends Entity {
         // 拒收不可达;旧无条件补矢=外源残窗/水母豁免拒收跳也出 631=over-fire）
         if (!vanillaGated && !this.hostile && this.projId !== 631 && VANILLA_ARROW_PROJS.has(this.projId)) {
           this.spawnPhantasmChase(game, { id: e.id, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+        }
+        // ★BJ740-A ACC08（issue #30）：蜜刺 6184 箭命中放蜂（Projectile.cs:13945-13965
+        //   ——紧随 :13935 幻象弓块,原序即此）。门 = projectile.arrow &&
+        //   Main.player[owner].accHoneyedBarb（arrow 位以 VANILLA_ARROW_PROJS 全集承载,
+        //   同上块;owner=玩家故 !this.hostile）。概率 = NextFloat() < 0.2 −
+        //   (ownedProjectileCounts[181]+[566])×0.02（在场蜂数衰减,2 只蜂=0.16 档）;
+        //   命中即 6 循环:偶位（0/2/4）必发,奇位（1/3/5）再掷 Next(3)==0（基础 3 只
+        //   + 最多 3 次 1/3 额外掷）。蜂 = beeType()（strongBees 半数 566 巨蜂）/
+        //   伤 = beeDamage(trunc(箭damage×0.05)+4)（强蜂再 +Next(1,4)/弱蜂 +Next(2)）/
+        //   kb = beeKB(0)（强蜂 0.5）;出生 = 弹心 + NextVector2Circular(8,8),初速 =
+        //   NextVector2Circular(8,8)（角均匀×线性半径盘,F6 判例）;NewProjectile 尾置
+        //   magic=false/ranged=true/penetrate=2。旧面 equipStats.accHoneyedBarb 只聚合
+        //   零消费（Game.ts:18311 侧 accSharpBarb 备案注亦同批清偿）
+        if (!vanillaGated && !this.hostile && VANILLA_ARROW_PROJS.has(this.projId)
+          && (game.player as unknown as { equipStats?: { accHoneyedBarb?: boolean } } | null)?.equipStats?.accHoneyedBarb) {
+          const entsBee = (game as unknown as { entities?: { projectiles?: unknown[]; add?: (en: unknown, b: string) => void } }).entities;
+          if (entsBee?.add) {
+            let beeCount = 0;
+            for (const q of entsBee.projectiles ?? []) {
+              if (q === this || !(q instanceof Arrow)) continue;
+              const bq = q as Arrow;
+              if (!bq.dead && (bq.projId === 181 || bq.projId === 566)) beeCount++;
+            }
+            if (Math.random() < 0.2 - beeCount * 0.02) {
+              const stBee = game.player?.equipStats?.strongBees === true;
+              for (let bi = 0; bi < 6; bi++) {
+                if (bi % 2 === 1 && Math.floor(Math.random() * 3) !== 0) continue;   // :13957 奇位 1/3
+                const strong = stBee && Math.floor(Math.random() * 2) === 0;   // beeType()
+                const dmgBee = Math.trunc(this.damage * 0.05) + 4
+                  + (strong ? 1 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2));
+                const ba = Math.random() * Math.PI * 2, br = Math.sqrt(Math.random()) * 8;
+                const va = Math.random() * Math.PI * 2, vr = Math.sqrt(Math.random()) * 8;
+                const bee = new Arrow(this.cx + Math.cos(ba) * br, this.cy + Math.sin(ba) * br,
+                  Math.cos(va) * vr, Math.sin(va) * vr,
+                  dmgBee, strong ? 0.5 : 0, strong ? 566 : 181, {});
+                bee.pierce = 2;                       // :13964 覆盖 181/566 表值 penetrate 3/4
+                bee.pierceInit = 2;
+                bee.frostEligible = true;             // ranged=true（:13962-13963）
+                bee.projClass = 'ranged';             // 运行时旗覆写（spawnBeeSwarm 同族第三处,同锚 :78077-79）
+                bee.critChance = this.critChance;
+                bee.armorPen = this.armorPen;
+                entsBee.add(bee, 'projectiles');
+              }
+            }
+          }
         }
         // ★BJ398 受理面化（尾段八站清扫②——拒收跳不落表：502/localImmune/idStatic 支
         // （:9233/:9238/:9225）不查全局读门,外源残窗拒收曾照 add → :9265 永久去同敌重

@@ -32,7 +32,7 @@ import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ741 R19-1（G37①）：TimerCrit :12928 消费并单源
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C M02：632 光棱/461 光束 DV 首掷（:12970）
 
@@ -222,9 +222,12 @@ export class PrismProng extends Entity {
           if (d > this.beamLen) break;
           const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
           if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
-          // ★BJ489 def-3：632 光棱掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+
-          //  :25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
-          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+          // ★BJ489 def-3：632 光棱掷率=rollVanillaHitCritConsumeTimer（magic 旗,命中拍
+          //  owner 装配+:25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0
+          //  关断钉保留
+          //  ★BJ741 R19-1（G37① DV✓T✗ 残差族）：TimerCrit :12928 消费并单源（:12915-27
+          //  类掷→:12928 无条件消费——蓄能暴击对 632 同判同消费,旧仅类掷）
+          const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
           // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——632 光棱
           //  每受理靶 ±15% 31 档离散+luck 重掷,BJ716-A Arrow 主环同式;满充 ×3 不能
           //  替代 DV=两乘区独立）。原版序=AI :32022-32026 先写 damage 字段（=
@@ -726,8 +729,9 @@ export class BlasterBeam extends Entity {
         if (d > this.beamLen) break;
         const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
-        // ★BJ489 def-3：461 光束掷率=rollVanillaHitCrit（magic 旗,命中拍动态;冻结载体退役）
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        // ★BJ489 def-3：461 光束掷率=rollVanillaHitCritConsumeTimer（magic 旗,命中拍动态;
+        //  冻结载体退役）;★BJ741 R19-1（G37①）：TimerCrit :12928 消费并单源
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
         // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（:12970——461 光束每受理靶
         //  ±15% 31 档离散+luck 重掷,Arrow 主环同式;crit ×2 后置=StrikeNPC 内序）
         const dmgB461 = damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
@@ -789,8 +793,8 @@ export class BlasterBeam extends Entity {
         }
         return false;
       }, undefined, undefined, undefined,
-      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
-        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn741) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn741, this.critChance > 0),   // ★BJ741 R19-1（G37①）：TimerCrit 并单源（settle victim=城镇靶 hitbox）
         penPercent: this.armorPen }));
   }
 

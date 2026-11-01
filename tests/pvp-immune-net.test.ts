@@ -100,10 +100,11 @@ function seedPeer(net: ClientNet, slot: number): RemotePlayerState {
   const p = {
     slot, name: `玩家${slot}`, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
     up: false, down: false, left: false, right: false, jump: false, useItem: false,
+    dash: false,   // ★BJ742-A R22-⑦：RemotePlayerState 新字段（ctrlBits[7]）
     facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
     hostile: true, team: 0, hp: 100, maxHp: 100, sleeping: false,
     deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
-    camTarget: null,
+    camTarget: null, sitting: false, porAnchors: null,   // G36-A D3 新字段
   };
   net.players.set(slot, p);
   return p;

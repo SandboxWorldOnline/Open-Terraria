@@ -147,10 +147,14 @@ describe('BJ727-A B2：MissileProj killNow 爆箱城镇臂（BJ723-C D4 登记�
 
 // ================= S1 结构锁：16 面接线在位 =================
 describe('BJ727-A S1：16 面 Kill 爆城镇臂接线结构锁', () => {
-  it('S1-1 各文件 hitTownNpcsAoeBox 调用计数（Game 3/Arrow 7/Missile 1/Dart 1/DCM 1/Mounts 1）', () => {
+  it('S1-1 各文件 hitTownNpcsAoeBox 调用计数（Game 3/Arrow 8/Missile 1/Dart 1/DCM 1/Mounts 1）', () => {
     const cnt = (p: string, m = 'hitTownNpcsAoeBox(') => SRC(p).split(m).length - 1;
     expect(cnt('core/Game.ts')).toBe(3);        // settleKillExplosion/41/286
-    expect(cnt('entities/Arrow.ts')).toBe(7);   // gem/617/659/661/1023/烟花/283
+    // ★BJ748（BJ746 A29 尾迹收口,2026-11-01）：7→8——A29 烈焰塔弹 664/666/668 Kill
+    //  溅射城镇臂（Arrow.ts killNow 664/666/668 支,原版 Resize+Damage() 重跑 victim
+    //  循环含城镇 voodoo 靶;283/gemAoeBurst 同构单层,非多套）。敌怪臂 A29a-c 行为
+    //  锁在 tests/bj746a-armor-projectiles.test.ts。
+    expect(cnt('entities/Arrow.ts')).toBe(8);   // gem/617/659/661/1023/烟花/283/A29-664族
     expect(cnt('entities/MissileProj.ts')).toBe(1);   // KILL_BURST 79/16/34
     expect(cnt('entities/Dart.ts')).toBe(1);    // blastDamage（烟花接触爆另走 hitTownNpcs）
     expect(cnt('entities/DeadCellsMushroom.ts')).toBe(1);

@@ -324,7 +324,9 @@ describe('BJ494-§3：悠悠球伴生弹静态掷退役→rollVanillaHitCrit（m
 describe('BJ494-§4：庆祝烟花弹静态掷退役→rollVanillaHitCrit+小数冻结注入摘除', () => {
   it('4a 结构锁：三段式+旧静态掷零残留+Game.ts 小数冻结载体退役（armorPen 保留）', () => {
     const s = SRC('entities/Celeb2.ts');
-    expect(s.match(/const rollCrit = this\.critChance > 0 && rollVanillaHitCrit\(this\.projId, game\);/g)?.length).toBe(1);
+    // ★G37-A（D5/D6,2026-10-31）改判史：三段式拆形迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 收编+DV 补齐）——锁形随刀迁移。
+    expect(s.match(/const crit = rollVanillaHitCritConsumeTimer\(this\.projId, game, e, this\.critChance > 0\);/g)?.length).toBe(1);
     expect(s).not.toContain('Math.random() < this.critChance');
     const game = SRC('core/Game.ts');
     expect(game).not.toContain('rk.critChance = ');               // 小数冻结载体复辟必红
@@ -371,7 +373,9 @@ describe('BJ494-§4：庆祝烟花弹静态掷退役→rollVanillaHitCrit+小数
 describe('BJ494-§5：圣/邪/血水幻影远程率摘除→单源零掷+TimerCrit', () => {
   it('5a 结构锁：三段式+旧静态掷零残留+Game.ts 幻影率注入退役', () => {
     const s = SRC('entities/SolutionProj.ts');
-    expect(s.match(/const rollCrit = this\.critChance > 0 && rollVanillaHitCrit\(this\.projId, game\);/g)?.length).toBe(1);
+    // ★G37-A（D5/D6,2026-10-31）改判史：三段式拆形迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 收编+DV 补齐）——锁形随刀迁移。
+    expect(s.match(/const crit = rollVanillaHitCritConsumeTimer\(this\.projId, game, e, this\.critChance > 0\);/g)?.length).toBe(1);
     expect(s).not.toContain('Math.random() < this.critChance');
     const game = SRC('core/Game.ts');
     expect(game).not.toContain('water.critChance = ');            // 幻影率注入复辟必红
@@ -386,10 +390,14 @@ describe('BJ494-§5：圣/邪/血水幻影远程率摘除→单源零掷+TimerCr
         const g = mkGame([e]);
         timer.v = timerOn;
         const flask = new WaterSplashProj(1590, 793, 3, 0, projId, 20, 3, () => {});
-        const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.0);
+        // ★G37-A（D6）改判史：mock 0.0→0.5——敌臂补 DV :12970 后 rnd 有 1 调（tier 掷）,
+        //  0.5 恰 tier0 恒等档（floor(0.5×31)−15=0）→ dmg 保持基伤 20 断言零漂移。
+        const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
         flask.fixedUpdate(1 / 60, g);
         expect(calls.length).toBe(1);
-        expect(rnd).not.toHaveBeenCalled();                       // ★零掷（旧幻影掷必调 rnd=红）
+        // ★G37-A（D6,2026-10-31）改判史：敌臂补 DV :12970 逐靶掷（BJ729-A 登记债清偿）
+        //  → rnd 恰 1 调（DV tier 掷;mock 0.0 恒 tier0=恒等值）。crit 掷仍零（flagless）。
+        expect(rnd).toHaveBeenCalledTimes(1);
         if (timerOn) {
           expect(timer.box[0]).toEqual([e.x, e.y, e.w, e.h]);     // TimerCrit 照达（旧整缺必红）
           // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 40,
@@ -426,7 +434,8 @@ describe('BJ494-§6：TerraArc 死类定谳（现役 984=SwingArc 已 rollVanill
     const live = SRC('entities/SwingArc.ts');
     expect(live).not.toContain('export const TerraArc');
     expect(live).toContain('984: {');
-    expect(live.match(/const crit = this\.critChance > 0 && rollVanillaHitCrit\(this\.projId, game\);/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+    // ★G37-A（D6,2026-10-31）改判史：弧族敌臂 crit 段迁 ConsumeTimer 单源形——锁形随刀迁移。
+    expect(live.match(/const crit = rollVanillaHitCritConsumeTimer\(this\.projId, game, e, this\.critChance > 0\);/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -469,7 +478,9 @@ describe('BJ494-§7：MagicProj 命中环死面定谳（唯一活构造=net kind
 describe('BJ494-§8：星璇之音静态掷退役→rollVanillaHitCrit（直击/爆裂共口 stellarStrike）', () => {
   it('8a 结构锁：stellarStrike 三段式+旧静态掷零残留+冻结载体退役/路由门在位+关断钉保留', () => {
     const s = SRC('entities/SparkleGuitarProj.ts');
-    expect(s.match(/const rollCrit = critChance > 0 && rollVanillaHitCrit\(proj\?\.projId \?\? 856, game\);/g)?.length).toBe(1);
+    // ★BJ744 改判史：BJ741 G37①（R19-1 T✓DV✗ 残差档）——手写 roll||timer 对偶迁
+    //  rollVanillaHitCritConsumeTimer 单源（类掷+TimerCrit 各自独立求值后 ||）+DV :12970。
+    expect(s.match(/const critGuitar = rollVanillaHitCritConsumeTimer\(proj\?\.projId \?\? 856, game, e, critChance > 0\);/g)?.length).toBe(1);
     expect(s).not.toContain('Math.random() < critChance');        // 旧冻结掷复辟必红
     expect(s).toContain('critChance = 0;');                       // 类缺省 0=关断钉（直构测试确定性）
     const game = SRC('core/Game.ts');
@@ -512,7 +523,10 @@ describe('BJ494-§8：星璇之音静态掷退役→rollVanillaHitCrit（直击/
     const g = mkGame([e], stubPlayerAt(1600, 800));
     timer.v = true;
     const g1 = new SparkleGuitarProj(1600, 800, 200, 0, 50, 1700, 800);   // 类缺省 critChance=0
-    vi.spyOn(Math, 'random').mockReturnValue(0.0);
+    // ★BJ744 改判史：BJ741 G37① DV 首掷接入（:12970）——0.0 档 DV tier−15→42 必红;
+    //  改 0.5 中性档（tier 0→基伤 50）。且 0.5>0.04 档使「掷臂关死」判别更严
+    //  （门摘除回退则 roll 0.5<0.04 假 → crit 假必红;旧 0.0 恰掩此回退）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     for (let t = 0; t < 35 && calls.length < 1 && !g1.dead; t++) g1.fixedUpdate(1 / 60, g);
     // ★BJ726 改判史：S02(BJ723-B) crit ×2 移 Enemy.hurt 防后,旧期望=预倍 ×2 值 100,
     //  现收基伤+crit 旗（TimerCrit 照达,50+true;×2 下游 hurt 内,旧整缺必红）

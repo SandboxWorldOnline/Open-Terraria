@@ -242,7 +242,9 @@ describe('BJ707-G29 §C 件4 lavaOpacity Spawn 复位（:37875 两 face 落位�
     const iLava = SRC.game.indexOf("if (c.kind === 'spawn') p.lavaOpacity = 1;");
     expect(iFall).toBeGreaterThan(0);
     expect(iLava).toBeGreaterThan(iFall);
-    expect(iLava - iFall).toBeLessThan(400);
+    // ★BJ744 改判史：BJ738 P01 回家门双锚块+migrate/G36-A D4 vanity 清面插入同段
+    //  （均为 Teleport 公共尾合法同域代码）→ 段距 400→533,界随刀 400→700。
+    expect(iLava - iFall).toBeLessThan(700);
   });
 
   it("C3 登记债在案:recall spawn 支 :37874 lavaTime 复位缺（邻行独立语义,清偿另派）", () => {

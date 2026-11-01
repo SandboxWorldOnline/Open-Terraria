@@ -44,6 +44,9 @@
 //   EmptyTile 实体 (int) 截断（Collision.cs:1370/:1377）→ V5 红 / 债②-M9 门错挂
 //   主臂（:4511-4525 原版无门）→ V4/V5 红 / 债②-M10 门序倒置（先落块后清液）→ S4 红。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// ★BJ743-A（R24 SEV-2）：require('node:fs') 旁路收口——改 ESM import 形经守卫。
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { RollingBoulder } from '../src/entities/RollingBoulder';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
@@ -454,7 +457,8 @@ describe('SW-BJ93 债② 1053 LavaBoulderExplosion（半径 4 圆盘∧CanHit→
 
 // ================= 结构锁（源文本锚,防静默回退） =================
 describe('SW-BJ93 wave2 结构锁（判据表达式与调用序钉死）', () => {
-  const rb = () => require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/entities/RollingBoulder.ts'), 'utf8');
+  // ★BJ743-A：require 形退役——顶部 ESM import 经守卫（R24 SEV-2 旁路收口）。
+  const rb = () => readFileSync(join(__dirname, '../src/entities/RollingBoulder.ts'), 'utf8');
 
   it('S1 1021 专支接线于碰撞链（先于 1013=原版链序）且弹回式逐式在场', () => {
     const src = rb();

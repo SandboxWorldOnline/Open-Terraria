@@ -241,6 +241,28 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //     --dump 1457 × 本表 45 件逐字段重跑=29 全等/8 部分/1 末值/15 LAG 33 字段,
   //     与 BJ205 盘点逐项吻合——上方清单即现行权威残余（数据源/字段数均可机械
   //     重算）,勿按旧口径重盘。
+  // ---- ★BJ738 P07（2026-10-31,issue #28）：SetFoodDefaults 整族提取缺口 83 件。
+  //   定谳：extract-itemcombat.mjs 只解析 SetDefaults1-5 主 switch,独立方法
+  //   SetFoodDefaults（Item.cs:48040-48395,85 case）整族不入表——仅 2266/1912
+  //   因他处 case 复现而在 json（对拍=族内唯二）。族语义 = DefaultToFood
+  //   （:48544-48565：useAnimation=useTime=animationTime,形参缺省 17——85 case
+  //   零 custom animationTime 亲读）+ DefaultToHealingPotion（:48567,同 17,1912
+  //   已在表）。用户可见病灶：Ale 353 手喝动画走 heldUseAnimation 兜底 30
+  //   （应 17,Sake 2266 对照=17 即因其在表）;冷却路径 `?? 17` 兜底恰对=掩差。
+  //   只补时序两面（useTime/useAnimation）——consumable/useStyle/useTurn/buffType
+  //   面 itemfunc 表已全量承载,战斗面（damage 等）食物族本无。
+  //   【禁反哺标记】与 4423 族同理：若未来提取器扩 SetFoodDefaults,本块与原生
+  //   逐字节等价（17/17 恒等）,重叠无害。
+  ...(Object.fromEntries(([                  // SetFoodDefaults 85-2 缺席件（上方清单）
+    353, 357, 967, 969, 1787, 1911, 1919, 1920, 2267, 2268, 2425, 2426, 2427, 3195,
+    3532, 4009, 4011, 4012, 4013, 4014, 4015, 4016, 4017, 4018, 4019, 4020, 4021,
+    4022, 4023, 4024, 4025, 4026, 4027, 4028, 4029, 4030, 4031, 4032, 4033, 4034,
+    4035, 4036, 4037, 4282, 4283, 4284, 4285, 4286, 4287, 4288, 4289, 4290, 4291,
+    4292, 4293, 4294, 4295, 4296, 4297, 4403, 4411, 4614, 4615, 4616, 4617, 4618,
+    4619, 4620, 4621, 4622, 4623, 4624, 4625, 5009, 5041, 5042, 5092, 5093, 5275,
+    5277, 5278, 5537, 5645,
+  ] as number[]).map((id) => [String(id), { useTime: 17, useAnimation: 17 }])
+  ) as Record<string, Partial<ItemCombat>>),
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -751,6 +773,25 @@ export function ammoDamageKind(useAmmo: number): AmmoDamageKind {
   if (AMMO_KIND_BULLET.has(useAmmo)) return 'bullet';
   if (AMMO_KIND_SPECIALIST.has(useAmmo)) return 'rocket';
   return 'other';
+}
+
+/** ★BJ745 A40（issue#35,2026-11-01）：ItemID.Sets.IsRangedSpecialistWeapon
+ *  （ItemID.cs:1311 全表 8 员——1156 食人鱼枪/3350 彩弹枪/3210 毒泡鱼/160 鱼叉/
+ *  266 砂枪/5629（ranged=false 恒不达）/3821 麦酒投掷器/5460 木桶发射器）。
+ *  GetWeaponDamageMultiplier（Player.cs:54031-54055）第三支：
+ *  `IsSpecialist[useAmmo] || IsSpecialist[ammo] || IsRangedSpecialistWeapon[type]
+ *  → specialistEffectiveDamage（= rangedDamage × rocketDamage——蘑菇矿火箭头 1548
+ *  的 ×1.12 即由此承载,任意 specialist 武器吃满）。5629 照表收录（其 ranged=false
+ *  在 item.ranged 前置门天然不达,与原版 boolset 逐字一致）。 */
+export const IS_RANGED_SPECIALIST_WEAPON: ReadonlySet<number>
+  = new Set([1156, 3350, 3210, 160, 266, 5629, 3821, 5460]);
+
+/** 武器位完整分道（GetWeaponDamageMultiplier :54031-54055 全序）：IsArrow →
+ *  IsBullet → (IsSpecialist(useAmmo) ∨ IsRangedSpecialistWeapon(vid)) → other。
+ *  弹药三表先行（specialist 武器无箭/弹弹药成员,两序对现员逐字等价）。 */
+export function rangedDamageKindOf(weaponVid: number, useAmmo: number): AmmoDamageKind {
+  const k = ammoDamageKind(useAmmo);
+  return k === 'other' && IS_RANGED_SPECIALIST_WEAPON.has(weaponVid) ? 'rocket' : k;
 }
 
 /** 弓族弹型换体全链（PickAmmo 尾链 Player.cs:52660-52705 + ItemCheck_Shoot 弹型段

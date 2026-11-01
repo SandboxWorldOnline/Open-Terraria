@@ -77,7 +77,12 @@ describe('SW-AF1 F-4：爆炸 ranged 弹暴击掷（Damage_PVE_Inner :12920）',
   });
   it('explodeAt 三 victim 支接线（敌怪/小动物/城镇）：源面逐支掷入', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
-    expect(src.match(/Game\.explodeCritRoll\(projId, this\.rangedCritPct\(\)\)/g)?.length).toBe(3);
+    // ★BJ744 改判史：BJ741 R19-6 掷序反清偿——crit 迁 rollVanillaHitCritConsumeTimer
+    //  单源（crit :12915-27→TimerCrit :12928→DV :12970 原序;trap 型整调跳过=单源契约,
+    //  classOverride='ranged'=EXPLODE_RANGED_PROJS 表成员类旗强占,单 RNG 与旧
+    //  explodeCritRoll 逐位同相）。旧 explodeCritRoll 消费面退役（纯函数保留=回归锚）。
+    expect(src.match(/rollVanillaHitCritConsumeTimer\(projId, this as unknown as import\('\.\.\/entities\/types'\)\.GameHooks, (?:en|c|tn),/g)?.length).toBe(3);
+    expect(src).not.toMatch(/Game\.explodeCritRoll\(projId, this\.rangedCritPct\(\)\)/);   // 旧消费面零残留
     // ★BJ730 改判史：旧形 `/en\.hurt\(hurt,/`——BJ723-B D4 清偿（BJ725-A）snap 双支
     //  给敌怪支入参合法加 snap 加成（`hurt + (snapE ? snapE : 0),`）,逗号紧跟形破窗;
     //  改前缀形（锁「敌怪支以 hurt 直传未预倍」语义,×2=Enemy.hurt 防后,S02 判语不变）。

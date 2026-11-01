@@ -27,7 +27,7 @@ import type { Camera } from '../render/Camera';
 import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
-import { rollVanillaHitCrit } from './proj1457';
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ741 R19-1（G37①）：TimerCrit :12928 消费并单源
 import { canHitLine } from '../physics/LineOfSight';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
@@ -205,7 +205,8 @@ export class MedusaHeadProj extends Entity {
       //  出生即 Damage()（:45420-45435）⇒ 掷=Damage_PVE :12915-12927 magic 臂（536 数
       //  据面 magic;本实体 projId=535 同 magic 旗同掷面,同值形）,rollVanillaHitCrit
       //  命中拍动态（owner 装配+:25712 持械折入）;critChance≤0 关断钉保留。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      //  ★BJ741 R19-1（G37① DV✓T✗ 残差族）：TimerCrit :12928 消费并单源（旧仅类掷）
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, t, this.critChance > 0);
       // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79）——原版 volley 结算载体 =
       //  逐目标 NewProjectile(536) 后立即 Damage()（AI_100 :45420-45435,束为纯视觉
       //  载体 damage=0）;536 数据面 magic（vanilla-projectiles.json）⇒ 原版本就吸血,

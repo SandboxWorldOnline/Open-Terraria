@@ -258,8 +258,9 @@ describe('D. 四键（📋 登记不修 → 本批收口）', () => {
     expect(main).toBeTruthy();
     expect(main![0]).not.toContain('onToast');
     expect(main![0]).not.toContain('useTime = 30');
-    // QuickHeal 支保持早退但不带提示/冷却
-    const q = gameSrc.match(/kind === 'heal' && p\.buffs\.healBlocked[\s\S]{0,260}?return;/);
+    // QuickHeal 支保持早退但不带提示/冷却（★BJ738 P05 起 quickDrinkPotion 薄路由
+    // 进 quickHeal——拒用静默门=quickHeal 入口总门 :5495,移动键同享）
+    const q = gameSrc.match(/if \(!p \|\| p\.buffs\.has\(BuffType\.Cursed\) \|\| p\.cced \|\| p\.dead \|\| p\.hp >= p\.maxHp \|\| p\.buffs\.healBlocked\) return;[\s\S]{0,80}?:5495/);
     expect(q).toBeTruthy();
     expect(q![0]).not.toContain('onToast');
     expect(q![0]).not.toContain('useTime = 30');
@@ -267,7 +268,9 @@ describe('D. 四键（📋 登记不修 → 本批收口）', () => {
 
   it('③ buffTime 缺省 = 3600（ItemCheck_UsePotionStuff Player.cs:5518-5524）', () => {
     expect(gameSrc).not.toContain('buffTime ?? 7200');
-    expect(gameSrc.match(/buffTime \?\? 3600/g)).toHaveLength(2);   // 主链 + QuickHeal 链
+    // ★BJ738 P05：主链 1 处（quickDrinkPotion 旧自备链退役,QuickHeal 走 quickConsume
+    // 的 `f.buffTime || 3600` 同语义式）
+    expect(gameSrc.match(/buffTime \?\? 3600/g)).toHaveLength(1);   // 主链
     expect(gameSrc).toContain('ItemCheck_UsePotionStuff Player.cs:5518-5524');
   });
 

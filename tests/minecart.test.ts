@@ -634,11 +634,14 @@ describe('SuperCart 防御 + 机械激光', () => {
       },
     };
     const game = mkHooks(st, p, undefined, [enemy]);
+    // ★BJ744 改判史：BJ741 R19-4 激光 DV 接入（Mount.cs:5282 Damage()→:12970
+    //  Main.DamageVar(60, luck)）——60 断言须 DV 中性档（0.5→tier 0;随机跑必漂移）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     cart.fixedUpdate(1 / 60, game);
     expect(calls.length).toBe(1);
     expect(calls[0].dmg).toBe(SUPER_CART_LASER_DMG); // 60
     expect(calls[0].kx).toBe(0);                     // NewProjectile kb 0
-    expect(calls[0].crit).toBe(false);               // 591 无 melee/ranged/magic → 不暴击
+    expect(calls[0].crit).toBe(false);               // 591 无 melee/ranged/magic → 不暴击（夹具无蓄能暴击）
     expect(cart.laserBeams.length).toBe(1);          // 余辉束登记
     expect(cart.laserBeams[0].dirX).toBe(1);
   });

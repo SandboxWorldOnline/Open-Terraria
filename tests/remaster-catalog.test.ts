@@ -150,12 +150,27 @@ describe('projectile 帧枚举', () => {
 });
 
 describe('item 帧枚举', () => {
-  it('全部 6119 条命中 Item_Atlas 子矩形', () => {
+  it('全部条目命中 Item_Atlas 子矩形;无矩形独立 PNG(3861/3862)整图收录(★BJ743-A)', () => {
+    let whole = 0;
     for (const [id, m] of Object.entries(vanilla.items)) {
       const e = catalog.byKey.get(`item:${id}`)!;
       expect(e.sheet).toBe(m.icon);
-      expect(e.frames[0]).toEqual({ x: m.ix, y: m.iy, w: m.iw, h: m.ih, frameIdx: 0 });
+      if (m.ix === undefined || m.iw === undefined || m.ih === undefined) {
+        // ★BJ743-A：无矩形条目（atlas-append 独立 PNG 落盘形,vicon 整图回退同构）
+        //   ——frames[0] = remaster-index IHDR 整图矩形,layout=whole。
+        expect(e.layout).toBe('whole');
+        const sz = sizes[m.icon];
+        expect(sz, `item ${id} 独立 PNG 须在 remaster-index`).toBeTruthy();
+        expect(e.frames[0]).toEqual({ x: 0, y: 0, w: sz[0], h: sz[1], frameIdx: 0 });
+        whole++;
+      } else {
+        expect(e.frames[0]).toEqual({ x: m.ix, y: m.iy, w: m.iw, h: m.ih, frameIdx: 0 });
+      }
     }
+    // 3861(Ogre)/3862(DarkMage)宝藏袋——atlas-append-1457 追加通道独立 PNG 形
+    expect(whole).toBe(2);
+    expect(catalog.byKey.get('item:3861')!.sheet).toBe('vanilla/Item_3861.png');
+    expect(catalog.byKey.get('item:3862')!.sheet).toBe('vanilla/Item_3862.png');
   });
 });
 

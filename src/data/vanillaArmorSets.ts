@@ -32,7 +32,9 @@ export interface ArmorSetBonus {
    *  Player.ts DD2_PIECE_FX 环消费 → equipStats.hpPerSec） */
   lifeRegen?: number;
   /** manaCost -= X（【加算】折扣池——原版 Player.manaCost 单浮点逐项减,
-   *  消费端 (1-manaCostOff)×manaCostMul;manaCostMul 乘区键保留给丛林套旧档） */
+   *  消费端 (1-manaCostOff)×manaCostMul;★BJ742-A R20-②：全树 manaCost 零乘区
+   *  （ArmorSetBonuses.cs:278-281 Jungle -=0.16 与 223/钴秘银精金同池加算）——
+   *  manaCostMul 乘区键自此无原版套装使用者（模组面通道保留）） */
   manaCostOff?: number;
   titaniumStorm?: boolean;   // 钛金全套 on-hit（ArmorSetBonuses.cs:222-225 Titanium→onHitTitaniumStorm）
   ashWood?: boolean;         // ★Notes④ 灰烬木全套（1456 Player.cs:15772-15775 赋位;
@@ -62,7 +64,7 @@ export interface ArmorSetBonus {
   /** Mining 套 pickSpeed -= 0.1（:299-303——折扣池【加算】,消费端 Game.pickSpeedMult;
    *  单件面 410/411/5589/5590 同字段走 accfx json+armorStat 环,组A 表批 2026-09-18） */
   pickSpeed?: number;
-  manaCostMul?: number;      // manaCost -=（折扣）
+  manaCostMul?: number;      // 【模组面保留】魔耗乘区——原版套装零使用者（BJ742-A R20-② Jungle 迁加算池后）
   onHitRegen?: boolean;      // 帕拉钯全套（ArmorSetBonuses.cs:217-220 Palladium→onHitRegen;
                              // Player.cs:6942-6945 AddBuff(58,300)——快速再生 58 RapidHealing）
   onHitPetal?: boolean;      // 山铜（奥利哈刚）全套（:215-221 Orichalcum→onHitPetal;
@@ -231,20 +233,34 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 日曜耀斑（2763/2764/2765=171|177|112,Player.cs:16224-16295 setSolar):
   // 受伤 ×0.88 + 护盾 3 层（每层该次受伤 ×0.2 + 反击 608 弹;每 3s 回 1 层;dashType=3 冲撞登记）
   '171|177|112': { endurance: 0.12, solar: true, dashType: 3 },
-  // 丛林 (76|8)(49|45) 2×2×2=8 种组合全配（:15873-15877 manaCost-=0.16f）
-  '8|8|8': { manaCostMul: 0.84, name: 'Jungle' },
-  '76|8|8': { manaCostMul: 0.84, name: 'Jungle' },
-  '76|49|45': { manaCostMul: 0.84, name: 'Jungle' },
-  '8|49|45': { manaCostMul: 0.84, name: 'Jungle' },
-  '76|49|8': { manaCostMul: 0.84, name: 'Jungle' },
-  '76|8|45': { manaCostMul: 0.84, name: 'Jungle' },
-  '8|49|8': { manaCostMul: 0.84, name: 'Jungle' },
-  '8|8|45': { manaCostMul: 0.84, name: 'Jungle' },
+  // 丛林 (76|8)(49|45) 2×2×2=8 种组合全配（ArmorSetBonuses.cs:278-281 Jungle →
+  //   player.manaCost -= 0.16f【加算】）。★BJ742-A R20-②（2026-10-31）：旧乘区
+  //   manaCostMul 0.84 = 自造形——原版全树 manaCost 零乘区（单浮点逐项 -=,
+  //   Player.cs:1859/:18450 ResetEffects 归 1 后 :11979-:15227 二十余站全加算）,
+  //   与大自然恩赐 223(-0.06)/钴·秘银·精金牌(-0.14/0.17/0.19) 并戴时旧式
+  //   (1-0.06)×0.84=0.7896 ≠ 原版 1-0.06-0.16=0.78——随刀归位加算池。
+  '8|8|8': { manaCostOff: 0.16, name: 'Jungle' },
+  '76|8|8': { manaCostOff: 0.16, name: 'Jungle' },
+  '76|49|45': { manaCostOff: 0.16, name: 'Jungle' },
+  '8|49|45': { manaCostOff: 0.16, name: 'Jungle' },
+  '76|49|8': { manaCostOff: 0.16, name: 'Jungle' },
+  '76|8|45': { manaCostOff: 0.16, name: 'Jungle' },
+  '8|49|8': { manaCostOff: 0.16, name: 'Jungle' },
+  '8|8|45': { manaCostOff: 0.16, name: 'Jungle' },
   // 熔岩 9：近战伤 +10% + fireWalk
   '9|9|9': { dmgMelee: 0.1, fireWalk: true, name: 'Molten' },
   // 霜寒 46：近远程伤 +10% + frostBurn engine（StatusNPC :93712-93716：
   //   melee||ranged 命中 → Frostburn2(324) 60×Next(5,15)t = 5-14s）
   '46|27|26': { dmgMelee: 0.1, dmgRanged: 0.1, frostBurn: true, name: 'Frost' },
+  // 海龟 1316/1317/1318 = 槽 99|65|54（★BJ745 A02,issue#35：Benefits.Turtle
+  //   ArmorSetBonuses.cs:159-164 = endurance+=0.15 + thorns=1f + turtleThorns。
+  //   endurance 0.15 走 sb 槽键通道（activeArmorSetMatch=GetEffectiveArmor 语义,
+  //   ArmorSetBonus.QueryContext :20-24 直读 effective ✓）→ equipStats.enduranceEq
+  //   → damage() ×(1−endurance) 截断（防后 100 伤应 85）;thorns=1f 被消费端
+  //   turtleThorns?2:thorns 覆写（Game :39102）=死值不承载;turtleThorns 行为旗
+  //   走 vid 键表 getter（Player.ts turtleSet）,与本槽键条目分道不双计。
+  //   反伤共享配装面（A07）随 getter 改读 effective 一并修复）
+  '99|65|54': { endurance: 0.15, name: 'Turtle' },
   // 幽灵套（Spectre Robe 66 / Pants 55；Player.cs:15850-15860）：
   // 头 101 兜帽 → ghostHeal（魔法命中回血，魔法伤 −40%）；
   // 头 156 面具 → ghostHurt（on-hit 浮魂弹 356——★批⑥已接 SpectreSoulProj.ts；

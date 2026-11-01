@@ -15,6 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { MagnetSphereProj, BeamBoltProj, MAGNET_SPHERE_BALL, MAGNET_SPHERE_BOLT, HEAT_RAY_BOLT }
   from '../src/entities/MagnetSphereProj';
 import type { GameHooks } from '../src/entities/types';
@@ -305,7 +306,11 @@ describe('③激光弹 255：子步飞行/死亡铺束/命中（aiStyle48 + Kill
     expect(bolt.dead).toBe(true);
     expect(e.hurt).toHaveBeenCalledTimes(1);
     const [dmg, kbx, , , armorPen, , pierce, fromPlayer] = e.hurt.mock.calls[0];
-    expect(dmg).toBe(48);
+    // ★G37-A（D6,2026-10-31）改判史：255 敌臂补 DV :12970 逐靶掷（census 外同形面
+    //  随刀）→ 旧平值钉 48 改 31 档 DV 域锁（bj735a 判例形,luck=0 单掷域）。
+    const dvDomain255 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain255.add(damageVarRoll(48, 0, () => i / 31));
+    expect(dvDomain255.has(dmg)).toBe(true);
     expect(kbx).toBeGreaterThan(0);               // kb 沿飞行方向
     expect(armorPen).toBe(5);
     expect(pierce).toBe(1);                       // 单发 flag3（:11904）

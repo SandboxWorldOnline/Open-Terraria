@@ -57,6 +57,7 @@ describe('①太阳石/月亮石天界石复合门（1458 :15529-15533）', () =
     p.nightPhase = false;                      // Main.dayTime=true 且非日食
     const day = p.equipStats;
     p.nightPhase = true;                       // !dayTime || eclipse
+    (p as unknown as { dayTime: boolean }).dayTime = false;   // ★R20-S0:真夜双位(nightPhase 单设=日食相,899 开)
     const night = p.equipStats;
     expect(day.meleeSpeed).toBeCloseTo(night.meleeSpeed + 0.1, 6);
     expect(day.critMelee).toBe(night.critMelee + 2);      // 复合同句 crit+2 双确认
@@ -263,16 +264,16 @@ describe('⑩a FindPulley !controlJump 门（:26320——Space 只手不进绳�
     for (let t = 0; t < 20; t++) step(p, game);
     expect(p.pulley).toBe(false);
   });
-  it('Space+↑ 同按（本仓合并输入的歧义面）：仓内谓词视 ↑ 主导 → 允许抓绳（钉死声明）', () => {
+  it('Space+↑ 同按：!controlJump 拦截（★BJ737-A 翻正——原版分离键面同判,旧合并键面登记差异退役）', () => {
     // 原版 controlJump/controlUp 分离键面下，Space+Up 同按被 !controlJump 拦；
-    // 本仓 inputJump=Space∪Up 无分离位，等价谓词取「纯 Space 才算 controlJump」
-    // （保住纯 ↑ 抓绳）——合并键面的 Space+↑ 组合语义钉死为可抓，登记差异。
+    // ★BJ737-A（2026-10-31）起 inputJump=Space 单键面（Game.ts:10636 根部并键面退役）
+    // → jumpOnlyHeld=inputJump=controlJump 精确定义 → Space+↑ 同按 = 不抓绳（原版
+    // 同判）。旧「视 ↑ 主导允许抓绳」系合并键面时代的钉死声明,随本刀翻正。
     const { p, game } = ropeWorld();
     p.inputUp = true;
     p.inputJump = true;
-    let grabbed = false;
-    for (let t = 0; t < 20 && !grabbed; t++) { step(p, game); grabbed = p.pulley; }
-    expect(grabbed).toBe(true);
+    for (let t = 0; t < 20; t++) step(p, game);
+    expect(p.pulley).toBe(false);
   });
 });
 

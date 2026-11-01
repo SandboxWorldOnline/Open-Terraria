@@ -34,6 +34,14 @@ const windowTexts = (m: ChatHistoryModel, open: boolean): Array<[string, string]
     return [e.text, `${s.from}-${s.to}`];
   });
 
+describe('Issue#34 小键盘回车双接受（XNA Keys.Enter 覆盖双物理键）', () => {
+  it('结构锁:开框门与发送门均含 NumpadEnter 分支', () => {
+    expect(GAME_SRC).toContain("code === 'NumpadEnter'");
+    const CHAT = readFileSync(join(__dirname, '..', 'src', 'ui', 'ChatInput.ts'), 'utf8');
+    expect(CHAT).toContain("e.code === 'Enter' || e.code === 'NumpadEnter'");
+  });
+});
+
 describe('① 池:500 环形(RemadeChatMonitor.cs:13,40-53)', () => {
   it('Insert(0) 头插=新在 entries[0];第 501 条入池,第 1 条被尾删', () => {
     const m = new ChatHistoryModel();
@@ -199,7 +207,12 @@ describe('⑤ ↑↓ 键位定谳(Main.cs:18502-18513;S 级发送历史迁位)',
   });
 
   it('Game.ts Enter 门无 netMode 项(单机同权,Main.cs:18451)+ fromEnter 开框声(Main.cs:18453)', () => {
-    expect(GAME_SRC).toContain("if (code === 'Enter' && !this.input.uiBlocking && this.spectatingSlot < 0) {");
+    // ★Issue#34 改判史：Enter 门扩 'Enter'∪'NumpadEnter' 双接受（XNA Keys.Enter
+    //   覆盖双物理键;旧锁钉单 'Enter' 字面=小键盘回车开不了聊天的病灶本体）
+    // ★BJ744 改判史：BJ742 R22-8 补 Alt 守卫（Main.cs:18449 !LeftAlt&&!RightAlt
+    //  ——Alt+Enter=全屏切换组合不开聊;浏览器 e.altKey 电平面=左右 Alt 合一单旗）
+    //  ——门串随刀加 `&& !e.altKey` 位（跨行整串锁,保位序）。
+    expect(GAME_SRC).toContain("(code === 'Enter' || code === 'NumpadEnter') && !e.altKey\n        && !this.input.uiBlocking && this.spectatingSlot < 0) {");
     expect(GAME_SRC).toContain('this.chatInput.open(true)');
     expect(GAME_SRC).not.toContain("code === 'Enter' && this.net?.active");
     // 单机 Say 本地回显(Main.cs:18545-18548 netMode==0 形态)

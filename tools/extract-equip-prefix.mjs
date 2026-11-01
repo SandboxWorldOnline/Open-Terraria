@@ -336,15 +336,34 @@ const ACCESSORY = new Set([
   // DefaultToInfoAccessory(DefaultToAccessory 内部 accessory=true;Item.cs:48234/:48229)
   ...scanCaseFields(itemSrc, ['\\bDefaultToInfoAccessory\\s*\\(']).keys(),
   ...scanCaseFields(itemSrc, ['\\bDefaultToAccessory\\s*\\(']).keys(),
-  // 1456 反编译伪影补全:手机 3124/贝壳手机 5358-5361 的 case 块缺辅助调用
-  // (Item.cs :29000 仅 useStyle=4;游戏内确为可装备信息饰品,
-  //  Player.RefreshInfoAccsFromItemType :12353-12394 将其列为全开 12 项的 OR 源)
-  3124, 5358, 5359, 5360, 5361,
+  // ★BJ740-A ACC16-18（issue #30）：三个辅助函数内置 accessory=true——case 块内
+  // 只有调用点,字面量扫描天然漏（同 DefaultToInfoAccessory 形）:
+  //   DefaultToMusicBox（Item.cs:48638-48655,101 调用点 562-574/1596-1610/…）
+  //   DefaultToVoiceOverrideAccessory（:47786-47800,15 点 215/5484/5485/5499-5509/5534）
+  //   DefaultToMonolith（:47762-47769,4 点 5113/5598/5599/5655）
+  ...scanCaseFields(itemSrc, ['\\bDefaultToMusicBox\\s*\\(']).keys(),
+  ...scanCaseFields(itemSrc, ['\\bDefaultToVoiceOverrideAccessory\\s*\\(']).keys(),
+  ...scanCaseFields(itemSrc, ['\\bDefaultToMonolith\\s*\\(']).keys(),
   // 建筑族 4 件:SetDefaults5 default 段区间判断 type>=2214&&type<=2217 →
   // accessory=true（Item.cs:22346-22352;case 标签不落在任何 case 块,扫描不到）
   2214, 2215, 2216, 2217,
+  // ★BJ740-A ACC15（issue #30,2026-10-31 定谳=翻案删硬编码）：手机 3124/贝壳手机
+  //   5358-5361 的 case 块【确无】accessory/InfoAccessory 辅助调用——1457 亲读
+  //   Item.cs:29026-29035（case 3124 仅 useStyle=4/useTime=90 等;邻 case 3123 PDA
+  //   :29022-29025 有 DefaultToInfoAccessory——同函数内模式可见,非反编译伪影）;
+  //   case 5358-5361（:42506-42540,与 5437 共支）同形无 accessory。原硬编码注释
+  //   「游戏内确为可装备信息饰品」系把 RefreshInfoAccsFromItemType 的背包生效面
+  //   （:12486-12500 全格扫,与装备无关）误当装备资格——原版 ItemSlot.cs:1444
+  //   拒非 accessory,五件真不可装备（线上 3124/5358 误可装,issue #30 ACC15）
 ]);
-const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
+const VANITY = new Set([
+  ...scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys(),
+  // ★BJ740-A ACC16-18：同三辅助函数内置 vanity=true（DefaultToMusicBox 48654/
+  //   VoiceOverride 47794/Monolith 47768）——入 VANITY 使 acc 落 0 档（双旗族）
+  ...scanCaseFields(itemSrc, ['\\bDefaultToMusicBox\\s*\\(']).keys(),
+  ...scanCaseFields(itemSrc, ['\\bDefaultToVoiceOverrideAccessory\\s*\\(']).keys(),
+  ...scanCaseFields(itemSrc, ['\\bDefaultToMonolith\\s*\\(']).keys(),
+]);
 const STATS = {};
 const setStat = (vid, patch) => { STATS[vid] = { ...(STATS[vid] ?? {}), ...patch }; };
 for (const [vid, slot] of HEAD_SLOT) setStat(vid, { s: 'h', hs: slot });

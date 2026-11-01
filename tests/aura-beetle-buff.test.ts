@@ -33,66 +33,95 @@ interface FakeBuffs {
   removed: BuffType[];
   live: Map<BuffType, number>;
 }
-function fakeBuffs(): FakeBuffs & { apply(t: BuffType, s: number): void; remove(t: BuffType): void } {
+function fakeBuffs(): FakeBuffs & { has(t: BuffType): boolean; apply(t: BuffType, s: number): void; remove(t: BuffType): void } {
   const f = { applied: [] as Array<[BuffType, number]>, removed: [] as BuffType[], live: new Map<BuffType, number>() };
   return {
     ...f,
+    has(t: BuffType) { return f.live.has(t); },   // ★BJ745 A16：meter Phase1 派生读面
     apply(t: BuffType, s: number) { f.applied.push([t, s]); f.live.set(t, s); },
     remove(t: BuffType) { f.removed.push(t); f.live.delete(t); },
   };
 }
 
 describe('BeetleMeter buff 钉值管道', () => {
-  it('猛攻族蓄能爬档 → 钉 98/99/100 当档 5/60 秒,非当档立删', () => {
+  // ★BJ745 A16（issue#35,2026-11-01）：buff 单源重构——orbs 每拍由 UpdateBuffs 从
+  // 95-100 档 buff 重派生（族守卫读【上拍】族旗）,梯子只 AddBuff 不直写 orbs。
+  // 旧用例的「同帧 orbs 跳档/换族当帧剥」期望系旧持久字段模型的语义,按原版逐拍
+  // 相重写（换壳 3/0/1 = issue#35 A16 实测锚;派生滞后一拍=UpdateBuffs 先于
+  // UpdateArmorSets 的构造性时序）。
+  it('猛攻族蓄能爬档 → 钉 98/99/100 当档 5/60 秒,非当档立删;orbs 派生滞后一拍', () => {
     const fb = fakeBuffs();
     const host = { beetleOrbs: 0, buffs: fb };
     const m = new BeetleMeter();
     m.registerHit(500, true);
     m.tick(host, true, false);
-    expect(host.beetleOrbs).toBe(1);
+    expect(host.beetleOrbs).toBe(0);                       // 本拍只 AddBuff(98),orbs 下拍派生
     expect(fb.live.get(BuffType.BeetleMight1)).toBeCloseTo(5 / 60, 10);
     expect(fb.live.has(BuffType.BeetleMight2)).toBe(false);
-    m.registerHit(5000, true);   // 500+5000=5500 跨过 400+1200+3600 = 5200 → 3 档
     m.tick(host, true, false);
-    expect(host.beetleOrbs).toBe(3);
+    expect(host.beetleOrbs).toBe(1);                       // UpdateBuffs 从 98 派生（:10506）
+    m.registerHit(5000, true);   // counter 跨过 400+1200+3600 = 5200 → 3 档
+    m.tick(host, true, false);
+    expect(host.beetleOrbs).toBe(1);                       // 换档拍 orbs 仍旧值
     expect(fb.live.get(BuffType.BeetleMight3)).toBeCloseTo(5 / 60, 10);
     expect(fb.live.has(BuffType.BeetleMight1)).toBe(false);   // 换档立删旧档（:16686-16696）
+    m.tick(host, true, false);
+    expect(host.beetleOrbs).toBe(3);
   });
 
-  it('换族：猛攻→防御当帧剥 98-100 挂 95-97（:10434-10452 守卫）', () => {
+  it('★A16 换壳胸甲（满 Might 3 → 防御壳）逐拍相 3/0/1（issue#35 实测锚）', () => {
+    const fb = fakeBuffs();
+    const host = { beetleOrbs: 0, buffs: fb };
+    const m = new BeetleMeter();
+    // 攒满 Might 3（进攻套在身）
+    for (let i = 0; i < 4; i++) { m.registerHit(2000, true); m.tick(host, true, false); }
+    m.tick(host, true, false);
+    expect(host.beetleOrbs).toBe(3);
+    expect(fb.live.has(BuffType.BeetleMight3)).toBe(true);
+    // 换壳（防御套）——原版拍末球数 3/0/1：
+    m.tick(host, false, true);       // 拍1：族守卫读上拍旗（offense）→Might3 保留,orbs=3
+    expect(host.beetleOrbs).toBe(3);
+    expect(fb.live.has(BuffType.BeetleMight3)).toBe(true);
+    m.tick(host, false, true);       // 拍2：上拍旗=defense →守卫剥 Might3,orbs=0;梯子 AddBuff(95)
+    expect(host.beetleOrbs).toBe(0);
+    expect(fb.live.has(BuffType.BeetleMight3)).toBe(false);
+    expect(fb.live.has(BuffType.BeetleEndurance1)).toBe(true);
+    m.tick(host, false, true);       // 拍3：UpdateBuffs 从 95 派生 orbs=1
+    expect(host.beetleOrbs).toBe(1);
+  });
+
+  it('换族对面族残留：守卫独立剥（上拍族旗不含该族 → 当拍 DelBuff）', () => {
     const fb = fakeBuffs();
     const host: { beetleOrbs: number; buffs: ReturnType<typeof fakeBuffs> } = { beetleOrbs: 0, buffs: fb };
     const m = new BeetleMeter();
-    m.tick(host, true, false);       // 猛攻在身一拍（置家族记忆；counter0 → orbs 0）
-    host.beetleOrbs = 2;             // 模拟既有球数
-    fb.live.set(BuffType.BeetleMight2, 5 / 60);   // ★预置对面族旧档（防同义反复：
-    //   真实验证"对面族被守卫剥净"这条路径本身，红队 B3 指控的空洞断言已补实）
-    m.tick(host, false, true);       // 换防御甲：防御臂 counter++ 未满 180,球数不变
-    expect(host.beetleOrbs).toBe(2);
-    expect(fb.live.has(BuffType.BeetleMight2)).toBe(false);   // 对面族当帧剥净
-    expect(fb.live.get(BuffType.BeetleEndurance2)).toBeCloseTo(5 / 60, 10);
+    m.tick(host, true, false);       // 猛攻在身一拍（族旗=offense）
+    fb.live.set(BuffType.BeetleEndurance2, 5 / 60);   // 预置对面族残留
+    m.tick(host, true, false);       // 壳族守卫（上拍旗 offense ≠ defense）→ Endurance2 当拍剥
+    expect(fb.live.has(BuffType.BeetleEndurance2)).toBe(false);
   });
 
-  it('双套离身：同帧 counter=0 + orbs=0 + 双族全剥（:16556-16562 无衰减窗）', () => {
+  it('双套离身：counter=0 当拍;might 族 buff 一拍滞后剥（族守卫读上拍旗）', () => {
     const fb = fakeBuffs();
     const host = { beetleOrbs: 0, buffs: fb };
     const m = new BeetleMeter();
     m.registerHit(500, true);
-    m.tick(host, true, false);       // orbs=1,家族=猛攻,Might1 在栏
-    expect(fb.live.get(BuffType.BeetleMight1)).toBeCloseTo(5 / 60, 10);
-    fb.live.set(BuffType.BeetleEndurance3, 5 / 60);   // 再预置一枚对面族残留
-    m.tick(host, false, false);      // 双套离身【当帧】
-    expect(host.beetleOrbs).toBe(0);                        // 无 5t 窗（红队 B2 定罪后语义）
+    m.tick(host, true, false);       // AddBuff(98),族旗=offense
+    m.tick(host, true, false);       // orbs=1 派生
+    expect(host.beetleOrbs).toBe(1);
+    m.tick(host, false, false);      // 离身拍：守卫读上拍旗（offense）→Might1 保留,orbs=1
+    expect(m.stateForTest().counter).toBe(0);               // :16560 counter 当拍清
+    expect(host.beetleOrbs).toBe(1);
+    m.tick(host, false, false);      // 次拍：上拍旗 none →守卫剥,orbs=0
+    expect(host.beetleOrbs).toBe(0);
     expect(fb.live.has(BuffType.BeetleMight1)).toBe(false);
-    expect(fb.live.has(BuffType.BeetleEndurance3)).toBe(false);
   });
 
-  it('裸宿主（无 buffs）不炸——blue-r2 既有用例形态兼容', () => {
+  it('裸宿主（无 buffs）不炸——无 buff 栏则派生恒 0（原版无栏同构）', () => {
     const host = { beetleOrbs: 0 };
     const m = new BeetleMeter();
     m.registerHit(500, true);
     expect(() => m.tick(host, true, false)).not.toThrow();
-    expect(host.beetleOrbs).toBe(1);
+    expect(host.beetleOrbs).toBe(0);   // AddBuff 无栏可落=派生无源（旧期望 1 系持久字段模型）
   });
 });
 

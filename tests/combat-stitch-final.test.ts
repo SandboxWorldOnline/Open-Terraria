@@ -201,8 +201,11 @@ describe('★A3 projClass 数据面与消费面', () => {
     const strikeIchors: Array<number> = [];
     const e = { x: 10, y: 10, w: 40, h: 40, id: 7, dead: false, cx: 30, cy: 30,
       vx: 1, vy: 0, ichorT: 0,
-      hurt(dmg: number, _kx: number, _ky: number, _g: unknown, _pen?: number, crit?: boolean) {
-        hits.push({ dmg, crit: !!crit });
+      // ★BJ739 B19：nanoMul 第 11 参在 penAdd 并入后施加（Projectile.cs:13684-13690
+      //  序=pen 先加→(int)(×1.05)）;mock 无防/无 pen ⇒ trunc((dmg+0)×nanoMul)
+      hurt(dmg: number, _kx: number, _ky: number, _g: unknown, _pen?: number, crit?: boolean,
+        _pierce?: number, _fp?: boolean, _pp?: number, _sp?: number, nanoMul?: number) {
+        hits.push({ dmg: nanoMul !== undefined && nanoMul !== 1 ? Math.trunc(dmg * nanoMul) : dmg, crit: !!crit });
         strikeIchors.push((e as unknown as Record<string, number>).ichorT ?? 0);
         return true;
       } };

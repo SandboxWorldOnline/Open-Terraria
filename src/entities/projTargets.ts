@@ -55,6 +55,10 @@ export interface TownHitSettle {
   flatPen?: number;
   crit?: boolean;
   kb?: number;
+  /** ★BJ739 B19（2026-10-31）：Nano ×1.05 乘区（melee||IsAWhip 弹/鞭）——原版
+   *  Projectile.cs:13684-13690 序 = checkArmorPenetration 加伤【之后】才
+   *  (int)(dmg×1.05)。经 TownNPC.hurt 第 11 参在 penAdd 并入后施加;缺省 1 */
+  nanoMul?: number;
 }
 
 /** 命中小动物:一击致死。返回是否命中(调用方按各自语义消耗穿透/销毁弹体) */
@@ -96,10 +100,12 @@ export function hitTownNpcs(
    *  短路。返回 {dmg?, penPercent?, flatPen?, crit?, kb?} 覆盖对应入参（逐靶依赖
    *  tag 态/靶位的随从环用;dmg 提供时覆盖 dmg 入参——banner 在通道内统一施加,
    *  调用方勿预套。crit 语义 = TownNPC.hurt 防后双精度 ×2（NPC.cs:82067 原序）,
-   *  与 Enemy.hurt「调用侧预倍+参仅染色」约定不同——传 crit=true 时 dmg 勿预倍）。
+   *  ★BJ741 R19-8：旧注「与 Enemy.hurt『调用侧预倍+参仅染色』约定不同」系陈旧语——
+   *  S02(BJ723-B) 起 Enemy.hurt 同为防后 ×2,两接收端约定已统一——传 crit=true 时
+   *  dmg 勿预倍）。
    *  调用位 = 巫毒窄门后/hurt 前（vanilla flag(:12631)→…→:12947 ModifyHit→StrikeNPC
    *  同位;settle 内的 tag 结算含 OnHit 消费副作用=敌怪环既有同形,见 resolveWhipTagHit）。 */
-  settle?: (n: { id: number; vanillaId?: number }) => TownHitSettle,
+  settle?: (n: { id: number; vanillaId?: number; x: number; y: number; w: number; h: number }) => TownHitSettle,   /* ★G37-A：受害靶 hitbox 入型（TimerCrit :12928 消费单源 victim 位——城镇 NPC 实体恒有盒面） */
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -111,7 +117,7 @@ export function hitTownNpcs(
       x: number; y: number; w: number; h: number; dead: boolean;
       hurt: (d: number, kx: number, ky: number, g: GameHooks,
         penPercent?: number, flatPen?: number, crit?: boolean, force?: boolean,
-        fromPlayer?: boolean, srcProjId?: number) => boolean;
+        fromPlayer?: boolean, srcProjId?: number, nanoMul?: number) => boolean;
       bound?: boolean; vanillaId?: number; id: number; iframes?: number;
     };
     if (n.dead || typeof n.hurt !== 'function') continue;
@@ -161,7 +167,7 @@ export function hitTownNpcs(
     //   :82067 对城镇靶同面）;缺省 0/0/false = X1 旧形态（W1 鞭面零回退,仅 banner
     //   新增=:13387-91 面位）。
     if (n.hurt(outDmg, st?.kb ?? kb, 0, game, st?.penPercent ?? 0, st?.flatPen ?? 0,
-      st?.crit ?? false, false, source === 'playerProj', projId)) {
+      st?.crit ?? false, false, source === 'playerProj', projId, st?.nanoMul ?? 1)) {   // ★BJ739 B19：nanoMul 透传（penAdd 后乘）
       if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
       // ★W1：受理拍回调 = 写梯位（:14031-14179 immune[owner]=0+局部表/:14263
       //   numHits/:14321-14327 minionTarget——原文序在 OnKillNPC 之后,同拍序保持）
@@ -188,7 +194,7 @@ export function hitTownNpcsAoeBox(
   cx: number, cy: number, half: number,
   game: GameHooks, dmg: number, projId: number,
   source: 'playerProj' | 'hostile' = 'playerProj',
-  settle?: (n: { id: number; vanillaId?: number }) => TownHitSettle,
+  settle?: (n: { id: number; vanillaId?: number; x: number; y: number; w: number; h: number }) => TownHitSettle,   /* ★G37-A：受害靶 hitbox 入型（TimerCrit :12928 消费单源 victim 位——城镇 NPC 实体恒有盒面） */
 ): boolean {
   return hitTownNpcs(
     { x: cx - half, y: cy - half, w: half * 2, h: half * 2 },
@@ -882,6 +888,26 @@ export const COLD_DAMAGE_NPCS: ReadonlySet<number> = new Set([
   668, // Deerclops
 ]);
 
+/** ★G39-A（bj742a D-③,2026-11-01）：微光闪避源实体三查门双表
+ *  （Player.cs AllowShimmerDodge :39059-39072）——`entity is NPC && (boss ||
+ *  GetNPCInvasionGroup(type)!=0 || NPCID.Sets.CanHitPastShimmer[type])` /
+ *  `entity is Projectile && ProjectileID.Sets.CanHitPastShimmer[type]` 返 false
+ *  = 不被微光吞。boss 旗与入侵组在消费侧现读（Enemy def.boss / INVASION_GROUP）,
+ *  本处只承载两张 Factory.CreateBoolSet 字面表（ProjectileID.cs:433 45 员 /
+ *  NPCID.cs:4883 50 员,1457 亲读）。消费=Game.damagePlayer 源块计算
+ *  （__swShimmerNoDodge 瞬态通道 → Player.damage 微光门）。 */
+export const CAN_HIT_PAST_SHIMMER_PROJS: ReadonlySet<number> = new Set([
+  605, 270, 719, 961, 962, 926, 922, 100, 84, 83, 96, 101, 102, 275, 276, 277,
+  258, 259, 384, 385, 386, 874, 872, 873, 871, 683, 676, 670, 675, 686, 687,
+  467, 468, 464, 465, 466, 526, 456, 462, 455, 452, 454, 949, 1041, 1125,
+]);
+export const CAN_HIT_PAST_SHIMMER_NPCS: ReadonlySet<number> = new Set([
+  535, 5, 13, 14, 15, 666, 267, 36, 210, 211, 115, 116, 117, 118, 119, 658,
+  659, 660, 134, 135, 136, 139, 128, 131, 129, 130, 263, 264, 246, 249, 247,
+  248, 371, 372, 373, 566, 567, 440, 522, 523, 521, 454, 455, 456, 457, 458,
+  459, 397, 396, 400,
+]);
+
 export function hitPlayer(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
@@ -988,7 +1014,14 @@ export function hitPlayer(
   } else {
     // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:14912-14917）；
     // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar 直传
-    game.damagePlayer(sweaterDmg, self.x + self.w / 2, self.y + self.h / 2, undefined, false, pvp);
+    // ★G39-A（bj742a D-③）：补 opts.projVid（单传无 projDomain=不进 mod 修正链,
+    // 零扰动）——Damage_EVP 的 damageSource=ProjectileSource（:15132 同族）,
+    // 微光三查门（AllowShimmerDodge :39068-69）据此查 CanHitPastShimmer 弹表;
+    // CanHitPastShimmer 表内弹命中微光化玩家照常受伤（月总族部分已在
+    // BossNoCheese 桶先拦,其余 605/270/719… 旧被微光吞=本刀修）。
+    game.damagePlayer(sweaterDmg, self.x + self.w / 2, self.y + self.h / 2,
+      undefined, false, pvp, true,
+      evpId !== undefined ? { projVid: evpId } : undefined);
   }
   // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
   // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）

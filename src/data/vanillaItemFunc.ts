@@ -42,6 +42,14 @@ export function itemFuncOfVid(vid: number): ItemFunc | null {
 // vanilla-itemcombat.json 为权威（本表同名字段非武器伤害取数口）。
 FUNC['1227'] = { ...FUNC['1227'], useStyle: 13 };
 
+// ★BJ738 改判史（P08,2026-10-31,issue #28）：SetDefaults case 226 直通 case 227
+//   （Item.cs:4195-4212 `case 226: case 227: this.type = 227;` 共享块）——226 的
+//   功能画像 = 227 全量（consumable/potion/healLife 90/useStyle 9/useTurn）。
+//   提取器对归一化 case 无独立产出（itemfunc['226'] 缺）→ 存量 SW 档已落盘的
+//   vi_226 条目（vid→key 归一前导入的旧档）使用面由本别名保底;新导入/搜索/
+//   授予走 items.ts VANILLA_VID_NORMALIZE 直落 vi_227（本条目=纵深防御面）。
+FUNC['226'] = { ...FUNC['227'] };
+
 // 1457: DD2 宠物蛋族共享 case 基值 200/703 + 嵌套 case 覆写（Item.cs:34034-34047——
 // 组 3855 Gato=200/703、3856 Ghost=201/702（提取器已中）、3857 Dragon=202/701）。
 // ★F-STRUCT 泛化重产（2026-09-03）：提取器嵌套 case per-id 归并已自愈——3857 表内

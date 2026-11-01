@@ -44,7 +44,9 @@ export const PVP_BUFF_WHITELIST: ReadonlySet<number> = new Set([
   20, 70, 24, 323, 31, 39, 44, 324, 69, 103, 119, 120, 137, 320, 30, 36,
 ]);
 
-/** vanilla buff id → BuffType（白名单内已实装的子集；103/119/137/320 为纯视觉 buff 未实装） */
+/** vanilla buff id → BuffType（白名单内已实装的子集；103/119/320 为纯视觉 buff 未实装。
+ *  ★BJ739 B11（2026-10-31）：137 Slimed 入册（BuffType.Slimed 建模——六火族 DoT
+ *  翻倍消费面;史莱姆枪 406 的 PvP 施加走 AI 专臂非 StatusPvP,见 SlimeGlob 注） */
 const VANILLA_TO_BUFFTYPE: ReadonlyMap<number, BuffType> = new Map([
   [20, BuffType.Poisoned],
   [24, BuffType.OnFire],
@@ -56,6 +58,7 @@ const VANILLA_TO_BUFFTYPE: ReadonlyMap<number, BuffType> = new Map([
   [69, BuffType.Ichor],
   [70, BuffType.Venom],
   [120, BuffType.Stinky],
+  [137, BuffType.Slimed],
   [323, BuffType.OnFire3],
   [324, BuffType.Frostburn2],
 ]);

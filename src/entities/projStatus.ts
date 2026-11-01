@@ -356,17 +356,20 @@ export function applyMeleeImbue(
   //  曾只闸 dontTakeDamage,ImmuneToAll 37 键名 NPC 经浸剂照吃 debuff,最终清零补。
   //  时长掷保持在闸前=原版"掷后 AddBuff 拒"同拍,RNG 消耗不变）
   if (has(BuffType.ImbueVenom)) {
-    const v = 5 + Math.random() * 5;
+    // ★BJ739 B17（2026-10-31）：整数秒化——Projectile.cs:11202-11224
+    //  `nPC.AddBuff(N, 60 * Main.rand.Next(a,b))` 右端不含 → {5..9}/{3..6}/
+    //  {10..19}/{1..3} 离散整数秒（旧连续秒均值长 0.5s,issue#29 B17）
+    const v = 5 + Math.floor(Math.random() * 5);
     if (debuffWriteAllowed(enemy, 70)) max('venomT', v);
     // 1457 StatusNPC :11201-11204：毒液浸剂命中伴发 AddBuff(395 PotentAcid, 60t=1s)
     if (debuffWriteAllowed(enemy, 395)) max('potentAcidT', 1);
   }
-  if (has(BuffType.ImbueCursed)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(enemy, 39)) max('cursedT', v); }
-  if (has(BuffType.ImbueFire)) { const v = 3 + Math.random() * 4; if (debuffWriteAllowed(enemy, 24)) max('onFireT', v); }
+  if (has(BuffType.ImbueCursed)) { const v = 3 + Math.floor(Math.random() * 4); if (debuffWriteAllowed(enemy, 39)) max('cursedT', v); }
+  if (has(BuffType.ImbueFire)) { const v = 3 + Math.floor(Math.random() * 4); if (debuffWriteAllowed(enemy, 24)) max('onFireT', v); }
   if (has(BuffType.ImbueGold) && debuffWriteAllowed(enemy, 72)) max('midasT', 2);
-  if (has(BuffType.ImbueIchor)) { const v = 10 + Math.random() * 10; if (debuffWriteAllowed(enemy, 69)) max('ichorT', v); }
-  if (has(BuffType.ImbueNano)) { const v = 1 + Math.random() * 3; if (debuffWriteAllowed(enemy, 31)) max('confusedT', v); }
-  if (has(BuffType.ImbuePoison)) { const v = 5 + Math.random() * 5; if (debuffWriteAllowed(enemy, 20)) max('poisonT', v); }
+  if (has(BuffType.ImbueIchor)) { const v = 10 + Math.floor(Math.random() * 10); if (debuffWriteAllowed(enemy, 69)) max('ichorT', v); }
+  if (has(BuffType.ImbueNano)) { const v = 1 + Math.floor(Math.random() * 3); if (debuffWriteAllowed(enemy, 31)) max('confusedT', v); }
+  if (has(BuffType.ImbuePoison)) { const v = 5 + Math.floor(Math.random() * 5); if (debuffWriteAllowed(enemy, 20)) max('poisonT', v); }
   if (has(BuffType.ImbueParty)) partyFx?.();
 }
 

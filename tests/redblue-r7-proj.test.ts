@@ -161,8 +161,8 @@ describe('R7-05 life 递减在子步末', () => {
 // R7-10/11 AI_029 宝石法珠 homing 形状（:38580-38601）
 // ---------------------------------------------------------------------------
 describe('R7-10/11 AI_029 homing', () => {
-  it('R7-11 近距低速转向 = (prox×0.1+0.01+0.05)×Remap(sp,1,3,10,1) 整项乘', () => {
-    // 竖直下飞 v=(0,1)（sp=1<8 提速档）,敌在正右视距内（496<500）
+  it('R7-11 近距低速转向 = (prox×0.1+0.01+0.05)×Remap(sp0,1,3,10,1) 整项乘（A36 num13=加速前）', () => {
+    // 竖直下飞 v=(0,1)（sp0=1<8 提速档）,敌在正右视距内（496<500）
     const e = mkEnemy(1, 988, 800);            // 盒心(996,808)
     const g = makeHooks([e]);
     const a = new Arrow(492, 792, 0, 1, 30, 2, 125, { grav: 0, life: 300 });
@@ -170,8 +170,12 @@ describe('R7-10/11 AI_029 homing', () => {
     a.fixedUpdate(1 / 60, g.hooks);
     const dist = Math.hypot(996 - 497, 808 - 797);   // 弹心(497,797) 125=10×10
     const prox = Math.max(0, 1 - dist / 500);
-    const sp = 1.21;                            // 提速 (1+0.1)×1.1
-    const turn = (prox * 0.1 + 0.01 + 0.05) * Math.max(1, Math.min(10, 10 - (sp - 1) * 4.5));
+    // ★BJ748（BJ746 A36 尾迹收口,2026-11-01）：转向门 Remap 读 num13=【加速前】
+    //  快照 sp0（:38576 先读、:38578-84 才 +0.1×1.1;旧测用提速后 1.21 → Remap
+    //  9.055 恰差一档）。旋转向量长仍=加速后终值（rotateTowards 保长）。
+    const sp0 = 1;                              // num13=加速前 |v|
+    const sp = 1.21;                            // 提速 (1+0.1)×1.1 终值
+    const turn = (prox * 0.1 + 0.01 + 0.05) * Math.max(1, Math.min(10, 10 - (sp0 - 1) * 4.5));
     const nv = Math.PI / 2 - turn;              // diff=want−cur<−turn → 钳到 −turn
     expect(a.vx).toBeCloseTo(Math.cos(nv) * sp, 3);
     expect(a.vy).toBeCloseTo(Math.sin(nv) * sp, 3);

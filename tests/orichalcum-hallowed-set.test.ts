@@ -61,7 +61,7 @@ function gameStub(p: Player): {
 function fakeHooks(w: World, p?: Player): Record<string, unknown> {
   return {
     world: w, player: p ?? null,
-    enemies: () => [], critters: () => [], projectiles: [],
+    enemies: () => [], critters: () => [], projectiles: () => [],   // ★BJ744 改判史：G36-A BJ740-D2 清偿线 Player.ts:5159 读 game.projectiles?.()（GameHooks 契约=方法,旧数组形夹具炸 is not a function）
     spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
     cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
     spawnParticles: () => {}, notifyInventoryChanged: () => {},

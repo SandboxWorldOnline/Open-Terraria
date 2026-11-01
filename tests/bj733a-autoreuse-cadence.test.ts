@@ -90,14 +90,15 @@ describe('BJ733-A 铜短剑自动连发节拍', () => {
     expect(c?.shoot).toBe(938);
   });
 
-  it('② 开连发:600 拍持按戳数 ∈[40,60]（13 拍/戳档,4.6/s——原版同节拍）', () => {
+  it('② 开连发:600 拍持按戳数 ∈[44,48]（13 拍/戳档,4.6/s——原版同节拍）', () => {
     options.data.autoReuseAllItems = true;
     const { drive, count } = stubGame();
     drive(600);
     const n = count();
-    // 13 拍/戳 → 600/13≈46;容差吸收首戳沿与实现性 ±1 拍差
-    expect(n, `600 拍实测 ${n} 戳,13 拍档预期 ≈46`).toBeGreaterThanOrEqual(40);
-    expect(n).toBeLessThanOrEqual(60);
+    // 13 拍/戳 → 600/13≈46;★BJ742-A（R24 收紧 [40,60]→[44,48]）:±2 容差吸收
+    // 首戳沿与实现性 ±1 拍差——旧 [40,60] 宽容 14 戳=连发节拍劣化 30% 不报警
+    expect(n, `600 拍实测 ${n} 戳,13 拍档预期 ≈46`).toBeGreaterThanOrEqual(44);
+    expect(n).toBeLessThanOrEqual(48);
   });
 
   it('③ 关连发:持按=恰 1 戳（fresh-click 门——原版 autoReuse=false 逐点语义）', () => {

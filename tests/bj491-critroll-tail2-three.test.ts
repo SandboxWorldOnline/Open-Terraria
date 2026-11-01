@@ -227,7 +227,7 @@ describe('BJ491-②：MinionProj contact() hitCritters projId 穿线（BJ490③/
 
 // ============ ③ armorpen 站数现役形（BJ184 网守卫面不动） ============
 
-describe('BJ491-③：armorpen 站数钉现役形（WhipProj 2/MinionProj 4,逐站身份锁）', () => {
+describe('BJ491-③：armorpen 站数钉现役形（WhipProj 2/MinionProj 5,逐站身份锁）', () => {
   const READ = /\b(?:eq|equipStats\??)\.armorPen\b/g;
 
   it('3a WhipProj 2 站身份锁：:851 敌怪环 hurt 参 + Y2 城镇 settle flatPen（均 ?? 0 卫）', () => {
@@ -243,7 +243,7 @@ describe('BJ491-③：armorpen 站数钉现役形（WhipProj 2/MinionProj 4,逐�
     }
   });
 
-  it('3b MinionProj 4 站身份锁：4×两源站（contact 敌怪环/946 城镇/ai156Strike/contactTown,玩家 AP+弹幕 AP）', () => {
+  it('3b MinionProj 5 站身份锁：4×两源站（contact 敌怪环/946 城镇/ai156Strike/contactTown,玩家 AP+弹幕 AP）+ownerArmorPenOf 单源 helper', () => {
     const src = stripComments(SRC('entities/MinionProj.ts'));
     const hits = [...src.matchAll(READ)];
     // ★BJ703-F 钉勘误（2026-10-21,存量红分诊=钉陈旧非回归）：5→4——BJ684 批
@@ -251,19 +251,23 @@ describe('BJ491-③：armorpen 站数钉现役形（WhipProj 2/MinionProj 4,逐�
     //  ai156Strike 共享结算体 :5162;BJ703-D4（2026-10-21）把 946 城镇臂 flatPen 同改
     //  两源 :4960。四站全两源（StrikeNPC :12068 玩家 AP+:12852 弹幕 AP 原序——
     //  contact 敌怪环 :7689 旧批已两源）。守卫面（?? 紧随）逐站复核全绿。
-    expect(hits.length).toBe(4);                          // 站数=现役钉
+    // ★BJ748（2026-11-01,终验尾迹收口）4→5：G39-A ⑦D6（bj745a D6）新增
+    //  ownerArmorPenOf 单源 helper :120——玩家 owned 弹 spawn 穿甲注入（:12852/
+    //  :13684-86,10 处 new Arrow spawn 消费）的第 5 站,单源玩家池读（无弹幕 AP
+    //  伴读,非两源站族）。守卫形已对齐 playerArmorPenOf（闸同绿）。
+    expect(hits.length).toBe(5);                          // 站数=现役钉
     // 两源站 4：:7689 contact 敌怪环 / :4960 946 城镇 flatPen / :5162 ai156Strike /
     //   :7789 contactTown——伴读 projectileData().armorPenetration 不入 READ 闸
-    //   =equipStats 源只记 1 次
+    //   =equipStats 源只记 1 次（helper 站无伴读,计数不动）
     expect(src.match(/\+ \(projectileData\(this\.projId\)\?\.armorPenetration \?\? 0\)/g)?.length).toBe(4);
     for (const m of hits) {
       expect(/^\s*\?\?/.test(src.slice((m.index ?? 0) + m[0].length)), m[0]).toBe(true);
     }
   });
 
-  it('3c 钉值对拍：armorpen 网 FILES 钉=本文件身份锁（2/4,漂移互证）', () => {
+  it('3c 钉值对拍：armorpen 网 FILES 钉=本文件身份锁（2/5,漂移互证）', () => {
     const guard = TST('armorpen-stub-nan-guard.test.ts');
     expect(guard).toContain("['src/entities/WhipProj.ts', 2]");
-    expect(guard).toContain("['src/entities/MinionProj.ts', 4]");
+    expect(guard).toContain("['src/entities/MinionProj.ts', 5]");
   });
 });

@@ -10,7 +10,7 @@
 //     弹伤 = 源弹基伤（非防后实扣 dealt）,AI 不改伤 ⇒ hurt 实参 ≡ 构造伤。
 // 既有覆盖：spectre-stellar-procs.test.ts（门族/EU 子步/预热/触敌即亡/重选转向）。
 // 本文件补三面（吸取归谁/无递归/伤害归因）+ Forbidden 引擎回归位。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ748：vi=DV 0.5 中性档（A26 随刀补 mock）
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -61,6 +61,10 @@ function makeHooks(enemies: unknown[], player?: Player): {
 
 describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无治疗支）', () => {
   it('★伤害归谁：浮魂弹命中敌 → 敌侧吃构造基伤;玩家侧零回复/零 lifeSteal/零治疗弹', () => {
+    // ★BJ748（A26 尾迹收口）：BJ746 A26 给 356 敌臂补 DamageVar（:12970 每靶一掷）
+    //  后本断言面进随机域（实收 33±15% 逐跑漂移）——按 BJ723-B 判例补 0.5 中性档
+    //  （tier=floor(0.5×31)−15=0 ⇒ ×1.00 恒等）,锁语义仍=「hurt 实参 ≡ 构造基伤」。
+    const rnd748 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const p = new Player(40 * 16, 60 * 16, new Inventory());
     p.lifeSteal = 80;                                 // 预算满仓——若误接吸血链必被消费
     const enemy = mkEnemy(1, 41 * 16, 58 * 16);       // 与浮魂弹盒重叠
@@ -76,6 +80,7 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     const heals = added.filter((a) => (a as { projType?: number }).projType === 298
       || (a as { projId?: number }).projId === 298);
     expect(heals.length).toBe(0);                     // 零治疗弹（aiStyle 52 链零交集）
+    rnd748.mockRestore();
   });
   it('★无递归（flag10 aiStyle!=59 :13712）：ghostHurt 套装在场 → 356 命中不再产 356', () => {
     // equipStats 为只读 getter——旗标用裸形玩家注（spectre-stellar-procs 同式）
@@ -95,6 +100,8 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     expect(added.length).toBe(0);                     // ★零新浮魂弹（递归禁面）
   });
   it('伤害归因逐值：AI 子步不改伤——非 33 基伤构造 → hurt 实参逐拍恒基伤', () => {
+    // ★BJ748：同上——A26 DV 接入后 0.5 中性档（恒等掷）保「恒基伤」锁面。
+    const rnd748 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const p = new Player(40 * 16, 60 * 16, new Inventory());
     const enemy = mkEnemy(1, 41 * 16, 58 * 16);
     const { hooks } = makeHooks([enemy], p);
@@ -102,5 +109,6 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     (orb as unknown as { ai1: number }).ai1 = 60;
     orb.fixedUpdate(1 / 60, hooks);
     expect(enemy.hits).toEqual([57]);
+    rnd748.mockRestore();
   });
 });

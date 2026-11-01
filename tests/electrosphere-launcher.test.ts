@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
 import { Arrow } from '../src/entities/Arrow';
 import { ElectroSphereProj, ELECTROSPHERE_LIFE, ELECTROSPHERE_IFRAMES } from '../src/entities/ElectroSphereProj';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { TileStore } from '../src/world/TileStore';
 import { resolveAmmoProjId, forceGunProjId } from '../src/data/vanillaItemCombat';
 import type { GameHooks } from '../src/entities/types';
@@ -213,7 +214,11 @@ describe('443 电球（aiStyle 77 :31192-31285）', () => {
     const s = new ElectroSphereProj(1592, 1604, 40);   // 压敌心
     s.fixedUpdate(1 / 60, g);
     expect(taken.length).toBe(1);
-    expect(taken[0].d).toBe(40);
+    // ★G37-A（D6,2026-10-31）改判史：443 敌臂补 DV :12970 逐靶掷（BJ729-A 登记债
+    //  清偿）→ 旧平值钉 40 改 31 档 DV 域锁（bj735a 判例形,luck=0 单掷域）。
+    const dvDomain443 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain443.add(damageVarRoll(40, 0, () => i / 31));
+    expect(dvDomain443.has(taken[0].d)).toBe(true);
     expect(foe.iframes).toBe(ELECTROSPHERE_IFRAMES);
     for (let t = 0; t < 8; t++) {
       foe.iframes = Math.max(0, (foe.iframes ?? 0) - 1);    // Enemy.update :1704 递减

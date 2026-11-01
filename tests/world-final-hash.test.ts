@@ -69,6 +69,20 @@
 //   改判史——非回归,随流漂移的合法终态）。x86 槽链末锚认证未随本批重跑
 //   （rig 源不在此会话）,登记债:下批 worldgen 落刀前以 oracle 复跑八通道
 //   认证后再动刀。
+//
+// ── ★G38-A 认证复跑（2026-10-31,BJ731 D2 债清偿）——【RED,worldgen 刀禁动】──
+//   tools/_iii153fin（SW_I153_SLOT=105_Final_Cleanup,SW_MB_1457=1,9293480/E0）
+//   vs ~/GoldenChains/golden-g（x86 线,Dunes T=1796788972 指纹核验）:
+//   **八通道 RED total=525152**（dA=135083/dT=172445/dW=125317/dL=26400/
+//   dHf=8003/dSl=39211/dLt=18693/dIa=0,首差 (2428,61) vanilla 空 vs JS 云+水）。
+//   mile8 槽链定位:槽 0-52 零差（含 052_Shell_Piles）,首差=**053_Smooth_World**
+//   （JS 槽末#13·半砖平滑:A=5132/T=4447/Sl=35980/Hf=7208,slope 重灾+云格存在性
+//   差,后续墙差异自 056 起爆 W=68593）——与 BJ731「仪式谓词移位=主源」归因不符
+//   （仪式位 pass 远后于 53）,证据指向 BJ548/IIII99d 帧派发族与 Piles/tileSolid
+//   域改动（G38-D1）。连带:drunk 5162020 rig 实测喷泉 16 格≠SW 0（BJ731 云腿
+//   判死论被证伪,Piles 尾 cs:19608-19619 复原块漏读,详见 drunk-world-gen.test.ts
+//   G38-A 注）。本批金标维持 SW 现值锁（在途金标禁重冻）;流归位（053 首差收敛）
+//   后须重跑本认证,全绿前 worldgen 落刀冻结。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

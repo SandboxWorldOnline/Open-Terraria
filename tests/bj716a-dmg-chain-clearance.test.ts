@@ -262,8 +262,12 @@ describe('§5 R18-F2 DamageVar 首掷（:12970 ±15%,31 档离散）', () => {
     // ★BJ730 改判史：旧值 4（BJ716-A 时点 Dart 四点:trap 双支/blast 直击/烟花直击）→
     //  新值 8——BJ727-A C-D4（2026-10-27,炮弹/兔爆/烟花 Kill 爆城镇臂 hitTownNpcsAoeBox
     //  两掷点）+ BJ729-A B25（friendly 接触面 critter/城镇臂接线两掷点）DV 接面合法扩容。
-    //  锁语义不变:Dart 伤害面 DV 首掷全覆盖计数（防回退漏掷）。
-    expect(dart.split('damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)').length - 1).toBe(8);
+    //  ★G37-A 改判（2026-10-31 D6 trap 域）：六站 luck 正向裸式 → TRAP_TYPE_KINDS 三元式
+    //  （trap 型 luck=0 假臂 :12970）——裸式计数 8→2,三元式 4;锁语义不变（DV 首掷全覆盖
+    //  防回退漏掷,两式并计）。★BJ741-A 复核（2026-10-31）：本刀 blast crit 收编未动 DV 面,
+    //  计数随刀复核钉现值。
+    expect(dart.split('damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)').length - 1).toBe(2);
+    expect(dart.split('damageVarRoll(this.damage, TRAP_TYPE_KINDS.has(this.kind) ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))').length - 1).toBe(4);
   });
 });
 

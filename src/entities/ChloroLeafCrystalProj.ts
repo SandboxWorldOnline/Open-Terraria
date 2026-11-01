@@ -44,9 +44,10 @@
 //     尾参 stopAfterFirstHit 启用,不再重叠多怪同拍各吃 100。
 //   · bug③ type17 载荷色相链：producer 三段式全文前移到广播载荷（详见 orchestraFx.
 //     leafTrailInfoByte 注）——UniqueInfoPiece 存【变换后】H 的截断字节,两端同一字节面。
-//   · 疑① 出手坐标：NewProjectile 形参=position(top-left)（aiStyle42 :28253）——实际中心=
-//     top-left+(w/2,h/2)=锚中心+(+3,+7);换算归 Game.spawnChloroLeafShot（调用侧形参已是
-//     Center.X−4f/Center.Y 字面,不另改）。
+//   · 疑① 出手坐标（★BJ746 改判史：A38,2026-11-01 定谳=δA 批误读翻案）：NewProjectile
+//     :10878-79 `position=(X,Y)−size/2`——形参=【中心】非 top-left（δA 批误读后曾在
+//     Game 侧 +SIZE/2 回补 ⇒ 中心偏 (+7,+7),issue#35 A38 实报 503/447 vs 原 496/440）;
+//     现 Game.spawnChloroLeafShot 直传中心,ctor 中心语义。
 //   · 疑③ 边界裕量：P.cs:16787 position≤leftWorld(0)/+width≥rightWorld(=tiles×16,
 //     Main.cs:1080-1086) 原值判定——±16px 内缩自造裕量退役。
 //   · 疑② （未修,登记）game.enemies() 平铺桶含蠕虫段体 vs 原版整虫一个 npc index——
@@ -69,8 +70,8 @@ export const CHLORO_LEAF_DAMAGE = 100;
 /** Player.crystalLeafKB static 初值（Player.cs:823） */
 export const CHLORO_LEAF_KB = 10;
 
-/** 叶弹 227 SetDefaults 盒宽/高（:3131-32 width=14/height=14——NewProjectile top-left
- *  → 中心换算用,Game.spawnChloroLeafShot 消费） */
+/** 叶弹 227 SetDefaults 盒宽/高（:3131-32 width=14/height=14——NewProjectile 中心
+ *  语义下的盒尺寸,Game.spawnChloroLeafShot 消费） */
 export const CHLORO_LEAF_SHOT_SIZE = 14;
 
 /** 锚体每拍出手后的冷却窗（aiStyle42 :28254 crystalLeafCooldown=40——递减位在
@@ -292,8 +293,8 @@ export class ChloroLeafShot extends Entity {
   /** usesLocalNPCImmunity 表（penetrate=1 单发窗——dealContacts cooldown=−1 每敌一次） */
   private readonly hitCd = new HitCdImpl();
 
-  /** 入参=弹体中心（Game.spawnChloroLeafShot 已按 NewProjectile position(top-left) 形参
-   *  换算 top-left+(w/2,h/2)=锚中心+(+3,+7)——δA 疑①；构造器保持中心语义） */
+  /** 入参=弹体中心（NewProjectile :10878-79 中心语义——★BJ746 A38 勘正 δA 疑①的
+   *  top-left 误读：原版第 2/3 参即中心,无 +7/+7 换算;Game.spawnChloroLeafShot 直传） */
   constructor(cx: number, cy: number, vx: number, vy: number, damage = CHLORO_LEAF_DAMAGE,
     knockback = CHLORO_LEAF_KB) {
     super();

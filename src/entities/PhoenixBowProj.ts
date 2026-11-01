@@ -37,8 +37,9 @@ import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
 import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
-import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B18）：城镇 voodoo 靶
-import { rollVanillaHitCrit } from './proj1457';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A（D1 B18）：城镇 voodoo 靶;★G37-A（D7）：critter 臂
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
 // ★BJ704-G2（2026-10-21,债① 706 员）：残影环接线——706 TrailingMode=0/CacheLen 10
 //  （ProjectileID.cs:385/:387）,通用表 P(9,0,-2,0.5)（Main.cs:31055-31061）+B,G,A/=i
 //  色支（:31273-31278;GetAlpha :80830-80833 afade 面已随本刀入 GHOST_TINT[706]）。
@@ -487,8 +488,8 @@ export class PhoenixBolt extends Entity {
       //  分数域读 → random()<14 恒真 = 100% 暴击病。改 owner 装配口径（706 ranged 旗,
       //  rollVanillaHitCrit:12915-12927——基 4+rangedCrit 聚合+:25712 持械折入
       //  （命中拍动态;静态冻结载体退役）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = Math.round(this.damage);   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.round(damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★S02:crit ×2=Enemy.hurt 防后;★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）
       // ★F3 接线（蓝队四轮）：凤凰弹 706 数据面 ranged（SetDefaults :7462-7473）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -511,10 +512,16 @@ export class PhoenixBolt extends Entity {
     if (hitTownNpcs(this, game, Math.round(this.damage),
       Math.sign(this.vx) * this.knockback, 'playerProj', this.projId,
       undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn706) => ({ dmg: Math.round(damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn706, this.critChance > 0),
         penPercent: this.armorPen }))) {
       this.damage = Math.trunc(this.damage * 0.95);      // 穿透衰减（受理同相）
     }
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小动物
+    //  同链（706 非 minion/sentry → CanNPCBeHit :20675 放行）;penetrate=-1 穿透弹
+    //  → hitCrittersAll 多靶全结算（受理数入账;localNPCHitCooldown=10t 窗对 critter
+    //  由 Enemy.hurt iframes 近似承载=同族 D3 口径）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game);
   }
 
   /** 盒 vs 实心块（Collision.TileCollision 近似：盒覆盖格任一实心即撞） */

@@ -276,7 +276,7 @@ describe('饥饿链（UpdateHungerBuffs :11686 + UpdateStarvingState :11743）',
     expect(b.active.has(BuffType.NeutralHunger)).toBe(false);
   });
 
-  it('链尾转移：332 剩 ≤2t → 333（emote 147）；333 → 334（5t + emote 148 + 音）；334 尽 → 重播 332', () => {
+  it('链尾转移：332 剩 ≤2t → 333（emote 147）；333 → 334（5t + emote 148 + 音）；334 持续到食物重置（★BJ739 B02 改判）', () => {
     const b = new BuffState();
     b.dontStarveWorld = true;
     const events: string[] = [];
@@ -291,12 +291,18 @@ describe('饥饿链（UpdateHungerBuffs :11686 + UpdateStarvingState :11743）',
     b.tick(1 / 60);
     expect(b.has(BuffType.Starving)).toBe(true);
     expect(events).toContain('starving');
-    // 334 5t 走完 → 重播 332（updateStarvingState）
+    // ★BJ739 B02（2026-10-31,issue #29）：334 在 TimeLeftDoesNotDecrease 表
+    //  （BuffID.cs:22 + Player.cs:9958）——5t 不自减,极饿持续到食物/蘑菇重置,
+    //  旧「334 尽 → 重播 332」循环重启系缺递减门时期的近似,随刀改判
     b.tick(5 / 60);
+    expect(b.has(BuffType.Starving)).toBe(true);            // 持续（时长钉 5t 不动）
+    expect(b.active.get(BuffType.Starving)).toBeCloseTo(5 / 60, 9);
+    b.tick(10);
+    expect(b.has(BuffType.Starving)).toBe(true);            // 长期持续
+    expect(b.has(BuffType.NeutralHunger)).toBe(false);      // 不重播 332
+    // 食物重置才清（TryToResetHungerToNeutral → 下拍 332）
+    b.apply(BuffType.WellFed, 60);
     expect(b.has(BuffType.Starving)).toBe(false);
-    b.tick(1 / 60);
-    expect(b.has(BuffType.NeutralHunger)).toBe(true);
-    expect(events).toContain('neutral');
   });
 
   it('吃食物清饥饿链（IsFedState 换档删旧 :5080-5089）：apply(26) 删 332/333/334', () => {

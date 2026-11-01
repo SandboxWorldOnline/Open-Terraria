@@ -21,7 +21,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★刀4-A:弹命中 NPC 修正链
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
-import { playerCanHitEnemy, applyBannerDamageDealt, expertEowFifthDmg, hitCritters, hitCrittersAll, statusPlayer } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）
+import { playerCanHitEnemy, applyBannerDamageDealt, expertEowFifthDmg, hitCritters, hitCrittersAll, statusPlayer, resolveProjClass, IS_A_WHIP_PROJS } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）;★BJ741 R19-1：resolveProjClass/IS_A_WHIP_PROJS（nano 门 :13688 (melee||IsAWhip)）
 // ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
 // ★BJ420 幽灵伤害头 ghostHurt 同单源 + 受理面快照（清偿刀 T 族规）
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt,
@@ -30,7 +30,11 @@ import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424 星云套装
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
-import { applyProjStatus } from './projStatus';
+import { applyProjStatus, applyMeleeImbue } from './projStatus';   // ★BJ741 R19-1：applyMeleeImbue（StatusNPC :11197-11228 浸剂 debuff 面）
+// ★BJ741 R19-1：confetti 真弹 289（meleeEnchant==7，Projectile.cs:13693-96 nano 同支）
+// ——meleeOnHitProjs→Arrow→proj1457 函数声明环=运行时调用安全（本文件 :43 Arrow 先例同款;
+// ConfettiBurstProj 仅在 dealContacts 体内 new=求值期零引用）
+import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { Lang } from '../i18n/Lang';   // ★BJ674 自伤死因弹型名（itemName 6155）
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
@@ -303,7 +307,7 @@ interface HitTarget {
   x: number; y: number; w: number; h: number;
   id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number, nanoMul?: number) => boolean;   // ★BJ741 R19-1：nanoMul 尾参（Enemy.hurt 第 11 参,BJ739 B19 通道）
 }
 
 /** CanHitWithMeleeWeapon LOS 段单源（Projectile.cs:12420-12425）：A 段整盒
@@ -382,6 +386,37 @@ export function rollVanillaHitCrit(
   //  带 bonus 生产者仅 698/2269 弹,均无子弹;仓内无 bonusCritChance 字段）=登记不接线。
   const num13 = bonusCritChance > 0 ? bonusCritChance : 0;
   return Math.random() < 0.04 + (agg + heldBonus + num13) / 100;
+}
+
+/** ★G37-A（D5+D6,2026-10-31）爆面/接触面 crit 段完整单源——rollVanillaHitCrit 姊妹位：
+ *  类掷（:12915-12927）+ TimerCrit 消费（:12928）各自独立求值后 ||（懒惰链双病判例
+ *  Arrow.ts 主环 BJ496③——已掷中 crit 也照消费：charge 置 −15+NightsEdge 编排照发,
+ *  `rollCrit || tryConsuming` 短路会吞消费面）。victim = 受害靶 hitbox（敌怪/城镇/
+ *  critter 同形 {x,y,w,h}）;传 victim 即代表本面为 ownedBySomeone 弹的 Damage()
+ *  结算位（接触逐拍或 Kill 重跑 Resize+Damage(),全走 Damage_PVE_Inner 同一 crit 段）。
+ *  ★flagless 弹（162/281/606/908/612 族）类掷零 RNG 但 TimerCrit 照消费（:12928 在
+ *  ownedBySomeone 块内三类掷臂外=无条件段,亲读）;★trap 弹（OwnedBySomeone=false
+ *  :580-588）整 crit 块跳过=零掷零消费——调用侧对 trap 族勿传 victim（Dart 直击环
+ *  trap kinds 保持 crit=false 旧形）。消费 RNG 面=仅 charge 满足拍（20×NextFloat 尘,
+ *  Player.tryConsumingTimerCrit 内门）,与原版逐位同相。
+ *  ★classRollEnabled=仓内「关断钉」通道（critChance≤0 测试钉,Solution 缺省 0 族）:
+ *  false 时跳过【类掷】但 TimerCrit 消费照达——critChance 是仓内路由门非原版面,
+ *  :12928 无条件段不受其限（BJ729-A 起 Solution/Celeb2/TrapShot 城镇臂既有形=
+ *  `gated roll || ungated timerCrit`,本单源同语义;Arrow 主环 :11386 同形）。 */
+export function rollVanillaHitCritConsumeTimer(
+  projId: number,
+  game: GameHooks,
+  victim: { x: number; y: number; w: number; h: number },
+  classRollEnabled = true,
+  bonusCritChance = 0,
+  classOverride?: 'melee' | 'ranged' | 'magic' | 'summon',
+): boolean {
+  const rollCrit = classRollEnabled
+    && rollVanillaHitCrit(projId, game, bonusCritChance, classOverride);
+  const timerCrit = (game.player as unknown as
+    { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
+    | null)?.tryConsumingTimerCrit?.(game, victim.x, victim.y, victim.w, victim.h) ?? false;
+  return rollCrit || timerCrit;
 }
 
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。
@@ -533,8 +568,8 @@ export function dealContacts(
     //   （原版序：DamageVar(:12970;★SW-AB1 2026-09-04 引注校准:旧 1456 锚 :12959) → …→ banner(:13388) → armorPen 弹侧 :13685
     //   `dmg += targetNPC.checkArmorPenetration(num6, armorPenetrationPercent)`（SW-AJ1 2026-09-05 校准,旧 :13679 系 type22 kb 向支）在
     //   banner 后 ⇒ 不吃旗乘——armorPen 独立参传，此处序一致）。
-    //   crit 翻倍沿用仓内调用侧预倍惯例（与 Enemy.hurt 内 (int)Math.Max(1,×2)
-    //   截断式同值）。
+    //   ★BJ741 R19-8：旧注「crit 翻倍沿用仓内调用侧预倍惯例」系陈旧语——S02(BJ723-B)
+    //   起 ×2 统一在 Enemy.hurt 防后（NPC.cs:82067 两步式）,本面传未翻倍 dmg+crit 旗。
     let dmg = damageVarRoll(self.damage,
       ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
     // ★BJ286：per-target 伤害调整尾参（Projectile.Damage 段内逐型算式的挂点——
@@ -566,11 +601,60 @@ export function dealContacts(
         targeterBox: { x: self.x, y: self.y, w: self.w, h: self.h },
       });
     if (snapBonus1457 > 0) dmg += snapBonus1457;   // ★S02:snap 随整体进 hurt 吃防后 ×2
+    // ★BJ741 R19-1（2026-10-31）：nano ×1.05 + 浸剂 debuff 面 + confetti 289——
+    //  Damage_PVE_Inner 的 (melee||IsAWhip) 块整缺（Projectile.cs:13688-13696：meleeEnchant
+    //  ==6 → dmg=(int)(dmg×1.05)（GetNanoFlaskDamageBoost,Player.cs:44788-90）;==7 →
+    //  NewProjectile(289, target.Center, target.velocity)）+ StatusNPC :11197-11228
+    //  浸剂 debuff 块（applyMeleeImbue 单源,ImmuneToAll 闸内建）。位序=原版
+    //  StatusNPC(:13634)→armorPen(:13685)→nano/confetti(:13688-96)→StrikeNPC(:13702)
+    //  ——浸剂施加在 hurt【前】=首轮命中即吃 ichor(+15) 穿甲池（α-H6/A5「ichor 池反例」
+    //  同款定谳,WeaponProj.hitEnemies 先例）;nanoMul 经 Enemy.hurt 第 11 参在 penAdd
+    //  并入后施加（BJ739 B19 通道,勿在调用侧预乘——会漏穿甲池进乘区）。
+    //  门 = resolveProjClass(self)（projClass 实例覆写→数据面→meleeProj 旧旗）∨
+    //  IS_A_WHIP_PROJS——482(magic)/567-568/227 等非 melee 消费面天然排除。
+    const meleeGate741 = resolveProjClass(self as unknown as Parameters<typeof resolveProjClass>[0]) === 'melee'
+      || IS_A_WHIP_PROJS.has(self.projId);
+    // ★BJ745 A15：裸 melee 旗门（甲虫弹幕加账 :13918 `melee &&` 不含 whip——
+    //  与上面 (melee||IsAWhip) 浸剂块分道）
+    const meleeGate741Raw = resolveProjClass(self as unknown as Parameters<typeof resolveProjClass>[0]) === 'melee';
+    const pl741 = game.player as unknown as
+      { buffs?: { has: (b: never) => boolean }; dead?: boolean } | null | undefined;
+    if (meleeGate741 && pl741?.buffs) {
+      applyMeleeImbue(pl741.buffs, ent as unknown as Record<string, number>,
+        () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
+          ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+      if (pl741.buffs.has(BuffType.ImbueParty as unknown as never)) {
+        game.spawnFriendlyProj?.(new ConfettiBurstProj(
+          (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+          (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+          (e as unknown as { vx?: number }).vx ?? 0,
+          (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });   // Z-F4 netSync：NewProjectile 内联 SendData(27)
+      }
+    }
+    const nanoMul741 = meleeGate741 && pl741?.buffs?.has(BuffType.ImbueNano as unknown as never) ? 1.05 : 1;
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
     //（免疫门已在上收编——被拒敌到不了此处;★勿改为消费 hurt 布尔返作拒收判别:
     //  其语义=击杀非命中,存活受击返 false 会把已结算面整段误杀,见上判别位选型备案）
-    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, hitPierce, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
+    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, hitPierce, true, 0, self.projId, nanoMul741);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709);★BJ741 nanoMul 尾参
+    // ★BJ745 A15（issue#35,2026-11-01）：甲虫攻套【近战弹】命中加账（Projectile.cs
+    //   :13918-13933——Damage_PVE 尾段,StrikeNPC :13702 之后）:`melee && beetleOffense
+    //   && !immortal → counter += num41×(orbs==0?3:orbs==1?2:1); countdown=0`。
+    //   num41=实扣=lastStrikeDealt;门=裸 melee 旗（whip 非 melee 不吃——:13688 的
+    //   (melee||IsAWhip) 是浸剂/彩纸块≠本面）;flag9=debug 假人翻转,常态恒 false。
+    //   挥击面（ApplyNPCOnHitEffects :44840 ×1）与 PvP 面既有两站不变
+    if (meleeGate741Raw && ((e as unknown as { immortal?: boolean }).immortal !== true)) {
+      const plB = game.player as unknown as {
+        __swBeetle?: import('../player/BeetleMeter').BeetleMeter;
+        beetleOrbs?: number;
+        equipStats?: { beetleOff?: boolean };
+      } | null | undefined;
+      if (plB?.equipStats?.beetleOff === true) {
+        plB.__swBeetle?.registerProjHit(
+          (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0,
+          true, plB.beetleOrbs ?? 0);
+      }
+    }
     // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
     applyProjStatus(self.projId, ent as unknown as Record<string, number>,
       { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
@@ -3680,7 +3764,15 @@ export class TitaniumStormShard extends Entity {
   private rot = Math.random() * Math.PI * 2;
   private frame = Math.floor(Math.random() * 12);
   private orbitAngle = 0;
+  /** ★BJ746 A14：timeLeft=3600（SetDefaults :8632）自然寿命计数 */
+  private timeLeft = 3600;
   private hitCd = new HitCdImpl();
+  /** ★G39-A（bj746a D5,2026-11-01）：drawLayer 3/4 动态切换（AI_175 :46174
+   *  `drawLayer = ((localAI[0] <= 0f) ? 3 : 4)`——localAI[0]=环绕向量 Y=sin(相位)：
+   *  ≤0 上半圈=3 BehindProjectiles（弹幕后/玩家前）,>0 下半圈=4 OverPlayers
+   *  （玩家后）。Renderer 弹幕分派读本位（PROJ_DRAW_OVER_PLAYERS 静态表外的
+   *  唯一动态员——CacheProjDraws Main.cs:38822-38838 分档）。 */
+  projOverPlayers = false;
 
   constructor(x: number, y: number, damage: number, knockback: number) {
     super();
@@ -3691,8 +3783,9 @@ export class TitaniumStormShard extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    const p = game.player as unknown as { cx: number; cy: number; dead: boolean;
-      buffs: { has(t: BuffType): boolean } };
+    const p = game.player as unknown as { cx: number; cy: number; x: number; y: number;
+      oldX?: number; oldY?: number; dead: boolean;
+      buffs: { has(t: BuffType): boolean }; miscCounterNormalized?: number };
     if (!p || p.dead || !p.buffs.has(BuffType.TitaniumStorm)) { this.dead = true; return; }
     this.t++;
     this.rot += Math.PI / 200;                                 // :46162
@@ -3701,17 +3794,41 @@ export class TitaniumStormShard extends Entity {
     const group = all.filter((q) => q && !q.dead && q.projId === 908);
     const index = Math.max(0, group.indexOf(this as unknown as { projId?: number; dead?: boolean }));
     const total = Math.max(1, group.length);
-    this.orbitAngle = (index / total + this.t / 60 * 6) * Math.PI * 2;
+    // ★BJ746 A12（issue#35,2026-11-01）：相位源改玩家全局 miscCounterNormalized
+    //  （:46166 `(index/total + player.miscCounterNormalized×6)×2π`——Player.cs:3373
+    //  `miscCounter/300f`,:29529-32 每 tick +1 环绕 300）＝全组同步且角速 2π/50
+    //  =0.12566/t。旧 `this.t/60×6`＝各片自身年龄驱动：①角速 5 倍（0.6283/t）；
+    //  ②不同出生时间的碎片相位失同步（vanilla 同拍全组同角）。t 保留仅作寿命计。
+    const phase = (p.miscCounterNormalized ?? 0) * 6;
+    this.orbitAngle = (index / total + phase) * Math.PI * 2;
     const radius = 24 + total * 6;                             // :46165
+    // ★BJ746 A12②：玩家位移补偿（:46168-69 `Center += player.position -
+    //  player.oldPosition`——Lerp 前先把本拍玩家位移整段贴到碎片上,保持相对偏移；
+    //  纯 Lerp 追绝对目标不等价＝玩家移动期相对滞后相位差,issue 实报）。
+    const pdx = (p.oldX ?? p.x), pdy = (p.oldY ?? p.y);
+    this.x += p.x - pdx; this.y += p.y - pdy;
     const tx = p.cx + Math.cos(this.orbitAngle) * radius;
     const ty = p.cy + Math.sin(this.orbitAngle) * radius * 0.05;
     this.x += (tx - this.w / 2 - this.x) * 0.3;                // Lerp 0.3（:46170）
     this.y += (ty - this.h / 2 - this.y) * 0.3;
+    // ★G39-A（bj746a D5）：localAI[0]=vector2.Y=sin(f)（:46172-46173）→
+    //  drawLayer 3/4 切换（:46174）——下半圈（sin>0）画玩家后。
+    this.projOverPlayers = Math.sin(this.orbitAngle) > 0;
     // ★BJ383 小动物命中面（BJ381 登记债清偿）：908 friendly penetrate=1（:8636）→
     //  critter 受击耗穿归零即亡（:14184 → :17312 Kill）。非 magic（SetDefaults
     //  :8628-8638 无 magic 行）→ 无幽灵兜帽吸血,不接 proc。
     if (hitCritters(this, game)) { this.dead = true; return; }
-    dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });   // penetrate=1
+    // ★BJ746 A13（issue#35）：908 penetrate=1 单发族（flag3）——①stopAfterFirstHit
+    //  =true（Damage_PVE :14190-96 penetrate 1→0 ⇒ keepIterating=false,同拍重叠
+    //  多怪只结算桶序首个,旧两敌各吃 50）;②hitPierce=1（:12635 flag3=maxPenetrate
+    //  ==1∧无局部/IDStatic 表 → :12636 全局 immune 门豁免——有全局免疫的靶照打,
+    //  旧被跳过）。同型先例=叶弹 227（ChloroLeafCrystalProj L3 批,dealContacts
+    //  尾参 1,true）。
+    dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; }, undefined, 1, true);
+    // ★BJ746 A14（issue#35）：SetDefaults timeLeft=3600（:8632）——通用寿命梯
+    //  :17307-17310 `timeLeft--; if(<=0) Kill()`（AI 后尾位）。旧无寿命面：持续
+    //  维持 buff 306 时老碎片永不自然消亡（buff 续期清理与 7 片上限不能替代）。
+    if (--this.timeLeft <= 0) this.dead = true;
   }
 
   draw(r: Renderer, _cam: Camera): void {

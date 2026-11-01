@@ -217,6 +217,11 @@ describe('R5-F13/F14/F15/F17 冲刺', () => {
     p.inv.armor[0] = { id: _iid(2763), stack: 1 };
     p.inv.armor[1] = { id: _iid(2764), stack: 1 };
     p.inv.armor[2] = { id: _iid(2765), stack: 1 };
+    // ★BJ744 改判史：BJ742 R20-1 日曜 dashType=3 补盾门（Player.cs:16549-16553
+    //  (solarShields>0)|(solarDashing&&dashDelay<0) 才 3）——0 盾裸套 dash=0（旧
+    //  Math.max 恒 3 白送面退役）。夹具改授满盾（=原版 Solar Flare 充能后可冲撞态,
+    //  bj742a S1 同 idiom）;settle 期 dashDelay==0 拍闩 dashLatched=eq.dash=3。
+    p.solarShields = 3;
     settle(p, w);
     expect(p.equipStats.dash).toBe(3);
     doubleTap(p, w);
@@ -652,6 +657,10 @@ describe('R5-F16 日曜冲撞', () => {
     p.inv.armor[0] = { id: _iid(2763), stack: 1 };
     p.inv.armor[1] = { id: _iid(2764), stack: 1 };
     p.inv.armor[2] = { id: _iid(2765), stack: 1 };
+    // ★BJ744 改判史：BJ742 R20-1 盾门（同 F13）——0 盾 settle 期 dashLatched 闩 0,
+    //  直注 dashDelay=-1 被 C5-B6 闩清臂拍内清零 → 冲撞扫敌门恒闭（hits=0 根因）。
+    //  授满盾 settle → 闩 3,直注滑行态照旧可达（夹具语义=充能后冲撞中拍）。
+    p.solarShields = 3;
     settle(p, w);
     const hits: number[] = [];
     const mkEnemy = (id: number): Record<string, unknown> => ({
@@ -668,7 +677,10 @@ describe('R5-F16 日曜冲撞', () => {
     p.dashDelay = -1;
     p.vx = 21.9;
     p.fixedUpdate(1 / 60, hooks as never);
-    expect(hits.length).toBe(2);                       // 同帧双目标（旧 break 只打 1 个）
+    // ★BJ748 改判史（终谳）:BJ746 A22 冲撞爆闪后=直击2+爆闪3(第一轮 e1,e2 各1+
+    //   第二轮 e2 再1——e2 非 I 轮直击靶 immune 恒0,:21348 只写直击靶)。打点序
+    //   direct,flare,flare,direct,flare 实证;原版同构 5 发。旧 2 为爆闪前期望。
+    expect(hits.length).toBe(5);
     expect(p.solarDashing).toBe(true);                 // 不终止（旧置 false）
     expect((e1 as { iframes: number }).iframes).toBe(6);   // :21348 immune=6
     // 敌 1 免疫帧内不再吃,敌 2 照吃
@@ -676,7 +688,9 @@ describe('R5-F16 日曜冲撞', () => {
     (e2 as { iframes: number }).iframes = 0;
     hits.length = 0;
     p.fixedUpdate(1 / 60, hooks as never);
-    expect(hits.length).toBe(1);
+    // ★BJ748 改判史（终谳,同上注）:第二拍=e2 直击1+爆闪1(e1 免疫拒两轮;e2 爆闪
+    //   时 immune 未写)——旧 1 为爆闪前期望
+    expect(hits.length).toBe(2);
   });
 });
 
@@ -729,6 +743,8 @@ describe('★B 冲撞面 AI_112 仙灵免疫门', () => {
     p.inv.armor[0] = { id: _iid(2763), stack: 1 };
     p.inv.armor[1] = { id: _iid(2764), stack: 1 };
     p.inv.armor[2] = { id: _iid(2765), stack: 1 };
+    // ★BJ744 改判史：BJ742 R20-1 盾门（同 F16 注）——授满盾 settle 保 dashLatched=3。
+    p.solarShields = 3;
     settle(p, w);
     const charged = mkFairyEnemy(21, p.x, p.y, true);
     const loose = mkFairyEnemy(22, p.x, p.y, false);
@@ -739,6 +755,9 @@ describe('★B 冲撞面 AI_112 仙灵免疫门', () => {
     p.dashDelay = -1;
     p.vx = 21.9;
     p.fixedUpdate(1 / 60, hooks);
-    expect(hits.length).toBe(1);                        // 仅前态仙灵
+    // ★BJ748 改判史（终谳,同 F16 注）:A22 爆闪后=loose 直击1+爆闪2(charged1+loose1
+    //   ——608 弹面无仙灵充能门,原版 Damage_PVE 同构只走 friendly/免疫门)。
+    //   旧 1 为爆闪前期望(直击单发)。
+    expect(hits.length).toBe(3);
   });
 });

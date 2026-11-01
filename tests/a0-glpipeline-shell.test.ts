@@ -54,8 +54,13 @@ describe('A0 GLPipeline 管线壳', () => {
     // ★mod screenFx 动工（2026-10-12）：mods/hooks.ts 第七消费方——mod 全屏后处理
     //   契约面（ModScreenFxExec 签名类型引用,纯 type import 零运行时边）;
     //   mod 脚本经 sw.screenFx 注册,exec 由 GLScreenFilters 'ModScreenFx' 分支派发
+    // ★modShader Tier1-b 动工（2026-10-14）：mods/modShader.ts 第八消费方——mod GLSL
+    //   屏幕后处理声明面（sw.shader;纯 type import 零运行时边,exec 运行期由
+    //   GLScreenFilters 'ModScreenFx' 分支链内派发并注入 pipe 实参——第七消费方
+    //   hooks.ts 同模式;刀面测试 tests/mod-tier1b.test.ts）。★G38-A 收口（2026-10-31,
+    //   棘轮在途红归因）：Tier1-b 落地时漏随迁本白名单=10-27 发版会话在途红。
     const root = fileURLToPath(new URL('../src', import.meta.url));
-    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts', 'GhostBlur.ts', 'hooks.ts']);
+    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts', 'GhostBlur.ts', 'hooks.ts', 'modShader.ts']);
     const offenders: string[] = [];
     for (const f of walkTs(root)) {
       if (f.endsWith('GLPipeline.ts')) continue;

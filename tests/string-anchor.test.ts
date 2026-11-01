@@ -381,8 +381,7 @@ describe('fixedUpdate 集成：pulley 悬挂（Player.cs:25801-26177）', () => 
   it('按上键进态：X 吸附绳列中心、vx=0；★BJ-C8 重钉：居中档按右沿→侧挂档不离绳（:26350-26354/:26653-26661）', () => {
     const game = makeGame(ropeWorld());
     const p = new Player(800, 50 * 16, new Inventory());   // 中心列 50、头格行 49（绳）
-    p.inputUp = true;
-    p.inputJump = true;   // W 语义（本仓攀爬键 = inputJump 并含 W）
+    p.inputUp = true;    // ★BJ737-A：攀爬键=W（inputUp,:26531 controlUp;Space 并设=拒抓+跳离）
     stepP(p, game);
     expect(p.pulley).toBe(true);
     expect(p.pulleyDir).toBe(1);

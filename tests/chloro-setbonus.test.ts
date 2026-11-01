@@ -47,7 +47,7 @@ function fakeHooks(w: World, p?: Player, enemies: unknown[] = [], extra: Record<
     player: p,
     enemies: () => enemies,
     critters: () => [],
-    projectiles: [],
+    projectiles: () => [],   // ★BJ744 改判史：G36-A BJ740-D2 清偿线 Player.ts:5159 读 game.projectiles?.()（GameHooks 契约=方法,旧数组形夹具炸 is not a function）
     spawnDrop: () => null,
     damagePlayer: (): number => 0,
     addDamageNumber: () => {},
@@ -507,7 +507,7 @@ describe('δA 清偿批：叶弹 227 暴击/穿透/坐标/边界/色链（Terarr
     expect(calls[0][5]).toBe(83);                           // 出生字节直面锚
   });
 
-  it('δA④ spawnChloroLeafShot 形参=NewProjectile position(top-left)（:28253 Center.X−4f）→ 实际中心=top-left+(7,7)', () => {
+  it('★BJ746 A38 spawnChloroLeafShot 形参=NewProjectile【中心】（:10878-79 position=(X,Y)−size/2）→ 直传无 +7/+7 偏移（δA④ top-left 误读改判）', () => {
     const g = Object.create(Game.prototype) as unknown as {
       player: Player;
       entities: { add: (e: unknown) => void };
@@ -519,8 +519,8 @@ describe('δA 清偿批：叶弹 227 暴击/穿透/坐标/边界/色链（Terarr
     (g.spawnChloroLeafShot as (x: number, y: number, vx: number, vy: number) => void)
       .call(g, 400, 300, 12, 3);
     const s = added[0] as ChloroLeafShot;
-    expect(s.cx).toBe(400 + CHLORO_LEAF_SHOT_SIZE / 2);     // 锚 center+(+3,+7)
-    expect(s.cy).toBe(300 + CHLORO_LEAF_SHOT_SIZE / 2);
+    expect(s.cx).toBe(400);     // 中心直传（issue#35 A38：旧 +SIZE/2 ⇒ (407,307) 偏 (+7,+7)）
+    expect(s.cy).toBe(300);
     expect(s.damage).toBe(CHLORO_LEAF_DAMAGE);
     expect(s.knockback).toBe(CHLORO_LEAF_KB);
     expect(s.projId).toBe(227);

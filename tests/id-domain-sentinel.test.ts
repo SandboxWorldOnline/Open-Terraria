@@ -536,9 +536,16 @@ describe('收口8 联机域中立:msg5 位透传+键链(净边界无 id 表掺�
     for (let vid = 1; vid <= 6195; vid++) {
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
       if (key === undefined) continue;
+      // ★BJ744 改判史：BJ738 P08 SetDefaults 归一化（226→227,Item.cs:4195-4212
+      //  case 226 共享块 type=227——226 非现役药水）重定向 226 权威键=vi_227 →
+      //  归一化退位源 vid 键链终点=目标 vid 227（有意域外,键域跨越单点豁免;
+      //  vi_226 def 保留注册=数组下标不可删,见 items.ts BJ738 注）。
+      if (vid === 226) continue;
       const iid = internalIdOfVid(vid);
       expect(iid).toBeGreaterThanOrEqual(0);
       expect(ITEM_STABLE_OF_INTERNAL[iid]).toBe(vid);          // 键链终点=同 vid(域自洽)
     }
+    // 归一化退位源键链终点=目标 vid（226→227,BJ738 P08 定向钉）
+    expect(ITEM_STABLE_OF_INTERNAL[internalIdOfVid(226)]).toBe(227);
   });
 });

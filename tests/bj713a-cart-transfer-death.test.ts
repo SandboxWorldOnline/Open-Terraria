@@ -246,7 +246,9 @@ describe('BJ713-A §A G34 债① 骑矿车传送随迁（vanilla Teleport/Spawn 
     expect(SRC.game).not.toContain('private migrateMinecartOnTeleport(): void {');
     expect(SRC.game).toContain('migrateMinecartOnTeleport(): void {');
     const wired = SRC.game.match(/this\.migrateMinecartOnTeleport\(\);/g) ?? [];
-    expect(wired.length).toBe(4);
+    // ★BJ744 改判史：BJ738 P01 返程腿 Teleport style8 面=第五汇线（其台账随刀更新
+    //  bj714a C1 计数 4→5,本锁漏更）——fireRecallTeleport 域双落位（recall 尾+返程门）。
+    expect(wired.length).toBe(5);
     for (const fn of ['fireRecallTeleport', 'wormholeTeleportTo', 'teleportWhenReadyInner', 'teleportToMouse']) {
       const i = SRC.game.indexOf(`private ${fn}(`) >= 0
         ? SRC.game.indexOf(`private ${fn}(`)

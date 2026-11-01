@@ -8,6 +8,7 @@ import { coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inv
 import type { Player } from './Player';
 import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
 import { NEBULA_BOOSTER_VIDS, nebulaBoosterFamOf } from './NebulaBooster';   // ★BJ424 星云 booster 单源
+import { WALL_ALLOWS_WIND } from './Mounts';   // ★BJ745 A41：TryFillBucket 墙白名单（WallID.cs:54 单源）
 import { getDropScanCtx, grabRangeBonusFor } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
@@ -427,6 +428,17 @@ export class ItemDrop extends Entity {
       this.x += this.vx;
       this.y += this.vy;
     } else {
+      // ★BJ745 A41（issue#35,2026-11-01）：空桶收雨（WorldItem.cs:404-406 →
+      //   TryFillBucket :553-576）——位置=非抓取帧物理段头（UpdateShimmer/MoveInWorld
+      //   之前）。门链与掷式逐行：保留 myPlayer（SP 恒真;MP 远端掉落保留位未建模,
+      //   登记台账）→ raining → isThereAWorldSurface（本仓生成世界恒有地表,不建模）
+      //   → IsSurfaceForAtmospherics（WorldGen.cs:11003-11016：常规 y≤worldSurface;
+      //   remix y>rockLayer 且 y<maxTilesY−350）→ 盒心格 InWorld ∧
+      //   WallID.Sets.AllowsWind[wall]（含 wall 0=无墙）→ num3=600/dayRate（仅
+      //   dayRate∈(0,600) 才除——快进提频;冻结 dayRate=0 与缺省 1 同为 1/600 档）
+      //   → Next(num3)==0 ∧ NextFloat()<maxRaining → 整堆 205→206（SetDefaults 保
+      //   stack,SyncItem=MP 60t 断言全态覆写自然携带）。
+      if (vid === 205) this.tryFillBucket(game);
       // 液体采样（身体中心格；本仓液体编码 1水 2岩浆 3蜂蜜 4微光）——仅作重力档选择
       const st0 = game.world.store;
       const ci = st0.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
@@ -952,6 +964,44 @@ export class ItemDrop extends Entity {
    *  tests/bj574-voodoo-lava-wof.test.ts ①⑥）。
    *  差异：原版 StrikeNPC 后 NPC 当 tick 仍 active（死亡在下一 Update 收口），余量
    *  随机池可能命中垂死向导；本仓 TownNPC.hurt 即时置 dead，池自然排除，净效果一致 */
+  /** ★BJ745 A41：TryFillBucket 1:1（WorldItem.cs:553-576）——空桶 205 掉落物在
+   *  雨天地表露天处按 600/dayRate 与雨强随机收雨变水桶 206（整堆保 stack）。
+   *  调用位=非抓取帧物理段头（:404-406）;墙白名单 WALL_ALLOWS_WIND 单源
+   *  （Mounts.ts,WallID.cs:54）。 */
+  private tryFillBucket(game: GameHooks): void {
+    const w = game.world as unknown as {
+      weather?: { raining?: boolean; maxRaining?: number };
+      groundLevel: number; rockLevel: number; h: number;
+      seedFlags?: { remix?: boolean };
+      dayRate?(): number;
+    };
+    // :555-557 保留/雨/地表三门——isThereAWorldSurface 本仓恒真不建模;remix 分支
+    // IsSurfaceForAtmospherics（WorldGen.cs:11003-11016）与常规 y≤worldSurface 并道
+    if (!w.weather?.raining) return;
+    const tx = Math.trunc(this.cx / TILE), ty = Math.trunc(this.cy / TILE);
+    const remix = !!w.seedFlags?.remix;
+    const surfaceOk = remix
+      ? (ty > w.rockLevel && ty < w.h - 350)
+      : ty <= w.groundLevel;
+    if (!surfaceOk) return;
+    const st = game.world.store as unknown as {
+      inBounds(x: number, y: number): boolean; idx(x: number, y: number): number; wall: ArrayLike<number>;
+    };
+    if (!st.inBounds(tx, ty)) return;
+    if (!WALL_ALLOWS_WIND.has(st.wall[st.idx(tx, ty)])) return;   // 含 wall 0
+    // :566-573 掷式——num3=600（仅 dayRate∈(0,600) 才除——快进提频;0/1 同档 1/600）
+    let num3 = 600;
+    const dayRate = w.dayRate?.() ?? 1;
+    if (dayRate > 0 && dayRate < num3) num3 = Math.trunc(num3 / dayRate);
+    if (Math.floor(Math.random() * num3) !== 0) return;             // Next(num3) == 0
+    if (Math.random() >= (w.weather.maxRaining ?? 0)) return;       // NextFloat() < maxRaining
+    // :574-575 整堆 205→206（SetDefaults 保 stack;SyncItem=MP 断言全态覆写自然携带）
+    const iid = internalIdOfVanilla(206);
+    if (iid < 0) return;
+    this.itemId = iid;
+    this.refreshDimsFromVid();
+  }
+
   private checkLavaDeath(game: GameHooks): void {
     const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
     if (vid === 267) {

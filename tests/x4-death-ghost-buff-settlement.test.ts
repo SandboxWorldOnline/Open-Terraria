@@ -71,22 +71,34 @@ describe('X4-债3-A 持久表锚（Main.cs:9337-9344 全表 8 项）', () => {
 });
 
 describe('X4-债3-B clearNonPersistent（UpdateDead :17112-17117 判据 1:1）', () => {
-  it('浸剂八族幸存，其余（含 72 邻域金药剂例 Ironskin/Regen/OnFire）全清', () => {
+  it('浸剂幸存，其余（含 72 邻域金药剂例 Ironskin/Regen/OnFire）全清（★BJ739 B06 改判：'
+    + '浸剂同刻仅一——Main.meleeBuff 互斥 Main.cs:9100-07+Player.cs:5352-65,旧夹具三浸剂'
+    + '并存系未建互斥期的 un-vanilla 前提,改单浸剂+逐族轮换）', () => {
+    // 八浸剂逐员轮换：每个单独挂+清非持久 → 幸存且计时不折损
+    for (const [bt, vid] of [[BuffType.ImbueVenom, 71], [BuffType.ImbueCursed, 73],
+      [BuffType.ImbueFire, 74], [BuffType.ImbueGold, 75], [BuffType.ImbueIchor, 76],
+      [BuffType.ImbueNano, 77], [BuffType.ImbueParty, 78], [BuffType.ImbuePoison, 79]] as const) {
+      const b = new BuffState();
+      b.apply(bt, 10);                   // 持久族
+      b.apply(BuffType.Ironskin, 10);    // 5 非持久
+      b.apply(BuffType.Regen, 10);       // 2 非持久
+      b.apply(BuffType.OnFire, 10);      // 24 非持久
+      b.clearNonPersistent();
+      expect(b.has(bt), `浸剂 ${vid} 幸存`).toBe(true);
+      expect(b.active.get(bt)).toBe(10); // 幸存者计时不折损
+      expect(b.has(BuffType.Ironskin)).toBe(false);
+      expect(b.has(BuffType.Regen)).toBe(false);
+      expect(b.has(BuffType.OnFire)).toBe(false);
+    }
+  });
+  it('互斥相锁（BJ739 B06）：换浸剂 = 旧浸剂即刻出栏（死亡清非持久时栏内恒仅一新浸剂）', () => {
     const b = new BuffState();
-    b.apply(BuffType.ImbueVenom, 10);    // 71 持久
-    b.apply(BuffType.ImbueFire, 10);     // 74 持久
-    b.apply(BuffType.ImbuePoison, 10);   // 79 持久
-    b.apply(BuffType.Ironskin, 10);      // 5 非持久
-    b.apply(BuffType.Regen, 10);         // 2 非持久
-    b.apply(BuffType.OnFire, 10);        // 24 非持久
+    b.apply(BuffType.ImbueVenom, 10);
+    b.apply(BuffType.ImbuePoison, 30);   // 换毒 → 毒液即刻出栏
     b.clearNonPersistent();
-    expect(b.has(BuffType.ImbueVenom)).toBe(true);
-    expect(b.has(BuffType.ImbueFire)).toBe(true);
     expect(b.has(BuffType.ImbuePoison)).toBe(true);
-    expect(b.has(BuffType.Ironskin)).toBe(false);
-    expect(b.has(BuffType.Regen)).toBe(false);
-    expect(b.has(BuffType.OnFire)).toBe(false);
-    expect(b.active.get(BuffType.ImbueVenom)).toBe(10);   // 幸存者计时不折损
+    expect(b.active.get(BuffType.ImbuePoison)).toBe(30);
+    expect(b.has(BuffType.ImbueVenom)).toBe(false);
   });
 });
 

@@ -88,7 +88,11 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     //  回填之前——回填后 covered∩vi_ def 全部持有 tile（真可放置），死条目域实测
     //  清零：missing=[]（全集 vid 全在池）。+真件 2040 −退位/同名克隆 → 池 6251。
     //  missing 混入任何 vid = 真漏件（红）。
-    expect(missing).toEqual([]);   // 零缺席（比旧「∪死条目域=全集」更强）
+    // ★BJ744 改判史：BJ738 P08 SetDefaults 归一化退位件（226→227,Item.cs:4195-4212
+    //  case 226 共享块首行 type=227——226 非现役药水）不进池（itemSearch.ts
+    //  VANILLA_VID_NORMALIZE 门）→ missing 恒 [226]（目标 vid 227 真件在池,双行
+    //  =「旧名空功能件」复辟）;除 226 外混入任何 vid 仍=真漏件（红）。
+    expect(missing).toEqual([226]);   // 唯一合法缺席=归一化退位件 226（BJ738 P08）
     // 计数恒等式（+1 = 域外件 4143,见下）;2430 必须在池侧
     expect(poolVids.size + missing.length).toBe(allVids.length + 1);
     expect(poolVids.has(2430)).toBe(true);
@@ -98,14 +102,15 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     expect(extra).toEqual([4143]);
   });
 
-  it('池条目数快照（★BJ362 重锚:4816 + 2040 回填真件回池 − 567 退位克隆 − 38 同名克隆 = 6251）', () => {
+  it('池条目数快照（★BJ362 重锚:4816 + 2040 回填真件回池 − 567 退位克隆 − 38 同名克隆 − 1 归一化退位 = 6250）', () => {
     // 2026-09-19 定值 4816 = 6856 def − 2040 旧判据滤掉的「死 vid」。
     // ★BJ362（2026-09-27）：回填真件 2040 回池 + place_v 克隆退位 567
     //  （items.ts ⑦:唯一真件 509 + 多件族 style0 基件 58;PLACE_CLONE_SUPERSEDED）
     //  + 搜索面同名克隆退役 38（显示名撞已入池真件:人体模型 legacy/武器架 legacy/
     //  垃圾桶/晶莹宝石 off×7/苔藓砖×9/高门 open×2/装饰株族等——放置能力不受影响,
   //  仅搜索面退位）→ 4816 + 2040 − 567 − 38 = 6251。
-    expect(pool.length).toBe(6251);
+    //  ★BJ744 改判史：BJ738 P08 归一化退位件 226 出池（见上注）→ −1 = 6250。
+    expect(pool.length).toBe(6250);
     expect(ITEM_DEFS.length).toBe(20754);   // ★方案 A:稀疏域数组长=maxStable+1（实件 6856 由 D1 闸门钉）
   });
 });
@@ -179,8 +184,8 @@ describe('SW-BJ207 ④「80 封顶」行为锁（view 全量无封顶,三落点�
     expect(buildItemSearchView(wing, '翅膀').view.length).toBe(0);
   });
 
-  it('行为面①:真实池浏览模式 view=全池 6251（★BJ362 重锚,与池计数快照同源）', () => {
-    expect(buildItemSearchView(pool, '').view.length).toBe(6251);
+  it('行为面①:真实池浏览模式 view=全池 6250（★BJ362 重锚;★BJ744 BJ738 P08 −1,与池计数快照同源）', () => {
+    expect(buildItemSearchView(pool, '').view.length).toBe(6250);
   });
 
   it('UI 锚②:view 构建=单源裸调用+裸赋值（.slice 后缀/中转再截等异拼全数破锚）', () => {

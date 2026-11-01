@@ -241,6 +241,10 @@ describe('BJ467-③：SuperCart 激光 TimerCrit :12928 消费（Mount.cs:5282 D
     player.accTimerCritCharge = 1000;
     const e = spyEnemy(2550, 1433);
     push(hooks, e);
+    // ★BJ744 改判史：BJ741 R19-4 激光 DV 接入（Mount.cs:5282 Damage()→:12970
+    //  Main.DamageVar(60, luck)）——基伤 60 断言须 DV 中性档（0.5→tier 0,随机跑必漂
+    //  57/63;BJ723-C「DV 接入面未 mock 断言必同批补 0.5」判例同式）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     laserHit(hooks, player, e);
     expect(e.calls.length).toBe(1);                      // 夹具自证：锥内视线命中成立
     // ★BJ729-A（2026-10-27）改判史：S02（BJ723-B）crit ×2 移 Enemy.hurt 防后单次
@@ -256,6 +260,7 @@ describe('BJ467-③：SuperCart 激光 TimerCrit :12928 消费（Mount.cs:5282 D
     player.accTimerCritCharge = 1000;
     const e = spyEnemy(2550, 1433);
     push(hooks, e);
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ744：DV 中性档（同 3a）
     laserHit(hooks, player, e);
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.d).toBe(60);

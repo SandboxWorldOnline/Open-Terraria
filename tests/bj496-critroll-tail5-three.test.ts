@@ -277,7 +277,9 @@ describe('BJ496-§1：magic critBonus 族主环动态掷+617/659/Medusa 爆面�
     expect(arrow.split('Math.random() < (this.critChance || (4 + this.critBonus) / 100)').length - 1).toBe(0);
     expect(arrow).toContain('const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);');
     const medusa = strip(SRC('entities/MedusaHeadProj.ts'));
-    expect(medusa).toContain('rollVanillaHitCrit(this.projId, game)');
+    // ★BJ744 改判史：BJ741 G37①（R19-1）Medusa 535/536 volley 掷面迁
+    //  rollVanillaHitCritConsumeTimer 单源（TimerCrit :12928 并单源）——plain 形退役。
+    expect(medusa).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, t, this.critChance > 0)');
     expect(medusa).not.toContain('(this.critChance || (4 + this.critBonus) / 100)');
   });
 });

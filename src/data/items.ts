@@ -1120,6 +1120,24 @@ for (const [idStr, m] of Object.entries(_vim)) {
   VID_SEEN_IDX.set(vid, ITEM_DEFS.length - 1);
 }
 
+// ★BJ738 改判史（P08,2026-10-31,issue #28 定谳=真回归）：SetDefaults vid 归一化。
+//   Item.cs:4195-4212 case 226/case 227 共享块首行 `this.type = 227;`——旧
+//   Lesser Restoration Potion 226 经 SetDefaults 即成 227 全量终值（healLife 90/
+//   potion/useStyle9/useTime=useAnimation=17）,226 不是另一件现役药水（原版
+//   ContentSamples.ItemsByType[type] 键被 226 run 覆写=永无独立 226 条目）。
+//   归一落点=vid→key 反查表：wld 箱导入（WldImport `VANILLA_ITEM_KEY_BY_ID[it.id]`）/
+//   掉落/tooltip/旅程授予全链 226 一律解析到 vi_227。vi_226 def 保留注册
+//   （ITEM_DEFS id=数组下标不可删,金鱼掉魂平移事故先例）→ 搜索池/旅程浏览源
+//   集按 VANILLA_VID_NORMALIZE 排除（消费端 itemSearch.ts/JourneyPowersUI.ts,
+//   防「226+227 双行」）;存量 SW 档已落盘 vi_226 条目的使用面由
+//   vanillaItemFunc.ts FUNC['226'] 别名保底。堆叠合并残差（vi_226/vi_227 异内部
+//   id 不互并,原版同 type 互并）为双域架构边界,登记于 BJ738 台账。
+export const VANILLA_VID_NORMALIZE: Readonly<Record<number, number>> = { 226: 227 };
+for (const fromVid of Object.keys(VANILLA_VID_NORMALIZE)) {
+  const toKey = VANILLA_ITEM_KEY_BY_ID[VANILLA_VID_NORMALIZE[Number(fromVid)]];
+  if (toKey !== undefined) VANILLA_ITEM_KEY_BY_ID[Number(fromVid)] = toKey;
+}
+
 // ---- 音乐盒唱片全量 101 曲（Item.cs DefaultToMusicBox：createTile=139、
 // placeStyle=曲目 style、accessory；style 表 = WorldGen.GetItemDrop_MusicBoxes
 // :43138-43366 逆表）。6145 彩虹巨石/6146 静音盒无素材不在 vanilla.json，单独注册。

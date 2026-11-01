@@ -125,10 +125,10 @@ describe('BJ725-A D2：星璇潜行三消费位 vortexStealthActive 开关门', 
     const muts: Array<[string, string, string]> = [
       ['(st.vortexSet && this.vortexStealthActive) m += (1 - this.stealth) * 0.8;',
        '(st.vortexSet) m += (1 - this.stealth) * 0.8; /* BJ725A-M2a 变异:伤门摘除 */', 'D2-1'],
-      ['(st.vortexSet && this.vortexStealthActive) c += Math.round((1 - this.stealth) * 20);',
-       '(st.vortexSet) c += Math.round((1 - this.stealth) * 20); /* BJ725A-M2b 变异:暴门摘除 */', 'D2-1'],
-      ['(eqA.vortexSet && this.vortexStealthActive) a = -Math.round(1200 * s1);',
-       '(eqA.vortexSet) a = -Math.round(1200 * s1); /* BJ725A-M2c 变异:仇恨门摘除 */', 'D2-1'],
+      ['(st.vortexSet && this.vortexStealthActive) c += Math.trunc((1 - this.stealth) * 20);',
+       '(st.vortexSet) c += Math.trunc((1 - this.stealth) * 20); /* BJ725A-M2b 变异:暴门摘除 */', 'D2-1'],
+      ['(eqA.vortexSet && this.vortexStealthActive) a = -Math.trunc(1200 * s1);',
+       '(eqA.vortexSet) a = -Math.trunc(1200 * s1); /* BJ725A-M2c 变异:仇恨门摘除 */', 'D2-1'],
     ];
     for (const [trg, rep, tag] of muts) {
       withMutation(PLAYER_SRC, trg, rep, () => {

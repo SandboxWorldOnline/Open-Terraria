@@ -15430,7 +15430,21 @@ export class Enemy extends Entity {
    *  对 case {221,227,614,729,908,977} 硬排除——钛金碎片 908/村正刀气 977 等
    *  "由 on-hit 效果产出的弹"再命中时不再触发任何玩家 OnHit 效果，自续风暴/
    *  刷新 buff 在原版不存在）。非弹幕/未知源保持缺省 0 = 不排除。 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false, penPercent = 0, srcProjId = 0): boolean {
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false, penPercent = 0, srcProjId = 0,
+    /** ★BJ739 B19（2026-10-31）：Nano 浸剂 ×1.05 乘区（melee||IsAWhip 弹/鞭专属）——
+     *  原版位 = Projectile.cs:13684-13690【checkArmorPenetration 加伤之后】：
+     *  `dmg += checkArmorPen(...); … dmg = (int)(dmg × GetNanoFlaskDamageBoost()=1.05f)`
+     *  ⇒ 本参在 penAdd 并入后、防御减算前施加（trunc((dmg+pen)×1.05)）。挥砍链
+     *  （Player.cs:44761-44766）原版恰为反序（Nano 先、pen 后）——Game 挥砍站
+     *  不传本参保持旧序（先乘后入 hurt）。缺省 1 = 全部既有调用面零扰动 */
+    nanoMul = 1,
+    /** ★BJ745 A11（issue#35,2026-11-01）：ApplyDamageToNPC 等价路径标记（Player.cs
+     *  :20597-20621——荆棘/仙人掌反伤等直调站）。原版 OnHit 族三调用位门谱：
+     *  近战挥击 :44754 `life>5` 有门 / 弹幕 :13642 `life>5` 有门 / ApplyDamageToNPC
+     *  :20599-20600 【无条件】（先 OnHit 后 StrikeNPC）——本参=true 时 OnHit 五支
+     *  （钛金屏障/神圣闪避/帕拉钯再生/山铜花瓣/叶绿引援）豁免 hp>5 门（dmg>0 门
+     *  照旧——反伤路径实伤恒 ≥1,防御位）。缺省 false=全既有调用面零扰动。 */
+    adtnOnHit = false): boolean {
     // pierce 语义（Projectile.cs:11903-11907/13152-13155 Damage_PVE）：
     //   0   = 近战/荆棘等非弹幕 → 命中设免疫 10t（原版 immune[owner] 默认档）；
     //   1   = 单发弹（maxPenetrate==1，flag3）→ **无视免疫且命中后不设帧**
@@ -15493,8 +15507,10 @@ export class Enemy extends Entity {
     //   :12641-46 immune[owner] 门）与 dontTakeDamage 判别**之后**——拒收的命中
     //   不 proc、不消费 10t 冷却。此前块排在两个早退门前=被拒命中也吃 cd。
     // ★α-H4（终局扫尾批）：`target.life>5` 残血豁免门保留（Player.OnHit 调用位
-    //   原文全在残血门内 :44754/:13642-44），读受击前 life（=入口 this.hp）。
-    //   flag 豁免（Player.cs:6917-6921 type==488 || SpawnedFromStatue）照旧并入。
+    //   原文在残血门内 :44754 近战挥击/:13642 弹幕——★BJ745 A11 勘正：ApplyDamageToNPC
+    //   :20599-20600 第三调用位【无】hp 门,adtnOnHit 尾参豁免）,读受击前 life
+    //   （=入口 this.hp）。flag 豁免（Player.cs:6917-6921 type==488 ||
+    //   SpawnedFromStatue）照旧并入。
     // ★A-F1 来源排除表（Projectile.TryDoingOnHitEffects :15210-20）：弹 id ∈
     //   {221,227,614,729,908,977} 的命中不触发 OnHit 族（钛金碎片再命中不 proc/
     //   不刷 cd）。srcProjId 由弹侧结算点携带（proj1457.dealContacts /
@@ -15507,7 +15523,7 @@ export class Enemy extends Entity {
       } | null | undefined;
       const titanExempt = this.vanillaId === 488 || this.spawnedFromStatue
         || (srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId));
-      if (fromPlayer && dmg > 0 && !titanExempt && this.hp > 5
+      if (fromPlayer && dmg > 0 && !titanExempt && (adtnOnHit || this.hp > 5)
         && plT && !plT.dead && plT.equipStats?.titaniumStorm === true) {
         if ((plT.titaniumStormCd ?? 0) <= 0) {
           plT.titaniumStormCd = 10;                      // titaniumStormCooldown=10（:6928）
@@ -15528,7 +15544,7 @@ export class Enemy extends Entity {
         buffs: { apply(t: number, s: number): void };
         equipStats?: { onHitDodge?: boolean };
       } | null | undefined;
-      if (fromPlayer && dmg > 0 && this.hp > 5 && plH && !plH.dead
+      if (fromPlayer && dmg > 0 && (adtnOnHit || this.hp > 5) && plH && !plH.dead
         && plH.equipStats?.onHitDodge === true
         && (plH.shadowDodgeTimer ?? 0) <= 0                                  // :6938 timer==0 门
         && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
@@ -15544,7 +15560,7 @@ export class Enemy extends Entity {
         buffs: { apply(t: number, s: number): void };
         equipStats?: { onHitRegen?: boolean };
       } | null | undefined;
-      if (fromPlayer && dmg > 0 && this.hp > 5 && plP && !plP.dead
+      if (fromPlayer && dmg > 0 && (adtnOnHit || this.hp > 5) && plP && !plP.dead
         && plP.equipStats?.onHitRegen === true
         && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
         plP.buffs.apply(BuffType.RapidHealing, 5);                           // AddBuff(58,300t)=5s
@@ -15560,7 +15576,7 @@ export class Enemy extends Entity {
         dead?: boolean; petalTimer?: number;
         equipStats?: { onHitPetal?: boolean };
       } | null | undefined;
-      if (fromPlayer && dmg > 0 && this.hp > 5 && plO && !plO.dead
+      if (fromPlayer && dmg > 0 && (adtnOnHit || this.hp > 5) && plO && !plO.dead
         && plO.equipStats?.onHitPetal === true && (plO.petalTimer ?? 0) <= 0    // :6963 双门
         && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
         game.spawnOnHitPetals?.(this.cx ?? (this.x + this.w / 2), this.cy ?? (this.y + this.h / 2));
@@ -15578,7 +15594,7 @@ export class Enemy extends Entity {
         dead?: boolean; petalTimer?: number;
         equipStats?: { crystalLeaf?: boolean };
       } | null | undefined;
-      if (fromPlayer && dmg > 0 && this.hp > 5 && plL && !plL.dead
+      if (fromPlayer && dmg > 0 && (adtnOnHit || this.hp > 5) && plL && !plL.dead
         && plL.equipStats?.crystalLeaf === true && (plL.petalTimer ?? 0) <= 0
         && !(srcProjId > 0 && ON_HIT_EXCLUDED_PROJS.has(srcProjId))) {
         game.chloroOnHitLeafStrike?.(this);
@@ -15618,6 +15634,9 @@ export class Enemy extends Entity {
     const penAdd = npcCheckArmorPenetration(def, armorPen, penPercent, {
       ichor: this.ichorT > 0, brokenArmor: this.brokenArmorT > 0, betsysCurse: this.betsysCurseT > 0,
     });
+    // ★BJ739 B19：Nano ×1.05 在 penAdd 之后（(int)((dmg+pen)×1.05f),P.cs:13690）——
+    // 挥砍链不传 nanoMul（其原版为 Nano-先/pen-后,调用侧已乘好）
+    const strikeBase = nanoMul !== 1 ? Math.trunc((dmg + penAdd) * nanoMul) : dmg + penAdd;
     // ★F9/η（2026-08-31 蓝队三批）取整链锚修正：原版 StrikeNPC_Inner
     //   `int num = (int)Math.Max(1.0, Main.CalculateDamageNPCsTake(Damage, defense)
     //   × (crit?2:1))`——CalculateDamageNPCsTake 为 double 全程不取整
@@ -15633,7 +15652,7 @@ export class Enemy extends Entity {
     //   单布尔承载「防后 ×2+暴击色+击退 ×1.4」三面。旧「已知偏差登记：crit ×2
     //   原版在防后,仓内调用侧预倍」就此销账。PvP/玩家受击面（ClientNet
     //   beetlePvpCredit/Player.hurt）为 Player.cs:38533-35 先折乘域，不在本域。
-    let calcNpc = dmg + penAdd - def * 0.5;
+    let calcNpc = strikeBase - def * 0.5;               // ★BJ739 B19：strikeBase=penAdd(±nanoMul) 并入后的打击基伤
     if (calcNpc < 1) calcNpc = 1;                       // CalculateDamageNPCsTake 保底（double 域，×2 前）
     dmg = Math.trunc(calcNpc * (crit ? 2 : 1));         // NPC.cs:82067：crit ×2 防后/trunc 前
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
@@ -15814,61 +15833,69 @@ export class Enemy extends Entity {
     if (pierce === -3) this.iframes = 0;
     else if (pierce !== -2 && pierce !== 1) this.iframes = 10;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
-    // 击退管线（NPC.cs:82144-82239 1:1）。武器路径（kby===0，kbx=方向×力度）：
-    //   num3 = kb×resist（:82145 ★resist 先乘、五段软封顶作用在乘后值——旧实现
+    // 击退管线（NPC.cs 1:1）。武器路径（kby===0，kbx=方向×力度）：
+    //   num3 = kb×resist（★resist 先乘、五段软封顶作用在乘后值——旧实现
     //   封顶算在裸 kb 上再乘 resist，顺序反）→ onFire2（诅咒焰 buff39，cursedT 代）
-    //   ×1.1（:82148）→ 五段封顶 8/10/12/14/16（:82152-82175）→ crit×1.4（:82181）
-    //   → num8 = (int)防后最终伤 ×10（专家 ×15，:82183-82187）
-    //   num8>lifeMax = 轻路（大伤害打小怪，:82188-82226）：X 减法收敛（同向不足
-    //   才推、同号余速 ×2 步、钳 ±num3，:82189-82206）→ 小丑 185 num3×1.5
-    //   （:82209-82212，★仅轻路——旧实现放在共享段）→ num3 翻负（noGravity
-    //   ×-0.5 / 有重力 ×-0.75，:82217）→ Y 加法钳（vy>num3 才 += 并钳下限，
-    //   :82220-82225——下落/静止中挨打才起跳，上升中不追加）
-    //   否则重路（:82227-82237）：直接赋值 vy=-num3×(0.75|0.5)×resist、
+    //   ×1.1 → 五段封顶 8/10/12/14/16 → crit×1.4
+    //   → num8 = (int)防后最终伤 ×10（专家 ×15）
+    //   num8>lifeMax = 轻路（大伤害打小怪）：X 减法收敛（同向不足
+    //   才推、同号余速 ×2 步、钳 ±num3）→ 小丑 185 num3×1.5
+    //   （★仅轻路——旧实现放在共享段）→ num3 翻负（noGravity
+    //   ×-0.5 / 有重力 ×-0.75）→ Y 加法钳（vy>num3 才 += 并钳下限，
+    //   下落/静止中挨打才起跳，上升中不追加）
+    //   否则重路：直接赋值 vy=-num3×(0.75|0.5)×resist、
     //   vx=num3×dir×resist（★resist 二次乘=原版如此,num3 已含一次）
+    // ★BJ741 R19-7（2026-10-31）：击退段锚标双版——旧注行号全系 1456 基线
+    //  （1456 NPC.cs:82143-82239 = 1457 NPC.cs:82216-82312,亲读逐段对齐 +73 偏移）：
+    //  双门 :82143-44→:82216-17 / num3 :82145→:82218 / onFire2×1.1 :82148→:82219-22 /
+    //  五段封顶 :82152-82175→:82223-82250 / crit×1.4 :82179-82182→:82251-82254 /
+    //  num8 :82183-82187→:82255-82259 / 轻路 :82188-82226→:82260-82299 /
+    //  X 收敛 :82189-82206→:82262-82285 / 小丑 :82209-82212→:82286-82289 /
+    //  翻负 :82217→:82290 / Y 钳 :82220-82225→:82291-82298 / 重路 :82227-82237→
+    //  :82300-82311。1457 为数值权威（两版本段逐字同值）。
     // kby!==0 = 爆炸/光环等非武器冲量 → 加法冲量（原版同走 StrikeNPC 管线，
     //   仓内双参冲量约定，登记）
     const resist = this.kbResistOverride ?? this.def.knockbackResist;
-    // :82217/:82228 读【运行时】noGravity（AI_017 秃鹫飞行态/AI_087 空中态/AI_091
+    // num3 翻负/重路 读【运行时】noGravity（AI_017 秃鹫飞行态/AI_087 空中态/AI_091
     // 浮游态按态置位）——def.flying 仅静态兜底（数据 noGravity + aiStyle 2/5/14/23/44）
     const kbFlying = this.noGravity || this.def.flying;
     // ★F10（2026-08-31 蓝队三批）：原版击退整段单门 `knockBack>0f && knockBackResist>0f`
-    // （NPC.cs:82144）——标量 knockBack 与两分支共享。仓内双参冲量约定（kby≠0=爆炸/
-    // 环形冲量）在此以「向量非零」等价承载 knockBack>0：两分支现都要求 [冲量非零 ∧
-    // resist>0]，与武器支 :12366 同式；送参侧零冲量调用点同步归零（扑击弹 818 案，
-    // 见 MinionProj TigerPounce F10 注）。
+    // （1456 NPC.cs:82143-44 = 1457 :82216-17）——标量 knockBack 与两分支共享。仓内双参
+    // 冲量约定（kby≠0=爆炸/环形冲量）在此以「向量非零」等价承载 knockBack>0：两分支现
+    // 都要求 [冲量非零 ∧ resist>0]，与武器支同式；送参侧零冲量调用点同步归零（扑击弹
+    // 818 案，见 MinionProj TigerPounce F10 注）。
     if (kby !== 0) {
       if (resist > 0) { this.vx += kbx * resist; this.vy += kby * resist; }
-    } else if (Math.abs(kbx) > 0 && resist > 0) {   // :82144 knockBack>0 && resist>0 双门
+    } else if (Math.abs(kbx) > 0 && resist > 0) {   // :82144/:82216 knockBack>0 && resist>0 双门
       const hitDir = Math.sign(kbx) || 1;
-      let num3 = Math.abs(kbx) * resist;            // :82145 kb×resist
-      if (this.cursedT > 0) num3 *= 1.1;            // :82148 onFire2=诅咒焰（buff 39）
-      if (num3 > 8) num3 = 8 + (num3 - 8) * 0.9;    // :82152-82156 五段软封顶
-      if (num3 > 10) num3 = 10 + (num3 - 10) * 0.8; // :82157-82161
-      if (num3 > 12) num3 = 12 + (num3 - 12) * 0.7; // :82162-82166
-      if (num3 > 14) num3 = 14 + (num3 - 14) * 0.6; // :82167-82171
-      if (num3 > 16) num3 = 16;                     // :82172-82175
-      if (crit) num3 *= 1.4;                        // :82179-82182
-      const num8 = Math.trunc(dmg) * (mainExpertMode(game.world) ? 15 : 10); // :82183-82187
-      if (num8 > this.maxHp) {                      // 轻路 :82188
-        if (hitDir < 0 && this.vx > -num3) {        // :82189-82197 X 减法收敛
+      let num3 = Math.abs(kbx) * resist;            // :82145/:82218 kb×resist
+      if (this.cursedT > 0) num3 *= 1.1;            // :82148/:82219-22 onFire2=诅咒焰（buff 39）
+      if (num3 > 8) num3 = 8 + (num3 - 8) * 0.9;    // :82152-56/:82223-27 五段软封顶
+      if (num3 > 10) num3 = 10 + (num3 - 10) * 0.8; // :82157-61/:82229-33
+      if (num3 > 12) num3 = 12 + (num3 - 12) * 0.7; // :82162-66/:82235-39
+      if (num3 > 14) num3 = 14 + (num3 - 14) * 0.6; // :82167-71/:82241-45
+      if (num3 > 16) num3 = 16;                     // :82172-75/:82247-50
+      if (crit) num3 *= 1.4;                        // :82179-82/:82251-54
+      const num8 = Math.trunc(dmg) * (mainExpertMode(game.world) ? 15 : 10); // :82183-87/:82255-59
+      if (num8 > this.maxHp) {                      // 轻路 :82188/:82260
+        if (hitDir < 0 && this.vx > -num3) {        // :82189-97/:82262-72 X 减法收敛
           if (this.vx > 0) this.vx -= num3;
           this.vx -= num3;
           if (this.vx < -num3) this.vx = -num3;
-        } else if (hitDir > 0 && this.vx < num3) {  // :82198-82206
+        } else if (hitDir > 0 && this.vx < num3) {  // :82198-206/:82274-85
           if (this.vx < 0) this.vx += num3;
           this.vx += num3;
           if (this.vx > num3) this.vx = num3;
         }
-        if (this.vanillaId === 185) num3 *= 1.5;    // :82209-82212 小丑特例
-        num3 = kbFlying ? num3 * -0.5 : num3 * -0.75; // :82217 noGravity 运行时档
-        if (this.vy > num3) {                       // :82220-82225 Y 加法钳
+        if (this.vanillaId === 185) num3 *= 1.5;    // :82209-12/:82286-89 小丑特例
+        num3 = kbFlying ? num3 * -0.5 : num3 * -0.75; // :82217/:82290 noGravity 运行时档
+        if (this.vy > num3) {                       // :82220-25/:82291-98 Y 加法钳
           this.vy += num3;
           if (this.vy < num3) this.vy = num3;
         }
-      } else {                                      // 重路 :82227-82237
-        this.vy = -num3 * (kbFlying ? 0.5 : 0.75) * resist; // :82228-82233
-        this.vx = num3 * hitDir * resist;           // :82235 resist 二次乘
+      } else {                                      // 重路 :82227-37/:82300-11
+        this.vy = -num3 * (kbFlying ? 0.5 : 0.75) * resist; // :82228-33/:82302-09
+        this.vx = num3 * hitDir * resist;           // :82235/:82310 resist 二次乘
       }
     }
     // 法师族受击打断（StrikeNPC cs:82061-82088：aiStyle 8 受击即跳 ai[0]——已过全部

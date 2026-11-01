@@ -5,7 +5,7 @@
 //   ③ 全屏地图卷轴四档修正偏移（Main.cs:54860-54923 纯函数）
 // 标杆 = ../Terarria1456。只读导出的纯函数/静态表 + 盘上素材，不依赖 DOM。
 import { describe, it, expect } from 'vitest';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';   // ★BJ743-A:require 读形收编 ESM(守卫域外素材,行为不变)
 import { join } from 'node:path';
 import {
   TORCH_FLAME_TILE, BRAZIER_FLAME_TILE,
@@ -287,7 +287,7 @@ describe('② 手持火苗触发（PlayerDrawLayers.cs:3519-3561 + Item.cs flame
   it('素材结构 = 单帧、与物品贴图同尺寸（非动画横条）——动画由 itemFlamePos 抖动承担', () => {
     // 火把 8：ItemFlame_8 14×16 单帧
     const b = (f: string) => {
-      const fs = require('node:fs').readFileSync(join(VANILLA, f));
+      const fs = readFileSync(join(VANILLA, f));   // ★BJ743-A:require 形退役(顶部 ESM import)
       return [fs.readUInt32BE(16), fs.readUInt32BE(20)] as [number, number];
     };
     expect(b('ItemFlame_8.png')).toEqual([14, 16]);
@@ -374,7 +374,7 @@ describe('③ 全屏地图卷轴四档偏移（Map.png 928×248）', () => {
   it('Map.png 素材在盘且为 928×248（TextureAssets.Map）', () => {
     const f = join(VUI, 'Map.png');
     expect(existsSync(f)).toBe(true);
-    const b = require('node:fs').readFileSync(f);
+    const b = readFileSync(f);   // ★BJ743-A:require 形退役(顶部 ESM import)
     expect([b.readUInt32BE(16), b.readUInt32BE(20)]).toEqual([928, 248]);
   });
 });

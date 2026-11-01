@@ -8,6 +8,9 @@
 //   E9 叶绿矿 d.pick 65→200（Player.cs:52989 `type==211 && pickPower<200 → num=0`）。
 // 标杆：Terarria1456 Item.cs SetDefaults / Player.cs ItemCheck_UseMiningTools 链。
 import { describe, it, expect } from 'vitest';
+// ★BJ743-A（R24 SEV-2+R23-LOW-4）：require('node:fs') 旁路收口——改 ESM import 形
+//   经 fs-guard-shim;下方 readFileSync(new URL(...)) URL 形亦经 BJ743-A URL 路由进守卫。
+import { readFileSync } from 'node:fs';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, VANILLA_TOOL_POWERS } from '../src/data/items';
 import { itemCombat } from '../src/data/vanillaItemCombat';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
@@ -180,9 +183,7 @@ describe('F4｜挖掘冷却下限钳（Player.cs:4221-4226 max(val,1)）', () =>
     //   ——钳位 max(1,…) 语义不变,静态锚同步（旧字面 `* pickSpeed` 已不存在=恒红假锚）
     const src = 'Math.max(1, Math.floor((useTime ?? speed) * this.pickSpeedMult()))';
     // 静态锚：tryMine 冷却表达式唯一、无 8t 残留（读源码防回归）
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('node:fs') as typeof import('node:fs');
-    const gameSrc = fs.readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     expect(gameSrc).toContain(src);
     expect(gameSrc).not.toContain('Math.max(8, Math.round((useTime ?? speed)');
   });

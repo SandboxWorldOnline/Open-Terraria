@@ -20,7 +20,8 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A（D1 B17）：城镇 voodoo 靶 + critter 臂
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ497② 掷率单源（443 ranged 旗命中拍动态）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ497② 掷率单源（443 ranged 旗命中拍动态）;★G37-A ConsumeTimer=crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷（接触面逐拍 Damage() 同链）
 
 export const ELECTROSPHERE_PROJ = 443;
 /** timeLeft（NewProjectile :11067-11070 钳 300 = 5s） */
@@ -129,7 +130,7 @@ export class ElectroSphereProj extends Entity {
       //  =critBonus 无写者的孤儿 4% 平率（owner 聚合/:25712 持械折入整缺）——443 数据面
       //  ranged（SetDefaults :5146,亲读）→ rollVanillaHitCrit 命中拍动态（critChance>0
       //  路由门,类缺省 0.04;442 导弹 Kill 出生位 Game.ts :42957 无写位=类缺省同门）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(ELECTROSPHERE_PROJ, game);
+      const crit = rollVanillaHitCritConsumeTimer(ELECTROSPHERE_PROJ, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
       // ★F3 接线（蓝队四轮）：电球 443 数据面 ranged（SetDefaults :5139-5149）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -140,7 +141,7 @@ export class ElectroSphereProj extends Entity {
       // ★BJ497② 翻倍归位（BJ496③ 同族缺口）+★S02(BJ723-B):crit ×2 统一移
       //  Enemy.hurt 防后(NPC.cs:82067)——旧面染 crit 色零翻倍,后随「调用侧预倍」
       //  惯例,现单布尔承载。
-      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)))
+      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)))   // ★G37-A（D6）：DV :12970 逐靶掷（:12592 victim 循环逐拍同链,旧平值=BJ729-A D6 登记债）
         + (snapBonusSphere ? snapBonusSphere : 0),
         0, 0, game, this.armorPen, crit, 2, true);
       e.iframes = ELECTROSPHERE_IFRAMES;                 //（:14072-14074，覆写通用档 10）
@@ -155,7 +156,8 @@ export class ElectroSphereProj extends Entity {
     //  immune[owner]=8 档对城镇靶由 TownNPC.hurt iframes 近似承载（D3 族口径）。
     hitTownNpcs(this, game, Math.max(1, Math.trunc(this.damage)), 0, 'playerProj',
       ELECTROSPHERE_PROJ, undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(ELECTROSPHERE_PROJ, game),
+      (tn443) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像敌怪臂
+        crit: rollVanillaHitCritConsumeTimer(ELECTROSPHERE_PROJ, game, tn443, this.critChance > 0),
         penPercent: this.armorPen }));
   }
 

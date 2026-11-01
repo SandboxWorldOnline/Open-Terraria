@@ -249,8 +249,18 @@ describe('BJ493-§3：ranged critBonus 族 13 位迁移（冻结写位零残留+
     //   同批补齐 crit 掷（gem 121-126/597 数据面 magic=true[SetDefaults :2111
     //   ApplyGemStaffStats 段亲读,BJ727-A「宝石族无类旗」判语勘误];283 ranged=
     //   true[P.cs:3713 亲读]）——+4 掷位 16→20,锁语义同上（面存在性非清单冻结）。
-    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(20);
-    expect(s).toContain('const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);');   // 爆面
+    // ★G37-A（D5,2026-10-31）改判史：爆面 crit 段整体迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 消费收编）——Arrow 内爆面族 16 掷位（gem/617/659/661/1023/
+    //  烟花/283 敌臂+城镇 settle+283 critter 环[新掷位,旧 crit=false]）迁单源形 15 位,
+    //  余 6 位（主环×2/631/钉 514×2/whipTagShot）保持 rollVanillaHitCrit——两形合计
+    //  锁面存在性（锁语义=非清单冻结,BJ725-A 判例 3）。
+    // ★G39-A（2026-11-01）改判史：BJ746-A A29（664/666/668 烈焰塔 Kill 溅射）+2 掷位
+    //  （溅射敌臂 critA29+城镇 settle 臂）15→17——该 lane 回归批未含本文件,BJ745-A
+    //  台账域外红段已预言「计数 15→17 归 BJ746 lane 随刀更新」,本刀顺手清记账
+    //  （BJ742-A 对 BJ743-A 同款判例;DV/TimerCrit 面亲验在位）。
+    expect(s.split('rollVanillaHitCrit(').length - 1).toBe(6);
+    expect(s.split('rollVanillaHitCritConsumeTimer(').length - 1).toBe(17);
+    expect(s).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);');   // 爆面（单源形）
   });
 
   it('3c 无类旗成员零掷（196 烟雾=原版零掷;旧平率面 4% 掷必红）', () => {

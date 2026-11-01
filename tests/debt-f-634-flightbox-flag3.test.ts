@@ -16,7 +16,7 @@
 //   判别力：夹具用【真 Enemy.fromVanilla】——门在真 hurt 内部（Enemy.ts:13988
 //   `pierce !== 1 && this.iframes > 0` 早退）,非 spy 桩;旧码（pierce=0）下第二发
 //   飞行盒 hp 零扣、log 零 proc、iframes=10（hurt 写支）,全红;新码全绿。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -68,6 +68,9 @@ describe('清偿刀 F：634/635 飞行盒 flag3 免疫门豁免（:12635-12637�
     const e = tankEnemy(game, 84, 100);
     e.cx; // 触碰 getter 建立（无副作用,占位读）
     const hp0 = e.hp;
+    // ★BJ744 改判史（2026-10-31）：G37-A 给接触面（含 634/635 dealContacts）补 DV 掷
+    //   （:12970）——固定带宽断言须钉 0.5 中性档（BJ723-B 判例：DV 接入面未 mock 必漂）
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
 
     // 发 A：iframes=0 首中（旧码也过门——判别力在写支值与 B 面）
     const boltA = flyContact(e, game, 634);

@@ -300,7 +300,12 @@ export function parsePlr(raw: Uint8Array): PlrImported {
       const time = r.i32();
       if (type === 0) { target--; continue; }
       got++;
-      if (time > 0) buffs.push([type, Math.max(1, Math.round(time / 60))]);  // tick→秒
+      // ★G39-A（bj742a D-⑥,2026-11-01）：保 tick 精度——旧 Math.round(time/60)
+      // 整秒化,与 BJ742-A R21-⑥ Buffs.toSave 同病;.plr buffTime 为 Int32 tick 域
+      // （Player.cs:56243-56252 读/:55518-55530 写）,tick 直除 60 = 1/60 网格浮点秒
+      // 往返逐位无损;time>0 已滤 ⇒ ≥1t,Math.max(1/60,·) 为与 toSave 同式防御位。
+      // 旧式 tick→秒→tick 双掷漂移 ≤30t（如 2400-4200 随机药水病档经导入系统性偏移）。
+      if (time > 0) buffs.push([type, Math.max(1 / 60, time / 60)]);  // tick→秒
     }
   }
   // spawn 点列表(-1 终止;本仓不消费,流必须对齐)
@@ -621,6 +626,9 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   }
   w.byte(0);                                  // voidVaultInfo
   // buffs 恒 44 对:([vanillaId,秒]→tick=秒×60;缺省补 0)
+  // ★G39-A（bj742a D-⑥）：导出 round 回 tick 语义保持（原版写 Int32 tick 域,
+  //  运行时浮点秒经 60Hz 递减非整格,round 取最近格点）;导入侧已改 tick 直除
+  //  （见读侧 ★G39 注）⇒ tick→秒→tick 往返逐位无损,旧双掷 ≤30t 漂移消除。
   const buffs = st.buffs ?? [];
   for (let i = 0; i < 44; i++) {
     const bf = buffs[i];

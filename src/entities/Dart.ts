@@ -3,6 +3,7 @@
 import { Entity } from './Entity';
 import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, expertEowFifthDmg, statusPlayer, evpDirectDmg, hitTownNpcs, hitTownNpcsAoeBox, hitCrittersAll } from './projTargets';   // ★BJ716-A：expertEowFifthDmg（R18-F1 EoW /5 臂）;★BJ729-A：hitCrittersAll（B25/D4 critter 臂）
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ716-A（R18-F2）：全环 DamageVar 首掷（:12970）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A（D6）：非 trap 型 crit 段完整单源（:12915-28）
 import { InfernoHostileBlast } from './InfernoHostileBlast';
 import { shadowbeamLineFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -213,6 +214,16 @@ const TRAP_PROJ_ID: Partial<Record<TrapShotKind, number>> = {
   dart: 98, superdart: 184, flame: 187, venomdart: 980, spear: 186, spiky: 185, boulder: 99,
   geyser: 654, cannonball: 162, bunny: 281, snowball: 166, portalbolt: 601, hail: 1049,
 };
+
+/** ★G37-A（D6,2026-10-31）：TRAP_PROJ_ID 表内 vanilla SetDefaults trap=true 型全集
+ *  （Projectile.cs 亲提 {12,98,99,108,184,185,186,187,188,654,655,980,1002,1005,1007,
+ *  1048,1049,1073,1078,1091} ∩ 本表）——trap=true ⇒ OwnedBySomeone=false（:580-588）
+ *  ⇒ crit 段（:12915-28 三类掷+TimerCrit 消费）【整块跳过】+DV 走 `DamageVar(num15)`
+ *  【无 luck 重掷】（:12970 ownedBySomeone 三元假臂）。非 trap 成员（162 炮弹/166 雪球/
+ *  281 兔/601 传送门弹,玩家/导线 CurrentUser 发射 owner=myPlayer）crit 段照跑：
+ *  166 ranged 掷、162/281/601 flagless 零掷,TimerCrit 四型照消费。 */
+const TRAP_TYPE_KINDS: ReadonlySet<TrapShotKind> = new Set(
+  ['dart', 'superdart', 'flame', 'venomdart', 'spear', 'spiky', 'boulder', 'geyser', 'hail']);
 
 /** ---- 烟花尘色表（Projectile.cs Kill/AI 引用的 Dust id → 近似色）----
  *  130-134 爆花尘：发光色照抄 Dust.cs:2204-2226 Lighting.AddLight 的 RGB（134 未入光照表，
@@ -905,18 +916,30 @@ export class TrapShot extends Entity {
           // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
           // ★BJ716-A（R18-F2+R18-F1，2026-10-25）：DamageVar 首掷（:12970,owner luck
           //  正向——Wiring 发射尾参 owner=Main.myPlayer）→ banner(:13388)→ expert EoW
-          //  虫段 /5(:13392-98,281 兔在表——手工炮/陷阱兔对 EoW 专家 5× 超伤曾缺);
-          //  crit 面省略=TrapShot 族既有登记近似（掷面只 DV,序内零扰）
+          //  虫段 /5(:13392-98,281 兔在表——手工炮/陷阱兔对 EoW 专家 5× 超伤曾缺)
+          // ★G37-A（D6,2026-10-31）：①crit 面 per-kind trap 域——166 snowball ranged
+          //  掷补齐、162/281/601 flagless 零掷但 TimerCrit :12928 照消费、trap 型
+          //  （TRAP_TYPE_KINDS）整 crit 块跳过（旧恒 false=BJ729-A D6 crit 族真缺的
+          //  非 trap 半边）;②DV luck 域——trap 型走 `DamageVar(num15)` 无 luck 重掷
+          //  （:12970 三元假臂,旧全 kind 带 luck=域错）。
+          const trapTypeG37 = TRAP_TYPE_KINDS.has(this.kind);
+          const luckG37 = trapTypeG37 ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+          const critG37 = trapTypeG37 ? false
+            : rollVanillaHitCritConsumeTimer(trapProjId ?? this.projId ?? 0, game, e);
           e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
-              damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+              damageVarRoll(this.damage, luckG37)),
               trapProjId, (e as { vanillaId?: number | null }).vanillaId, game.world)
             + (snapBonusTrap ? Math.trunc(snapBonusTrap * 1) : 0),
-            Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+            Math.sign(this.vx) * kb, 0, game, 0, critG37, 0, true);   // 音/飘值=单点
         } else {
+          const trapTypeG37e = TRAP_TYPE_KINDS.has(this.kind);
+          const luckG37e = trapTypeG37e ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+          const critG37e = trapTypeG37e ? false
+            : rollVanillaHitCritConsumeTimer(trapProjId ?? this.projId ?? 0, game, e);
           e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
-              damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+              damageVarRoll(this.damage, luckG37e)),
               trapProjId ?? -1, (e as { vanillaId?: number | null }).vanillaId, game.world),
-            Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+            Math.sign(this.vx) * kb, 0, game, 0, critG37e, 0, true);   // 音/飘值=单点
         }
         // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——
         // StrikeNPC 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :711
@@ -988,9 +1011,13 @@ export class TrapShot extends Entity {
         //  穿透经济=受理计数逐个递减（162 炮弹 pen4 一拍多鸟=原版 keepIterating
         //  同相;per-victim 私表窗对一击致死小动物=死面,黑化复权残窗由 Enemy.hurt
         //  iframes 承载=近似登记;281 idStatic 共享桶同 iframes 近似）。
+        // ★G37-A（D6,2026-10-31）：trap 型（TRAP_TYPE_KINDS）critter 臂带 ctx.trap
+        //  ——OwnedBySomeone=false ⇒ crit 段（掷+TimerCrit 消费）整跳（settleCritterHit
+        //  :12911-28 同谳;旧无 ctx=trap 型也消费 TimerCrit=域错）;非 trap 型（162/166/
+        //  281/601,玩家发射）照常掷+消费。
         const nCritB25 = hitCrittersAll(
           { x: this.x, y: this.y, w: this.w, h: this.h, projId: tpB25 ?? this.projId ?? 0 },
-          game);
+          game, TRAP_TYPE_KINDS.has(this.kind) ? { trap: true } : undefined);
         for (let i = 0; i < nCritB25; i++) {
           if (--this.pierceLeft <= 0) {
             if (st.shatterDust) this.shatter(game);
@@ -1004,7 +1031,7 @@ export class TrapShot extends Entity {
           this as unknown as Parameters<typeof hitTownNpcs>[0], game,
           this.damage, Math.sign(this.vx) * kbB25, 'playerProj', tpB25 ?? this.projId ?? 0,
           undefined, undefined, undefined, undefined,
-          () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0) }));
+          () => ({ dmg: damageVarRoll(this.damage, TRAP_TYPE_KINDS.has(this.kind) ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)) }));   // ★G37-A（D6）：trap 型 DV 无 luck 重掷（:12970 假臂）
         if (townHitB25 && --this.pierceLeft <= 0) {
           if (st.shatterDust) this.shatter(game);
           this.dead = true;
@@ -1017,7 +1044,7 @@ export class TrapShot extends Entity {
           this as unknown as Parameters<typeof hitTownNpcs>[0], game,
           this.damage, Math.sign(this.vx) * kbB25, 'hostile', tpB25 ?? this.projId ?? 0,
           undefined, undefined, undefined, undefined,
-          () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0) }));
+          () => ({ dmg: damageVarRoll(this.damage, TRAP_TYPE_KINDS.has(this.kind) ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)) }));   // ★G37-A（D6）：trap 型 DV 无 luck 重掷
       }
       return;
     }
@@ -1084,7 +1111,9 @@ export class TrapShot extends Entity {
         hurt?: (d: number, kx: number, ky: number, g: GameHooks) => void };
       if (t.dead || !t.hurt) continue;
       if (!(cx - r < t.x + t.w && cx + r > t.x && cy - r < t.y + t.h && cy + r > t.y)) continue;
-      t.hurt(this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE.hail.kb ?? 2), 0, game);
+      // ★G37-A（D6）：1049 trap 型 → DV `DamageVar(num15)` 无 luck 重掷（:12970 假臂,
+      //  旧平值=面级残差）;crit 段整跳（trap,无掷无 TimerCrit）。
+      t.hurt(Math.max(1, damageVarRoll(this.damage, 0)), Math.sign(this.vx) * (TRAP_SHOT_STYLE.hail.kb ?? 2), 0, game);
     }
   }
 
@@ -1212,12 +1241,21 @@ export class TrapShot extends Entity {
           { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
       }
       // ★BJ716-A（R18-F2+R18-F1）：DV 首掷（:12970）→banner(:13388)→EoW /5(:13392-98,
-      //  281 兔爆面在表——旧专家 EoW 5× 超伤）;crit 面=TrapShot blast 族既有登记近似
+      //  281 兔爆面在表——旧专家 EoW 5× 超伤）
+      // ★G37-A（D6）：trap 型（hail 1049）DV 无 luck 重掷（:12970 假臂）;非 trap
+      //  （162/281/烟花 167-170）luck 正向。
+      // ★BJ741 R19-1（G37 新债②清偿,2026-10-31）：非 trap 型 blast 敌臂 crit 掷+TimerCrit
+      //  消费收编（原版 Resize+Damage() 重跑 crit 段 :12915-28——162/281 flagless 零类掷
+      //  但 TimerCrit :12928 照消费;167-170 ranged 掷）;trap 型（hail）crit 段整跳
+      //  （OwnedBySomeone=false）维持 false。掷位=DV 前（:12915→:12970 原序,RNG 位次
+      //  对齐其余臂）;crit ×2=Enemy.hurt 防后(S02)。
+      const critBlast741 = TRAP_TYPE_KINDS.has(this.kind) ? false
+        : rollVanillaHitCritConsumeTimer(blProjId ?? (this.projId ?? 0), game, e);
       e.hurt(expertEowFifthDmg(applyBannerDamageDealt(game, e,
-          damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+          damageVarRoll(this.damage, TRAP_TYPE_KINDS.has(this.kind) ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))),
           blProjId ?? -1, (e as { vanillaId?: number | null }).vanillaId, game.world)
         + (snapBonusBlast ? Math.trunc(snapBonusBlast * 1) : 0),
-        Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
+        Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, critBlast741, 0, true);   // 音/飘值=单点;★BJ741 crit 位
       // 命中尾免疫梯（GC1 桥——162 末档写 10 / 281 idStatic 写 0+共享桶已写）
       if (blProjId !== undefined) {
         noteVanillaProjImmune(game, blProjId, (e as unknown as { id?: number }).id ?? -1);
@@ -1230,19 +1268,25 @@ export class TrapShot extends Entity {
     //  （hitCritters 单发档语义不适用）。idStatic/immune 窗对 critter =
     //  perIDStaticNPCImmunity 门以 Enemy.hurt iframes 近似承载（D3 族登记口径）。
     hitCrittersAll({ x: cx - r, y: cy - r, w: r * 2, h: r * 2,
-      projId: TRAP_PROJ_ID[this.kind] ?? this.projId ?? 0 }, game);
+      projId: TRAP_PROJ_ID[this.kind] ?? this.projId ?? 0 }, game,
+      TRAP_TYPE_KINDS.has(this.kind) ? { trap: true } : undefined);   // ★G37-A（D6）：trap 型 crit 段整跳（TimerCrit 不消费）
     // ★BJ727-A（C-D4 族刀,2026-10-27）：炮弹/兔爆/烟花 Kill 爆城镇臂——原版 Resize+
     //  Damage() 重跑（162 :77393-77400/:77445-77452 / 281 :77374-77384 / 烟花
     //  :78549-78556）victim 循环（:12592）含城镇 voodoo 靶（:12618-12631）;单源
-    //  hitTownNpcsAoeBox,敌怪臂链镜像（DV :12970 掷;crit=TrapShot blast 族既有登记
-    //  近似不掷,同相）。162 两段各自一扫（immune[owner]=10 窗→TownNPC.hurt iframes
-    //  同靶不二结算,与敌怪 hitCdT 私表同净效）;281 idStatic 共享桶同由 iframes 承载。
+    //  hitTownNpcsAoeBox,敌怪臂链镜像（DV :12970 掷）。162 两段各自一扫（immune
+    //  [owner]=10 窗→TownNPC.hurt iframes 同靶不二结算,与敌怪 hitCdT 私表同净效）;
+    //  281 idStatic 共享桶同由 iframes 承载。
     //  415-418 damage=0 已在头门整退（Damage_PVE :12576 同相）;hail 1049 hostile 面
     //  有独立城镇臂（:1035）不经本口。
+    //  ★BJ741 R19-1（G37②）：非 trap 型城镇臂 crit 掷+TimerCrit 消费同收编（敌臂镜像,
+    //  trap 型整跳）;settle victim=城镇靶 hitbox（TimerCrit 消费位）。
     hitTownNpcsAoeBox(cx, cy, r, game, this.damage,
       TRAP_PROJ_ID[this.kind] ?? this.projId ?? 0, 'playerProj',
-      () => ({
-        dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+      (tn741) => ({
+        // ★G37-A（D6）：trap 型（hail 1049 经本口）DV 无 luck 重掷（:12970 假臂）。
+        dmg: damageVarRoll(this.damage, TRAP_TYPE_KINDS.has(this.kind) ? 0 : (((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+        crit: TRAP_TYPE_KINDS.has(this.kind) ? false
+          : rollVanillaHitCritConsumeTimer(TRAP_PROJ_ID[this.kind] ?? (this.projId ?? 0), game, tn741),   // ★BJ741 R19-1（G37②）：城镇臂同掷
         kb: Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2),
       }));
   }

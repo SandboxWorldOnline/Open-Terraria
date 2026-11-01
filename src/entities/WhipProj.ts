@@ -660,9 +660,10 @@ export class WhipProj extends Entity {
       //  GetArmorPenetration(melee=false)=玩家通用 armorPen,同敌怪环 :778 形）。
       //  banner 乘区（:13387-91）在 hitTownNpcs 通道内施加（城镇 NPC 无 banner 档,
       //  结构恒等值）。
-      // townDmg 入参=无 settle 兜底位（★BJ723-C S03：DV+nano 已上置 settle 逐靶掷,
-      //  本值不再被消费——hitTownNpcs :143 `st?.dmg ?? dmg` 恒取 settle 返回值）
-      const townDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05) : this.dmgNow;
+      // townDmg 入参=无 settle 兜底位（★BJ723-C S03：DV 已上置 settle 逐靶掷,
+      //  本值不再被消费——hitTownNpcs :143 `st?.dmg ?? dmg` 恒取 settle 返回值;
+      //  ★BJ739 B19：nano 已移 settle.nanoMul 位,兜底值不再预乘）
+      const townDmg = this.dmgNow;
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, townDmg,
         Math.sign(p.x - this.x) * 2, 'playerProj', this.projId,
         undefined, undefined,
@@ -805,13 +806,18 @@ export class WhipProj extends Entity {
             .equipStats?.armorPen ?? 0) : 0;
           // ★BJ723-C S03：城镇靶 DV 同掷（:12970 对 Damage_PVE_Inner 单遍历城镇受害
           //  靶同链同达——settle 位=巫毒窄门后/hurt 前 :12947 ModifyHit 原位,逐靶
-          //  独立掷;nano ×1.05 在 DV 后同敌怪环序）。dmg 返回值覆盖入参 dmg
-          //  （hitTownNpcs :143 st?.dmg ?? dmg）,入参仅无 settle 兜底位。
+          //  独立掷）。dmg 返回值覆盖入参 dmg（hitTownNpcs :143 st?.dmg ?? dmg）,
+          //  入参仅无 settle 兜底位。
+          //  ★BJ739 B19（2026-10-31）：nano ×1.05 移出本位——原版 Projectile.cs:
+          //  13684-13690 序 = checkArmorPenetration 加伤【后】才 (int)(dmg×1.05),
+          //  经 settle.nanoMul → TownNPC.hurt 第 11 参在 penAdd 并入后施加（旧先
+          //  乘后入 hurt = trunc(dmg×1.05)+pen,穿甲池不吃 nano 乘区,issue#29 B19）
           const townRolled = damageVarRoll(this.dmgNow, ((owner as unknown as { luck?: number } | null)?.luck) ?? 0);
           return {
             flatPen,
             crit: timerCritTown || undefined,
-            dmg: whipImbuNano ? Math.trunc(townRolled * 1.05) : townRolled,
+            dmg: townRolled,
+            nanoMul: whipImbuNano ? 1.05 : 1,
           };
         });
       // ★2026-10-21 用户实报「万花筒打不到小动物（猫头鹰等）」定谳修复:本扫只扫
@@ -832,7 +838,7 @@ export class WhipProj extends Entity {
         if (jellyDontTake && !zapJelly) continue;
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
-          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean } & import('./WhipTag').WhipTagged;
+          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number, nanoMul?: number) => boolean } & import('./WhipTag').WhipTagged;
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
@@ -888,8 +894,11 @@ export class WhipProj extends Entity {
         //  StrikeNPC 内 crit ×2——nano/banner/TimerCrit 均在 DV 之后消费掷值。
         //  旧形态无 DV=输入 100 恒 100（85-115 整缺）+luck 重掷无效。
         const whipRolled = damageVarRoll(this.dmgNow, ((owner as unknown as { luck?: number } | null)?.luck) ?? 0);
-        const whipDmg = whipImbuNano ? Math.trunc(whipRolled * 1.05)     // (int)(dmg×1.05f)——掷后值
-          : whipRolled;                                                  // 当前鞭伤（衰减链前,DV 掷值）
+        // ★BJ739 B19（2026-10-31）：nano ×1.05 移入 Enemy.hurt nanoMul 参——原版
+        //  Projectile.cs:13684-13690 序 = pen 加伤【后】(int)(dmg×1.05)（旧先乘后
+        //  加 pen = 穿甲池不吃 nano 乘区,基伤 39/穿甲池 12/防 30 时 31 应 32,
+        //  issue#29 B19）;banner 乘区仍在调用侧首参（:13388 在 pen/nano 之前 ✓）
+        const whipDmg = whipRolled;                                       // 当前鞭伤（衰减链前,DV 掷值;nano 在 hurt 内）
         if (whipImbuParty) {
           game.spawnFriendlyProj?.(new ConfettiBurstProj(
             e.x + e.w / 2, e.y + e.h / 2,
@@ -923,7 +932,7 @@ export class WhipProj extends Entity {
         //  砍伤）;pierce=-3 档（Enemy.ts :14427/:14541 BJ398 约定）=门照走（:14235
         //  pierce!==1 臂,flag3=false 同鞭）+命中写清零。局部节流已由 hitSet 承载。
         // ★S02(BJ723-B):crit ×2 摘除——TimerCrit 单布尔传 Enemy.hurt 防后翻倍(NPC.cs:82067)
-        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, timerCritWhip, -3, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）; ★BJ467① TimerCrit crit 色位
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, timerCritWhip, -3, true, 0, 0, whipImbuNano ? 1.05 : 1); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）; pierce=-3 写梯 usesLocal 主支（:14175-14179）; ★BJ467① TimerCrit crit 色位; ★BJ739 B19 nanoMul（penAdd 后 ×1.05）
         // ★Z1/D1④（2026-10-02）GC1 写方桥对称补接线（BJ436 在 MinionProj 接桥,鞭两面
         //  缺=近战域 immune 表单域记账不对称）。写梯真值=usesLocal 主支清零档
         //  （:14175-14179 `immune[owner]=0`;DefaultToWhip usesLocal+cd=-1 penetrate=-1

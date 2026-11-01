@@ -40,6 +40,10 @@ import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 
 import { playerCanHitEnemy } from './projTargets';
+// ★BJ741 R19-4（2026-10-31）：SuperCart 激光 591 DV 单源（:12970——Mount.cs:5286-87
+// `proj.damage=60; Damage()` → Damage_PVE_Inner 逐靶 DamageVar(num15, owner.luck),
+// owner=玩家 luck 正向;旧裸 60 平值=面级残差）
+import { damageVarRoll } from '../stats/DamageVar';
 import {
   trackCollision, trackRotation, onTrack,
   FLAG_ON_TRACK, FLAG_BOUNCY_BUMPER, FLAG_USED_RAMP, FLAG_HIT_SWITCH,
@@ -1082,7 +1086,8 @@ export class Minecart extends Entity {
       //  ★BJ729-A（2026-10-27）:S02(BJ723-B) 全仓预倍清偿漏站——BJ467③ 期预倍形
       //  `* (cartTimerCrit ? 2 : 1)` + crit 同传=×4 双倍;Enemy.hurt 防后单次 ×2
       //  （NPC.cs:82067,Mount.cs:5282 Damage()→StrikeNPC 单次乘区）承载,预倍摘除。
-      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG), 0, 0, game, 0, cartTimerCrit, 0, true);   // 玩家矿车激光=DPS 计;★BJ467③ crit 位;★BJ729-A 预倍摘除
+      e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(SUPER_CART_LASER_DMG,
+          ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)), 0, 0, game, 0, cartTimerCrit, 0, true);   // 玩家矿车激光=DPS 计;★BJ467③ crit 位;★BJ729-A 预倍摘除;★BJ741 R19-4：DV :12970（banner 前,旧裸 60）
     }
   }
 

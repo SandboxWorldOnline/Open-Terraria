@@ -56,7 +56,7 @@ const iid = (vid: number): number => {
 
 const mkHooks = (w: World, p: Player): GameHooks => ({
   world: w, player: p, enemies: () => [], critters: () => [],
-  projectiles: [], spawnDrop: () => null, damagePlayer: (): number => 0,
+  projectiles: () => [], spawnDrop: () => null, damagePlayer: (): number => 0,   // ★BJ744 改判史：G36-A BJ740-D2 清偿线 Player.ts:5159 读 game.projectiles?.()（GameHooks 契约=方法,旧数组形夹具炸 is not a function）
   addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
   spawnEnemy: () => {}, spawnParticles: vi.fn(), notifyInventoryChanged: () => {},
   playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: vi.fn(),

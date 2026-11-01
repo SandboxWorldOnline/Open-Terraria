@@ -182,7 +182,9 @@ describe('接线 tickSlotCooldownOverlays（60Hz onBuffsFrame 通道消费面）
     p.inv.armor[3] = { id: idOfVid(6185), stack: 1 };  // 催化指环（Player.ts:2282 pStone 面）
     expect(p.equipStats.pStone).toBe(true);
     ui.tickSlotCooldownOverlays();
-    expect(cds.get('inv:0')!.dataset.cd).toBe('0.882'); // 2700/2700=1（非 2700/3600）
+    // ★BJ738 P04 随刀更新：穿石翻转拍当场调整现役药水病（AdjustRemainingPotionSickness
+    //  Player.cs:29167-29181——2700t×0.75=2025t,非旧「分母换、分子不动」的 2700t 满窗）
+    expect(cds.get('inv:0')!.dataset.cd).toBe('0.662'); // 2025/2700=0.75（0.75×0.882 上限曲线）
   });
 
   it('非治疗件/非治疗药水无覆盖（谓词=ItemFunc.potion 单源）', () => {

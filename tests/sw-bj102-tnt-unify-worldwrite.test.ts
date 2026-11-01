@@ -32,6 +32,9 @@
 //   M7 W1 OOB 回退 →true → W1 红
 //   M8 W3 截断除回退 >>4 → W3 红
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// ★BJ743-A（R24 SEV-2）：require('node:fs') 旁路收口——改 ESM import 形经守卫。
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { RollingBoulder, boulderTimeLeft } from '../src/entities/RollingBoulder';
@@ -354,8 +357,7 @@ describe('SW-BJ102 W3 心 tile 提取分式（负带分叉：trunc 除 vs >>4）
   it('W3b 1053 注液面接线：rbLavaBoulderExplosion 用截断除（S 锁+正域 span 烟测）', () => {
     // ★S 锁（M8 判别线）：rbLavaBoulderExplosion 消费截断除变体——正域两式同值
     //  （W3a 钉负带分叉值,本锁钉 1053 面→截断除的接线,防「顺手统一成 >>4」回退）
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
-    const { join } = require('node:path') as typeof import('node:path');
+    // ★BJ743-A：require 形退役——顶部 ESM import 经守卫（R24 SEV-2 旁路收口）。
     const src = readFileSync(join(__dirname, '../src/entities/RollingBoulder.ts'), 'utf8');
     const fn = src.slice(src.indexOf('private rbLavaBoulderExplosion'), src.indexOf('private rbPlaceLiquidLava'));
     expect(fn).toContain('this.rbCenterTileTruncX()');

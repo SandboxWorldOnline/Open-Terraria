@@ -15,7 +15,7 @@
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
 import { getModLoadResult } from '../mods/loader';
-import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, VANILLA_VID_NORMALIZE } from '../data/items';
 import {
   JourneyPowersState, targetTimeRate, timeRateSliderOf, strengthOfDifficultySlider,
   spawnRateMultiplier, shouldDisableSpawns, windOfSlider, sliderOfWind,
@@ -621,7 +621,11 @@ function buildJourneyBrowser(game: Game, body: HTMLElement): void {
    *  ★P6:mod 物品(vid≡30000+ 恒等域)入池——授予链 internalIdOfVid 对 mod vid
    *  identity 成立;名称渲染走既定文本回退。 */
   const sourceVids = (): number[] => {
-    const base = Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number);
+    // ★BJ738 P08：SetDefaults 归一化别名 vid（226→227）退出源集——反查表已把
+    //  226 指到 vi_227（items.ts VANILLA_VID_NORMALIZE）,不滤则「226+227」两行
+    //  同授一件（原版 ContentSamples.ItemsByType 键被 226 run 覆写=永无独立 226）。
+    const base = Object.keys(VANILLA_ITEM_KEY_BY_ID).map(Number)
+      .filter((v) => VANILLA_VID_NORMALIZE[v] === undefined);
     const alloc = getModLoadResult()?.allocation;
     return alloc ? [...base, ...alloc.items.values()] : base;
   };

@@ -73,14 +73,17 @@ describe('IIII219 饥饿链（332→333→334 毛刺循环）', () => {
     expect(events.filter((e) => e === 'starving').length).toBe(1);  // 表情 148 + Hungry 音
   });
 
-  it('H6 334 无自持重钉：毛刺 5t 到期 → 332 重授（循环闭合,:12240）', () => {
+  it('H6 334 持续不自灭（★BJ739 B02 改判：TimeLeftDoesNotDecrease 表,issue #29）', () => {
+    // 旧「毛刺 5t 到期 → 332 重授」循环重启 = 缺递减门时期的近似;原版 334 在
+    // BuffID.cs:22 不递减表——极饿持续到食物/蘑菇重置（tryToResetHungerToNeutral）
     const b = makeBuffs();
     toStarving(b);
     for (let i = 0; i < 10; i++) b.tick(DT);
-    expect(b.active.has(BuffType.Starving)).toBe(false);          // 毛刺到期
-    const re = b.active.get(BuffType.NeutralHunger)!;
-    expect(re).toBeLessThanOrEqual(480);                          // 链回 332（满档-当拍递减）
-    expect(re).toBeGreaterThan(479);
+    expect(b.active.has(BuffType.Starving)).toBe(true);           // 持续
+    expect(b.active.get(BuffType.Starving)).toBeCloseTo(5 / 60, 9);  // 时长钉 5t
+    expect(b.active.has(BuffType.NeutralHunger)).toBe(false);     // 不重播 332
+    b.tryToResetHungerToNeutral();
+    expect(b.active.has(BuffType.Starving)).toBe(false);          // 蘑菇/蛋奶酒重置可清
   });
 
   it('H7 持续极饿流干（接线验证）：100hp → num12=2 HP 每 60t 一跳（:19458-19477）', () => {

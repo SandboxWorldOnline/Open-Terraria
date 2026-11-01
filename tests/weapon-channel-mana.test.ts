@@ -111,13 +111,21 @@ describe('CheckMana ManaV2（空蓝照放 + slowMagicUse,Player.cs:53216-53253�
     expect(p.slowMagicUse).toBe(false);       // :53217 入口清标记
   });
 
-  it('蓝不足：恒返 true 照放（ManaV2）+ statMana=0（:53243/:53254）+ slowMagicUse=true（:53258-53261）', () => {
+  it('蓝不足：恒返 true 照放（ManaV2）+ statMana=0（:53243/:53251）+ slowMagicUse=true（:53258-53261）', () => {
     const p = new Player(0, 0, new Inventory());
     p.mana = 5;
     p.slowMagicUse = false;
     expect(p.checkMana(20)).toBe(true);       // 不再 return false 跳发（审计 ❌ 修复点）
+    // ★R24 翻案（2026-10-31 红蓝定谳,三轮连环错判终结）：不足支 statMana=0
+    //  （原版全 Player.cs 仅 :53243/:53251 两处,ManaV2=true 默认下永不负值）。
+    //  五百五十五刀（f2f38e02）曾改扣量直落可负（错锚 :5878=QuickBuff 有卫门扣减）
+    //  → G38-A 首判沿 BJ738 D6「陈旧断言」改 toBe(-15)（错）→ R24 定谳真回归,
+    //  src 已回原版语义。负 mana 实害=无下界下潜+回魔逐点爬回惩罚远重原版。
     expect(p.mana).toBe(0);
     expect(p.slowMagicUse).toBe(true);        // DoRunOutOfManaEffect（攻速窗 ×2.5 消费侧）
+    // ★R24 判别锁（补）：0 蓝连发不再下潜（555 刀实害面——每拍全耗负值累积）
+    for (let i = 0; i < 5; i++) expect(p.checkMana(20)).toBe(true);
+    expect(p.mana).toBe(0);                   // 恒钉 0,禁负域回归
   });
 
   it('标记随重估自愈：空蓝置标 → 蓝恢复后再 CheckMana → 标记清除（每拍续发都走入口）', () => {

@@ -25,11 +25,11 @@ export interface SummonFx {
   meleeSpeed?: number;   // meleeSpeed += X（3806 :13260）
   move?: number;         // moveSpeed += X（1834 :14047）
   mana?: number;         // statManaMax2 += N（3777 :13375 / 3778 :13381）
-  /** 1457 鞭 tag 栈族（ApplyEquipFunctional :13068-13083）：
-   *  tagEffectDuration += N（SilverBracer 6156 系 +2 → tag/proc/buff 时长 ×3） */
-  tagDur?: number;
-  /** maxTagEffects += N（6156/6158/6159 系各 +1——多鞭 mark 并存上限） */
-  maxTag?: number;
+  /** 1457 鞭 tag 栈族（ApplyEquipFunctional 置位 :14616-14629/:14690-14715 +
+   *  UpdateEquips 消费 :13068-13083——★BJ740-A ACC02 改布尔族单计,数值在
+   *  Player.computeEquipStats 循环后统一消费,本表不再携带 tagDur/maxTag 逐件值） */
+  silverBracer?: boolean;   // accSilverBracer（6156/6163/6183——tagEffectDuration+2/maxTag+1）
+  mobiusStrip?: boolean;    // accMobiusStrip（6158/6162——maxTag+1/whipRange+0.1）
   /** accSnakeBand（6157/6162/6186——每 3 挥中段补挥背包下一把鞭,需 maxTagEffects>1） */
   snakeBand?: boolean;
   /** accWickedArmlet（6159/6163/6179/6182——出鞭击退 +1,ItemCheck_Shoot :49159-49163） */
@@ -56,7 +56,13 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   3812: { dd2: true },              // 武僧腰带（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:14480/:13103——旧每件累加+4/+40%）
 
   // ---- 1457 召唤师鞭 tag 配饰九件（ApplyEquipFunctional case 6156-6163/:14615-14632
-  //      + 组合件 6179/6182/6183 :14690-14715;数值段 :13068-13083）----
+  //      + 组合件 6179/6182/6183 :14690-14715;消费段 :13068-13083）----
+  //  ★BJ740-A ACC02（issue #30）：逐件 tagDur/maxTag/whipRange 数值改三布尔族
+  //    （Silver∈{6156,6163,6183} Mobius∈{6158,6162} Wicked∈{6159,6163,6179,6182}
+  //    Snake∈{6157,6162,6186}）——族内多件只计一次（原版 accSilverBracer 等布尔
+  //    字段置位语义,消费在 Player.computeEquipStats 循环后单计）：
+  //    6156+6163 应 tagDur 3/maxTag 3（旧逐件叠加 5/4）;6158+6162 应 maxTag 2/
+  //    鞭程 0.1（旧 0.2）
   //  6156 SilverBracer:tagEffectDuration += 2（时长 ×3!）+ maxTagEffects++（:13068-13074,
   //    minionDamage += 0f 死代码勿抄）;6157 SnakeBand:accSnakeBand;6158 MobiusStrip:
   //    maxTagEffects++ + whipRangeMultiplier += 0.1;6159 WickedArmlet:maxTagEffects++;
@@ -65,15 +71,15 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   //  6179 ArmletOfRuin = WickedArmlet+accArmletOfRuin（:14690-14693）;6182 WickedClaws
   //  = WickedArmlet+autoReuseGlove+meleeSpeed+0.12（:14705-14709）;6183 SilverShield
   //  = SilverBracer+noKnockback+fireWalk（:14711-14715）
-  6156: { tagDur: 2, maxTag: 1 },                 // 银护腕（上锁盒 1/4,OpenLockBox :9452-9454）
+  6156: { silverBracer: true },                   // 银护腕（上锁盒 1/4,OpenLockBox :9452-9454）
   6157: { snakeBand: true },                      // 蛇环
-  6158: { maxTag: 1, whipRange: 0.1 },            // 莫比乌斯带（石巨人袋 1/6,OpenBossBag :7516-7518）
-  6159: { maxTag: 1, wickedArmlet: true },        // 邪恶臂镯
-  6162: { maxTag: 1, whipRange: 0.1, snakeBand: true },   // 衔尾蛇环 = 6158+6157
-  6163: { tagDur: 2, maxTag: 2, wickedArmlet: true },     // 暮光之握 = 6156+6159
-  6179: { maxTag: 1, wickedArmlet: true },        // 毁灭臂镯 = 6159+accArmletOfRuin（旗在 Player 侧）
-  6182: { maxTag: 1, wickedArmlet: true },        // 邪恶之爪 = 6159+autoReuseGlove+近战速+12%（Player 侧）
-  6183: { tagDur: 2, maxTag: 1 },                 // 白银之盾 = 6156+免击退+火焰块（Player 侧）
+  6158: { mobiusStrip: true },                    // 莫比乌斯带（石巨人袋 1/6,OpenBossBag :7516-7518）
+  6159: { wickedArmlet: true },                   // 邪恶臂镯
+  6162: { mobiusStrip: true, snakeBand: true },   // 衔尾蛇环 = 6158+6157
+  6163: { silverBracer: true, wickedArmlet: true },   // 暮光之握 = 6156+6159
+  6179: { wickedArmlet: true },                   // 毁灭臂镯 = 6159+accArmletOfRuin（旗在 Player 侧）
+  6182: { wickedArmlet: true },                   // 邪恶之爪 = 6159+autoReuseGlove+近战速+12%（Player 侧）
+  6183: { silverBracer: true },                   // 白银之盾 = 6156+免击退+火焰块（Player 侧）
   6186: { snakeBand: true },                      // 德鲁伊蛇斗篷 = 6157+星星斗篷（:14726-14729,星斗篷旗 Player 侧）
 
   // ---- DD2 头盔散件（GrantArmorBenefits case 3797-3880 :13231-13332 实读,2026-09-03

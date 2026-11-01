@@ -8,6 +8,7 @@
 //   PickAmmo 溶液加法  Player.cs:52645-52647；消耗门 :52739（5134 三分免）/:52815
 import { describe, it, expect, vi } from 'vitest';
 import { RNG } from '../src/core/rng';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { World } from '../src/world/World';
 import { WorldEvolution, type EvolutionHost } from '../src/world/evolution/WorldEvolution';
 import type { TileStore } from '../src/world/TileStore';
@@ -456,7 +457,11 @@ describe('WaterSplashProj 三瓶水', () => {
     while (!p.dead && t++ < 30) p.fixedUpdate(1 / 60, hooks);
     expect(hurt).toHaveBeenCalled();
     const [dmg, kb] = hurt.mock.calls[0];
-    expect(dmg).toBe(20);
+    // ★G37-A（D6,2026-10-31）改判史：69/70/621 敌臂补 DV :12970 逐靶掷（BJ729-A
+    //  登记债清偿）→ 旧平值钉 20 改 31 档 DV 域锁（bj735a 判例形,luck=0 单掷域）。
+    const dvDomainSol = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomainSol.add(damageVarRoll(20, 0, () => i / 31));
+    expect(dvDomainSol.has(dmg)).toBe(true);
     expect(kb).toBe(3);   // Math.sign(vx)>0 → +kb
     expect(p.dead).toBe(true);
     expect(sheetOf(st.type[st.idx(30, 31)])).toBe(109);   // Kill 转换照跑（菱形盖地板）

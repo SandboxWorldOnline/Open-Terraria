@@ -42,6 +42,8 @@ import { cutTilesBox } from './ProjCutTiles';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ746 A26：crit 段完整单源（类掷+TimerCrit 消费）
+import { damageVarRoll } from '../stats/DamageVar';            // ★BJ746 A26：DamageVar（:12970）
 
 /** NPC.canGhostHeal=false 族（NPC.cs SetDefaults 写点——NPC.cs:6270 字段缺省 true；
  *  false 站点 :13921(type384)/:13961(type387)/:13978(type388)/:15839(type523)）。
@@ -512,10 +514,28 @@ export class SpectreSoulProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
-      // flag3 单发族：pierce 入参 1 = Enemy.hurt 的免疫豁免+不设帧面（:13152 对应位）
-      const dmgHooked_659 = runModModifyHitNpcByProj(game.player, game, this.projId,
-        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, this.damage, false);   // ★D2
-            e.hurt(applyBannerDamageDealt(game, e, this.damage), 0, 0, game, 0, false, 1, true);
+      // ★BJ746 A26（issue#35,2026-11-01）：356 SetDefaults magic=true（:4471）→
+      //  Damage_PVE 全链三缺补齐（旧固定伤/crit=false/pen=0）：
+      //  ① DamageVar（:12970 `Main.DamageVar(num15, player.luck)` 每靶一掷）;
+      //  ② 魔法动态暴击（:12915-12927 三类掷的 magic 臂——owner magicCrit 聚合+
+      //    持械 item.crit 折入;aiStyle59 无暴击排除——:13712 flag10 的 aiStyle!=59
+      //    是 lifesteal 防自续门非 crit 面）+ TimerCrit 消费（:12928 无条件段）,
+      //    单源 rollVanillaHitCritConsumeTimer;
+      //  ③ 属主穿甲（:12852 num6=GetArmorPenetration(melee)+armorPenetration →
+      //    :13685 `dmg += checkArmorPenetration(num6,…)`——magic 弹走非 melee 档
+      //    =玩家 armorPenetration 通用池,shark tooth +5 类;经 Enemy.hurt 第 5 参）。
+      //  序=DamageVar→mod 链→banner（dealContacts 同序）;★旧 D2 遗留：mod 链结果
+      //  dmgHooked_659 算后即弃（hurt 仍传裸 this.damage）——本刀一并收编进管线。
+      const crit356 = rollVanillaHitCritConsumeTimer(this.projId, game,
+        e as unknown as { x: number; y: number; w: number; h: number });
+      let dmg356 = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+      dmg356 = runModModifyHitNpcByProj(game.player, game, this.projId,
+        (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg356, crit356);
+      dmg356 = applyBannerDamageDealt(game, e, dmg356);
+      const pen356 = ((game.player as unknown as
+        { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen) ?? 0;
+      e.hurt(dmg356, 0, 0, game, pen356, crit356, 1, true);
       this.penetrate--;                            // （:14189 命中尾递减,写段判定用写前值）
       return;                                      // keepIterating=false（单发结算终了）
     }

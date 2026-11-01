@@ -16,6 +16,12 @@ const GOLDEN_SLOT: Record<string, unknown> = {
 // :418-426 Wizard 七袍 legs=0、:468-470 ShadowScale 笛卡尔、:448-456 钴·秘银·精金九套、
 // :465 CrystalNinja（dashType=5）；含并行组C 已落 Forbidden '200|198|142'（ BJ157 lane）。
 // 重采样前 recon-armorset-1457 闸门过（DRIFT=0）。
+// ★BJ742-A R20-② 有意重采样（2026-10-31）：Jungle 8 键 manaCostMul 0.84 → manaCostOff
+//   0.16（ArmorSetBonuses.cs:278-281 manaCost-=0.16f 加算归位;工具译层同批校正）。
+// ★BJ745 A02 有意重采样（2026-11-01,issue#35）：+Turtle 槽键 '99|65|54'
+//   {endurance:0.15}（ArmorSetBonuses.cs:159-164 Benefits.Turtle sb 面;闸门
+//   recon-armorset-1457 同批扩 slotFx 双 lane 译层,DRIFT=0 复核在案）。
+//   闸门先行复跑 DRIFT=0。
     "278|246|234": {"ashWood":true,"name":"AshWood"},
     "89|56|51": {"titaniumStorm":true,"name":"Titanium"},
     "90|56|51": {"titaniumStorm":true,"name":"Titanium"},
@@ -88,16 +94,17 @@ const GOLDEN_SLOT: Record<string, unknown> = {
     "216|252|19": {"pickSpeed":0.1,"name":"Mining"},
     "216|252|240": {"pickSpeed":0.1,"name":"Mining"},
     "171|177|112": {"endurance":0.12,"solar":true,"dashType":3},
-    "8|8|8": {"manaCostMul":0.84,"name":"Jungle"},
-    "76|8|8": {"manaCostMul":0.84,"name":"Jungle"},
-    "76|49|45": {"manaCostMul":0.84,"name":"Jungle"},
-    "8|49|45": {"manaCostMul":0.84,"name":"Jungle"},
-    "76|49|8": {"manaCostMul":0.84,"name":"Jungle"},
-    "76|8|45": {"manaCostMul":0.84,"name":"Jungle"},
-    "8|49|8": {"manaCostMul":0.84,"name":"Jungle"},
-    "8|8|45": {"manaCostMul":0.84,"name":"Jungle"},
+    "8|8|8": {"manaCostOff":0.16,"name":"Jungle"},
+    "76|8|8": {"manaCostOff":0.16,"name":"Jungle"},
+    "76|49|45": {"manaCostOff":0.16,"name":"Jungle"},
+    "8|49|45": {"manaCostOff":0.16,"name":"Jungle"},
+    "76|49|8": {"manaCostOff":0.16,"name":"Jungle"},
+    "76|8|45": {"manaCostOff":0.16,"name":"Jungle"},
+    "8|49|8": {"manaCostOff":0.16,"name":"Jungle"},
+    "8|8|45": {"manaCostOff":0.16,"name":"Jungle"},
     "9|9|9": {"dmgMelee":0.1,"fireWalk":true,"name":"Molten"},
     "46|27|26": {"dmgMelee":0.1,"dmgRanged":0.1,"frostBurn":true,"name":"Frost"},
+    "99|65|54": {"endurance":0.15,"name":"Turtle"},   // ★BJ745 A02（2026-11-01）新增（ArmorSetBonuses.cs:160 endurance+=0.15f）
     "101|66|55": {"ghostHeal":true,"dmgMagic":-0.4,"name":"SpectreHealing"},
     "156|66|55": {"ghostHurt":true,"name":"SpectreDamage"},
     "200|198|142": {"forbidden":true,"name":"Forbidden"},
@@ -196,8 +203,8 @@ const snap = (rec: Record<string, unknown>): Record<string, unknown> =>
   JSON.parse(JSON.stringify(rec));
 
 describe('BJ147 套装单表金标（ArmorSetBonuses.cs 重放面冻结）', () => {
-  it('槽键表全量冻结快照（161 键 = 101 既有 + 组A/B 批 59 + 组C Forbidden;含 summonSetOnly 召唤并键 16）', () => {
-    expect(Object.keys(ARMOR_SET_BONUSES).length).toBe(161);
+  it('槽键表全量冻结快照（162 键 = 101 既有 + 组A/B 批 59 + 组C Forbidden + ★BJ745 A02 Turtle sb 面 1;含 summonSetOnly 召唤并键 16）', () => {
+    expect(Object.keys(ARMOR_SET_BONUSES).length).toBe(162);
     expect(snap(ARMOR_SET_BONUSES)).toEqual(GOLDEN_SLOT);
   });
 

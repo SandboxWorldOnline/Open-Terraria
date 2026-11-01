@@ -356,7 +356,7 @@ describe('BJ534 ④执行面（踩踏 B 支接线 + 落地冲击波）', () => {
     expect(orch[0].ui).toBe(0);                   // 蓄力档 uniqueInfoPiece=0
   }, 30000);
 
-  it('蓄力档（32×downDashTime>300 ⇔ ≥10t）：60 伤（crit 预倍）/kb20/crit=true + 半径 176', async () => {
+  it('蓄力档（32×downDashTime>300 ⇔ ≥10t）：30 伤+crit 旗（防后 ×2=Enemy.hurt 承载）/kb20/crit=true + 半径 176', async () => {
     const w = makeWorld();
     const game = makeHooks(w);
     const p = await makePlayer();
@@ -374,11 +374,11 @@ describe('BJ534 ④执行面（踩踏 B 支接线 + 落地冲击波）', () => {
     expect(p.onGround).toBe(true);
     expect(p.downDashTime).toBeGreaterThanOrEqual(10);
     expect(near.hits.length).toBe(1);
-    expect(near.hits[0].dmg).toBe(60);            // 30×2 本仓 crit 调用侧预倍（MountCombat 同款）
+    expect(near.hits[0].dmg).toBe(30);            // ★BJ741 R19-8：:29011 平值 30 恒定——crit 旗单布尔承载 ×2（Enemy.hurt 防后,S02 域）;旧「30×2 调用侧预倍」=×4 双倍已摘
     expect(near.hits[0].crit).toBe(true);
     expect(near.hits[0].kbx).toBe(20);
     expect(mid.hits.length).toBe(1);              // 176 半径臂
-    expect(mid.hits[0].dmg).toBe(60);
+    expect(mid.hits[0].dmg).toBe(30);
     const orch = game.orchestras.filter((o) => o.type === ParticleOrchestraType.DeadCellsDownDashExplosion);
     expect(orch.length).toBe(1);
     expect(orch[0].ui).toBe(1);                   // 蓄力档 uniqueInfoPiece=1
