@@ -89,6 +89,9 @@ describe('BJ723-A S06：skyStoneEffects 召唤伤/击退/镐速（1457 Player.cs
       expect(pDay.damageMult('summon')).toBeCloseTo(1 + dayDmg, 6);
       const pNight = mkPlayer();
       pNight.nightPhase = true;
+      // ★R20-S0/BJ740 ACC07 改判史：899 门已迁 dayTime 域（Player.cs:15531 亲读）——
+      //   nightPhase=true 单设时 dayTime 缺省 true = 日食相（899 应开）。真夜须双位齐设。
+      (pNight as unknown as { dayTime: boolean }).dayTime = false;
       pNight.inv.armor[3] = { id: iid(vid), stack: 1 };
       expect(pNight.equipStats.minionDmg).toBeCloseTo(nightDmg, 6);
       expect(pNight.damageMult('summon')).toBeCloseTo(1 + nightDmg, 6);

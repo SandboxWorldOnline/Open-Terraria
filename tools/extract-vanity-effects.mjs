@@ -15,10 +15,18 @@
 // 扣除规则（保留旧 van 臂语义）：vanilla vanity=true 且 SW 现库 vanilla-itemstats.json
 //   带 van 键的 vid（3581/3929/4563/4762/5075/5076/1987 等）由 itemTooltip 的 !st?.van
 //   臂压住 → 从 social 产物扣除。★S7 简报勘误（本刀亲读证据）：音乐盒族 DefaultToMusicBox
-//   虽同时置 vanity=true，但现库 itemstats 对音乐盒 acc=1 且【无 van 键】（857 实测）→
-//   van 臂【不】压住；原版语义 social && !vanity && !hasVanityEffects（Main.cs:20854）对
-//   音乐盒=无警示行 → 音乐盒必须留在 social 集（若照 S7「音乐盒族扣除」会造 SW 警示/原版
-//   无警示的分歧）。故扣除判据=数据面 st.van 实压位，非 vanilla vanity 字面。
+//   虽同时置 vanity=true，但【彼时】现库 itemstats 对音乐盒 acc=1 且【无 van 键】（857
+//   实测）→ van 臂【不】压住；原版语义 social && !vanity && !hasVanityEffects（Main.cs
+//   :20854）对音乐盒=无警示行 → 音乐盒必须留在 social 集（若照 S7「音乐盒族扣除」会造
+//   SW 警示/原版无警示的分歧）。故扣除判据=数据面 st.van 实压位，非 vanilla vanity 字面。
+// ★BJ744 改判史（2026-10-31）：BJ740-A ACC16 已把音乐盒族 itemstats 修正为
+//   {acc:0, van:1}（DefaultToMusicBox Item.cs:48638-48655 亲读：accessory=true +
+//   hasVanityEffects=true + vanity=true——旧「acc=1 无 van 键」系提取器漏扫 helper
+//   内置位的数据面错误）→ 上段 S7 留集锚【前提灭失】。警示 parity 复核（1457 亲读
+//   Main.cs `item.social && !item.vanity && !item.hasVanityEffects`）：音乐盒
+//   vanity=true ⇒ !vanity 假 ⇒ 原版无警示行;SW itemTooltip `!st?.van` 臂同拍压制
+//   （van=1）⇒ 音乐盒按通用规则从 social 扣除【不再】造成 SW 警示/原版无警示分歧
+//   （两压制项 OR 关系,van 臂已独立承载）。留集锚改判双向锚（见下）。
 //
 // era guard 四要素（docs/era-guard-family.md 处方）：
 //   ① SW_ITEM_VER 白名单 {1456,1457,1458}（缺省 1457；1456=SetDefaults1..5 分段全量解析）；
@@ -315,10 +323,16 @@ const social = a1457.filter((v) => !vanCoSet.includes(v));
 for (const v of [3581, 3929, 4563, 4762, 5075, 5076, 1987]) {
   if (!vanCoSet.includes(v)) throw new Error(`锚断言失败[van 同置件]: vid ${v} 现库无 van 键 → 扣除面漂移,需重定谳`);
 }
-// 音乐盒族留集复验（S7 勘误物证：562 基础音乐盒等 itemstats acc=1 无 van → van 臂不压,
-// 必须留集；857/858 非 1457 音乐盒 vid）
+// 音乐盒族双向锚（★BJ744 改判史：S7 留集锚前提灭失——BJ740 ACC16 数据面修正后
+// 音乐盒带 van 键,按通用规则扣除;警示 parity 由 van 臂独立承载,见头注）：
+//   ①承运面——音乐盒 vid 必须在 all 集（DefaultToMusicBox 通路 85 站 101 vid,
+//     M3 判别面:通路旗摘除即红）;
+//   ②数据面——音乐盒 vid 必须带 van=1（itemstats 回退/漂移即 fail-loud,需重定谳
+//     勿静默;扣除态由通用规则 social=all−vanCoSet 构造性保证,不另设锚=M4 变异
+//     「摘扣除判定」须工具自绿的判别设计）。
 for (const v of [562, 574, 1596, 1610, 6144]) {
-  if (!social.includes(v)) throw new Error(`锚断言失败[音乐盒留集]: vid ${v} 被扣除 → S7 简报形态（会造成 SW 警示/原版无警示分歧）`);
+  if (!a1457.includes(v)) throw new Error(`锚断言失败[音乐盒承运]: vid ${v} 不在 all 集 → DefaultToMusicBox 通路失守（85 站 101 vid 承运面）`);
+  if (stats[String(v)]?.van !== 1) throw new Error(`锚断言失败[音乐盒 van 臂]: vid ${v} 现库无 van=1 键 → itemstats 数据面漂移（BJ740 ACC16 域）,需重定谳`);
 }
 
 const product = {
@@ -326,7 +340,7 @@ const product = {
     generator: 'tools/extract-vanity-effects.mjs',
     source: 'Terarria{1456,1457,1458}/Terraria/Item.cs SetDefaults 三通路（字面/DefaultToInfoAccessory/DefaultToGolfBall/DefaultToMusicBox）',
     knife: 'BJ260 (2026-09-22) S7 漏修#1 根治',
-    deduction: 'social = all − {vids with vanilla-itemstats van 键（van 臂实压位）};音乐盒族留集勘误见工具头注',
+    deduction: 'social = all − {vids with vanilla-itemstats van 键（van 臂实压位）};音乐盒族随 BJ740 ACC16 van 键落位按通用规则扣除（BJ744 改判史见工具头注）',
     crossCheck: '1456/1457/1458 all 集逐 vid 全等',
     counts: { all: a1457.length, social: social.length, vanCoSet: vanCoSet.length, ...m1457.counts, literalVids: literalVids.length },
     anchorLines: { signature: m1457.signatureLine },

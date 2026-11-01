@@ -150,12 +150,14 @@ describe('BJ707-G31 §A 件1 recall spawn 支 lavaTime=lavaMax（:37874 邻行�
     expect(SRC.game).toContain("if (c.kind === 'spawn') p.lavaOpacity = 1;");
     expect(SRC.game).toContain("if (c.kind === 'spawn') p.lavaImmuneTicks = p.equipStats.lavaMax + p.cartLavaMaxBonus;");
     // 门序（G29 C2 同式）:复位键在 Teleport 公共段（fallStartY）之后同域
-    //（★BJ713-A:窗 600→1000——同域判据不收窄,扩聚合判语注加长所致）
+    //（★BJ713-A:窗 600→1000——同域判据不收窄,扩聚合判语注加长所致;★BJ748:窗
+    //  1000→1200——G39-A g36a D-⑨ teleportHeadReset 双字段行（spawn 分流注释+行）
+    // 插入同段,同域判据仍不收窄）
     const iFall = SRC.game.indexOf('p.fallStartY = null;      // fallStart 重置');
     const iLavaT = SRC.game.indexOf("if (c.kind === 'spawn') p.lavaImmuneTicks = p.equipStats.lavaMax + p.cartLavaMaxBonus;");
     expect(iFall).toBeGreaterThan(0);
     expect(iLavaT).toBeGreaterThan(iFall);
-    expect(iLavaT - iFall).toBeLessThan(1000);
+    expect(iLavaT - iFall).toBeLessThan(1200);
     // lavaTime 键紧随 lavaOpacity 键（同段邻行序;窗 400→600 同因）
     const iLavaO = SRC.game.indexOf("if (c.kind === 'spawn') p.lavaOpacity = 1;");
     expect(iLavaT).toBeGreaterThan(iLavaO);

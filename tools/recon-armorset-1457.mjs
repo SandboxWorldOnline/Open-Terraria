@@ -138,14 +138,18 @@ const SET_EFFECTS = {
   SpectreDamage: { fx: { ghostHurt: true } },                       // :261-264
   Meteor: { lane: 'vid', fx: { spaceGun: true } },                  // :266-269
   Frost: { fx: { frostBurn: true, dmgMelee: 0.1, dmgRanged: 0.1 } },// :271-276
-  Jungle: { fx: { manaCostMul: 0.84 }, note: '原版 manaCost-=0.16 加算;仓旧档乘区键 0.84=1-0.16 等价承载' },  // :278-281
+  Jungle: { fx: { manaCostOff: 0.16 }, note: '★BJ742-A R20-②：manaCost-=0.16 归加算池（与钴/秘银/精金牌同键形）——旧译乘区键 0.84=「单源等价」自欺式近似,与 223/钴秘银精金并戴即露馅(0.9×0.84≠1-0.06-0.16)' },  // :278-281
   Molten: { fx: { dmgMelee: 0.1, fireWalk: true }, note: 'buffImmune[24] 走 name==="Molten" 特支(Player.ts :2462)' },  // :283-291
   ChlorophyteMelee: { fx: { crystalLeaf: true, endurance: 0.05 } }, // :129-134
   ChlorophyteSummon: { fx: { crystalLeaf: true }, summon: { slot: 2 } },  // :136-141(SUMMON_SET 并键)
   Chlorophyte: { fx: { crystalLeaf: true } },                       // :143-147
   Angler: { fx: { anglerSet: true }, note: '5591-5593 未注册债 BJ163 已销（atlas vanilla.json Captain Hat/Vest/Pants+itemstats 槽+legacyIndex/idNames/l10n 全在;单件 fish:5=活面）' },  // :149-152
   Cactus: { lane: 'vid', fx: { cactusThorns: true } },              // :154-157(getter 收编)
-  Turtle: { lane: 'vid', fx: { turtleThorns: true }, base: ['endurance+0.15 未承载(:159-164)'], note: 'thorns=1 被消费端覆写 2 等价(Game :39102 turtleSet?2:thorns)' },  // :159-164(getter 收编)
+  // ★BJ745 A02（issue#35）：双 lane——vid 键承载 turtleThorns 行为旗（Player.ts
+  //  turtleSet getter→反伤 ×2 覆写）+ slotFx 承载 sb 槽键面 endurance 0.15
+  //  （ArmorSetBonuses.cs:160 `endurance += 0.15f`→equipStats.enduranceEq→damage
+  //  ×(1−endurance)）;thorns=1f 被消费端覆写 2 等价不承载。
+  Turtle: { lane: 'vid', fx: { turtleThorns: true }, slotFx: { endurance: 0.15 }, note: 'thorns=1 被消费端覆写 2 等价(Game :39102 turtleSet?2:thorns)' },  // :159-164(getter 收编+槽键 sb 面)
   Palladium: { fx: { onHitRegen: true } },                          // :212-215
   Orichalcum: { fx: { onHitPetal: true } },                         // :217-220
   Titanium: { fx: { titaniumStorm: true } },                        // :222-225
@@ -331,9 +335,19 @@ for (const set of SETS) {
                        // tr.lane 裸 TypeError 中断全量对账;跳过让其余套照常对拍,末尾干净汇总
   const expSlot = new Map(), expVid = new Map();
   for (const trip of set.triplets) {
-    const key = tr.lane === 'vid' ? trip.join('|') : slotKeyOf(trip);
-    if (key === null) { fail(`${name} 三元组 ${trip} 槽真值缺失`); continue; }
-    (tr.lane === 'vid' ? expVid : expSlot).set(key, trip);
+    if (tr.lane === 'vid') {
+      expVid.set(trip.join('|'), trip);
+      // ★BJ745 A02：vid 主 lane + slotFx 并道（Turtle endurance sb 面）——槽键照常入
+      // expSlot,由 slot lane 环按 slotFx 对拍
+      if (tr.slotFx) {
+        const sk = slotKeyOf(trip);
+        if (sk !== null) expSlot.set(sk, trip);
+      }
+    } else {
+      const key = slotKeyOf(trip);
+      if (key === null) { fail(`${name} 三元组 ${trip} 槽真值缺失`); continue; }
+      expSlot.set(key, trip);
+    }
   }
   // vid lane
   for (const key of expVid.keys()) {
@@ -355,12 +369,13 @@ for (const set of SETS) {
     for (const key of expSlot.keys()) {
       if (claimedSlotKeys.has(key)) claimedSlotKeys.get(key).push(name);
       else claimedSlotKeys.set(key, [name]);
-      if (!tr.fx || !Object.keys(tr.fx).length) continue;   // 召唤专属套不走 sb 通道检查
+      const slotFace = tr.lane === 'vid' ? tr.slotFx : tr.fx;   // ★BJ745 A02：vid 套 sb 面走 slotFx
+      if (!slotFace || !Object.keys(slotFace).length) continue;   // 召唤专属套不走 sb 通道检查
       const rec = ARMOR_SET_BONUSES[key];
       if (!rec) { missing.push(key); continue; }
       if (isSummonOnly(rec)) { fail(`${name} 键 ${key} 被标 summonSetOnly（sb 通道漏亮）`); continue; }
       present++;
-      for (const [f, v] of Object.entries(tr.fx ?? {})) {
+      for (const [f, v] of Object.entries(slotFace ?? {})) {
         if (!fxEq(rec[f], v)) fail(`${name} ${key} 特效 ${f}=${rec[f]} ≠ 原版翻译 ${v}`);
       }
       if (tr.summon) {
@@ -616,10 +631,20 @@ for (const u of pieceCov.quirk) detail(`QUIRK ${u}`);
 console.log('\n[4] 孤儿键 census（仓有、原版注册表无）');
 const allVanillaSlotKeys = new Set(), allVanillaVidKeys = new Set();
 for (const set of SETS) {
-  const lane = SET_EFFECTS[set.name]?.lane ?? 'slot';
+  const trOr = SET_EFFECTS[set.name];
+  const lane = trOr?.lane ?? 'slot';
   for (const trip of set.triplets) {
-    const key = lane === 'vid' ? trip.join('|') : slotKeyOf(trip);
-    if (key !== null) (lane === 'vid' ? allVanillaVidKeys : allVanillaSlotKeys).add(key);
+    if (lane === 'vid') {
+      allVanillaVidKeys.add(trip.join('|'));
+      // ★BJ745 A02：slotFx 并道套的槽键入 slot 白名单（Turtle endurance sb 面）
+      if (trOr?.slotFx) {
+        const sk = slotKeyOf(trip);
+        if (sk !== null) allVanillaSlotKeys.add(sk);
+      }
+    } else {
+      const key = slotKeyOf(trip);
+      if (key !== null) allVanillaSlotKeys.add(key);
+    }
   }
 }
 // 槽键死键判定：任一非通配段在全表无一件可占据该槽 → 该键运行时永不匹配（保守上界）
@@ -646,7 +671,7 @@ console.log(unportedReport.length
 console.log(`  · PARTIAL：${partialReport.join(' / ') || '（无）'}`);
 console.log(`  · 单件面 PARTIAL ${pieceCov.partial.length} id + QUIRK ${pieceCov.quirk.length} id（--verbose 明细）`);
 console.log(`  · summonOnly 16 键 setBonus 文本面暗（原版亮;仓 85 键既有正确面不含——组A 裁决）`);
-console.log(`  · Turtle endurance+0.15 未承载（组B）/ 5591-5593 渔夫二型未注册债已销（BJ163：`);
+console.log(`  · Turtle endurance+0.15 已承载（★BJ745 A02 槽键 sb 面）/ 5591-5593 渔夫二型未注册债已销（BJ163：`);
 console.log(`    atlas Captain Hat/Vest/Pants + itemstats 槽 + legacyIndex/idNames/l10n 均在——死面判词作废）`);
 console.log(`  · Nebula nebulaCD-- / 238 十周年 maxMinions+1 / moonLordLegs·slowFall·canFloatInWater 旗面（组B/C）`);
 

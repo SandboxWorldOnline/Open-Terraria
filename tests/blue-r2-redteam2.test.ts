@@ -289,17 +289,31 @@ describe('R2-04/R2-05 978 命中门', () => {
 // R2-06⑤ BeetleMeter 实扣累计
 // ============================================================
 describe('R2-06⑤ 甲虫实扣模型', () => {
-  it('registerHit 加账＋进攻梯子 400/1600/5200 层位·抽水', () => {
-    const host: { beetleOrbs?: number } = { beetleOrbs: 0 };
+  // ★BJ745 A16（issue#35）：buff 单源重构后 orbs 由 buff 栏派生——夹具补 fakeBuffs
+  // 宿主（裸宿主无栏=派生恒 0）,期望按原版「AddBuff 拍 + 派生拍」两拍滞后重写。
+  function buffHost(): { beetleOrbs?: number; buffs: { applied: Array<[number, number]>; removed: number[]; live: Map<number, number>; has(t: number): boolean; apply(t: number, s: number): void; remove(t: number): void } } {
+    const live = new Map<number, number>();
+    return {
+      beetleOrbs: 0,
+      buffs: {
+        applied: [] as Array<[number, number]>, removed: [] as number[], live,
+        has: (t: number) => live.has(t),
+        apply: (t: number, s: number) => { (live as Map<number, number>).set(t, s); },
+        remove: (t: number) => { live.delete(t); },
+      },
+    };
+  }
+  it('registerHit 加账＋进攻梯子 400/1600/5200 层位·抽水（orbs 两拍滞后派生）', () => {
+    const host = buffHost();
     const m = new BeetleMeter();
     m.registerHit(500, true);
-    m.tick(host, true, false);
+    m.tick(host, true, false); m.tick(host, true, false);
     expect(host.beetleOrbs).toBe(1);
     m.registerHit(1300, true);
-    m.tick(host, true, false);
+    m.tick(host, true, false); m.tick(host, true, false);
     expect(host.beetleOrbs).toBe(2);
     m.registerHit(6000, true);
-    m.tick(host, true, false);
+    m.tick(host, true, false); m.tick(host, true, false);
     expect(host.beetleOrbs).toBe(3);
     const c3 = m.stateForTest().counter;
     m.tick(host, true, false);
@@ -307,14 +321,22 @@ describe('R2-06⑤ 甲虫实扣模型', () => {
   });
 
   it('掉层重置 countdown=0（:16678）；防御臂 180 计数增益一球（:16596-16617）', () => {
-    const host: { beetleOrbs?: number } = { beetleOrbs: 2 };
+    const host = buffHost();
     const m = new BeetleMeter();
+    m.tick(host, true, false);       // 族旗=offense（守卫放行 might 族）
+    host.buffs.live.set(BuffType.BeetleMight1, 5 / 60); // 预置 Might1（orbs 派生 1）
     m.tick(host, true, false);
-    expect(m.stateForTest().countdown).toBe(0);
-    expect(host.beetleOrbs).toBeLessThanOrEqual(2);
-    const dHost: { beetleOrbs?: number } = { beetleOrbs: 0 };
+    expect(host.buffs.live.has(BuffType.BeetleMight1)).toBe(false);   // 掉层到 0：梯子清档（:16686-96 num≠orbs&&orbs>0 → DelBuff 98-100）
+    const m2 = new BeetleMeter();
+    const host2 = buffHost();
+    m2.tick(host2, true, false);     // 族旗=offense → 掉层路径须 might 族在栏
+    host2.buffs.live.set(BuffType.BeetleMight2, 5 / 60);   // Might2（orbs 派生 2,counter0 → num0 < 2 掉层）
+    m2.tick(host2, true, false);
+    expect(m2.stateForTest().countdown).toBe(0);
+    expect(host2.beetleOrbs).toBeLessThanOrEqual(2);
+    const dHost = buffHost();
     const dm = new BeetleMeter();
-    for (let i = 0; i < 180; i++) dm.tick(dHost, false, true);
+    for (let i = 0; i < 181; i++) dm.tick(dHost, false, true);   // 180 满 → AddBuff(95),181 拍派生
     expect(dHost.beetleOrbs).toBe(1);
   });
 

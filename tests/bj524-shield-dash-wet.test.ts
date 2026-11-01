@@ -265,6 +265,10 @@ describe('BJ524③ 其他 dashType 湿态同构抽验', () => {
     p.inv.armor[0] = { id: iid(2763), stack: 1 };     // Solar Flare Helmet
     p.inv.armor[1] = { id: iid(2764), stack: 1 };     // Solar Flare Breastplate
     p.inv.armor[2] = { id: iid(2765), stack: 1 };     // Solar Flare Leggings
+    // ★BJ744 改判史：BJ742 R20-1 日曜 dashType=3 补盾门（Player.cs:16549-16553）——
+    //  0 盾裸套 dash=0（旧 Math.max 恒 3 白送面退役）→ 冲刺不发起。授满盾
+    //  （=原版充能后可冲撞态,bj742a S1 同 idiom）,发起拍 dashDelay==0 闩 eq.dash=3。
+    p.solarShields = 3;
     for (let i = 0; i < 10; i++) tick(p, w);
     expect(p.inWater).toBe(true);
     p.facing = 1;

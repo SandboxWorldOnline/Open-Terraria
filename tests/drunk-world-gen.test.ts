@@ -147,10 +147,20 @@ describe('IIIII14 DRUNK(05162020) 世界效应', () => {
     //   （cs:70698）读 Main.tileSolid——Piles 头 cs:18915-18925 已把云族 189 等翻
     //   非实心 ⇒ 云腿喷泉整组判死（微夹具复现:云实心 8 格存活/翻非实心 0 格）。
     //   机制五环全 1:1 亲读定谳=非回归;旧 >0 锚在 09-21 期流（BJ711-A/BJ715-A
-    //   仪式谓词域勘正等已定谳改动移流之前）。登记债:vanilla oracle/x86 rig 对
-    //   本种子终态喷泉计数复核（在途金标禁重冻判例适用——world-final-hash 同批
-    //   重冻以本定谳为据）。
-    expect(D.fountains).toBe(0);                        // style>0 放置照跑;Piles 云腿判死=原版同构
+    //   仪式谓词域勘正等已定谳改动移流之前）。
+    // ★G38-A rig 复核（2026-10-31,BJ731 D2 债清偿）——【上述定谳被证伪】:
+    //   vanilla x86 rig（arch -x86_64 强制,TerrariaServer 1.4.5.8,seed=5162020
+    //   数值触发 drunk,4200×1200）本种子终态喷泉=16 格/2 座存活（坐标聚类
+    //   (2647-2648,93-96)/(718-719,106-109),双邪恶自证 18817/17145）≠0。源码
+    //   二重证伪:Piles 头翻表 cs:18915-18925 属【pass 内作用域】——Piles 尾
+    //   cs:19608-19619 整批复原（tileSolid[189/460/190/196/202/717-719/225/379]
+    //   = true+SetBoulderSolidity(true)）,pass 后云族恒回实心;「整组判死」前提
+    //   （永久翻非实心）不成立,vanilla 实况=部分杀伤（24→16,1 座被杀 2 座存活）。
+    //   本断言 0=SW 现值锁（掷流已偏移的合法终态）,【非 vanilla 对齐面】——
+    //   债 G38-D1:worldgen 槽链 053_Smooth_World 首差（八通道认证 RED 525152,
+    //   tools/_iii153fin vs golden-g/105_Final_Cleanup）收敛前,喷泉面不得再
+    //   以「原版同构」立论;流归位后本断言应随 vanilla 真值重锚（预计 16）。
+    expect(D.fountains).toBe(0);                        // style>0 放置照跑;SW 现流终态（rig 证伪原版同构论,见上 G38-A 注）
     expect(C.islands.filter((i) => !i.isLake).map((i) => i.style)).toEqual([0, 0, 0]);
     expect(C.snowCloud).toBe(0);
     expect(C.fountains).toBe(0);

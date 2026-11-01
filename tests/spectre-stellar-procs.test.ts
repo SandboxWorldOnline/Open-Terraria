@@ -1,6 +1,6 @@
 // 弹 661 黑爆 Colliding 重载 / 幽灵伤害头 ghostHurt 全链 / 星璇之音减伤批回归
 // （2026-08-31 对齐批③④⑤⑥；标杆 Terarria1457/Terraria/Projectile.cs）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ741 R19-1：vi=Math.random 0.5 中性档（856 DV 接入随刀）
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -208,6 +208,9 @@ describe('SpectreSoulProj AI_059（:29368-29431,★三轮蓝队 F2 EU 全套化�
     expect(orb.dead).toBe(true);
   });
   it('★触敌即亡（链保序）：预热面 14t 内接触零伤零死；跨 60 拍当拍单跳 Kill（penetrate 默认 1,:14189→:17312）', () => {
+    // ★BJ748（A26 尾迹收口）：BJ746 A26 给 356 敌臂补 DamageVar（:12970）后
+    //  foe.hits[0] 进随机域（30±15% 逐跑漂移）——0.5 中性档（×1.00 恒等,同 BJ741 R19-1 式）。
+    const rnd748 = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     // 与弹重叠的敌——预热期（ai1<60）friendly=false ⇒ Damage_PVE 不受理
     const foe = mkEnemy(7, 96, 100, 40, 40);
     const { hooks } = makeHooks([foe]);
@@ -223,6 +226,7 @@ describe('SpectreSoulProj AI_059（:29368-29431,★三轮蓝队 F2 EU 全套化�
     expect(orb.dead).toBe(true);                // :17312 penetrate 归零同拍
     expect('hitCd' in (orb as unknown as Record<string, unknown>)).toBe(false);
     expect((orb as unknown as { penetrate: number }).penetrate).toBe(0);
+    rnd748.mockRestore();
   });
 
   it('锁失重选随机(:29403)后朝目标平滑转向(v×29+dir)/30(:29414)且速度保持 ~4', () => {
@@ -360,6 +364,7 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     expect(Math.hypot(lift.vx, lift.vy)).toBeLessThan(2 * Math.hypot(400, 50) * Math.SQRT2);
   });
   it('AI_167 触敌即亡(penetrate 默认 1→:14194--→:17312 同拍 Kill)；隔墙 ×0.75 即时折算(:13333)', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 敌臂 DV 接入（G37①）——0.5 中性档（tier=floor(0.5×31)−15=0 ×1.00）
     const p = new Player(24 * 16, 104 * 16, new Inventory());   // 玩家左侧 (cx≈394)
     const foe = mkEnemy(5, 1600, 1660, 40, 40);                 // 弹右侧近敌
     const { hooks, store } = makeHooks([foe], undefined, p);
@@ -370,7 +375,8 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     for (let t = 0; t < 89 && !g.dead; t++) g.fixedUpdate(1 / 60, hooks);
     expect(g.dead).toBe(true);                         // 首个有效敌命中当拍死亡
     expect(foe.hits.length).toBe(preHits + 1);         // 触杀一跳；爆裂轮免疫不双扣
-    expect(foe.hits[preHits]).toBe(60);                // trunc(81×0.75)=60.75→60
+    expect(foe.hits[preHits]).toBe(60);                // trunc(81×0.75)=60.75→60（DV 中性 ×1.00）
+    rnd741.mockRestore();
   });
 
   it('寿尽路(:47429 AI 自身 Kill)★A6 EU 化：无接触也在 tick30（第88/89子步）进 Kill；曲线逐子步取样对拍', () => {
@@ -421,6 +427,7 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
   });
 
   it('爆裂真结算(:72831-72841)：128×128 弹心居中盒,盒内全吃/盒外免疫/幂等', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 敌臂 DV 接入——0.5 中性档
     const p = new Player(120, 940, new Inventory());   // 玩家盒 (120,940,20,42)——LOS 锚
     const inBox = mkEnemy(10, 494, 950, 18, 18);       // 盒内 [424..552]×[904..1032]
     const outBox = mkEnemy(11, 490, 1038, 16, 16);     // 底沿外 6px
@@ -439,6 +446,7 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     killOf().call(g, hooks);                           // active=false 幂等（:71761 同构）
     expect(inBox.hits.length).toBe(1);
     expect(outBox.hits.length).toBe(0);
+    rnd741.mockRestore();
   });
 
   it('F2 减伤视线=步行族整盒对整盒(Collision.cs:373→383→388)：非对称走廊判别场', () => {
@@ -456,8 +464,10 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     const inBox = mkEnemy(10, 494, 950, 18, 18);
     const { hooks } = makeHooks([inBox], st, p);
     const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g, hooks);
+    rnd741.mockRestore();
     expect(inBox.hits).toEqual([81]);                  // 步行族视线通 → 无 ×0.75
   });
 
@@ -472,8 +482,10 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     const { hooks } = makeHooks([inBox], st, p);
     expect(canHit(st, 424, 904, 128, 128, 120, 940, 20, 42)).toBe(false);
     const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g, hooks);
+    rnd741.mockRestore();
     expect(inBox.hits).toEqual([60]);                  // trunc(81×0.75)
   });
 
@@ -484,7 +496,9 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     const far = mkEnemy(3, 594, 1685 - 9, 18, 18);              // >64px 爆区外
     const { hooks } = makeHooks([v, mid, far], undefined, p);
     const g = new SparkleGuitarProj(394, 1685, 50, 0, 81, 394, 1685);
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     for (let t = 0; t < 20 && !g.dead; t++) g.fixedUpdate(1 / 60, hooks);
+    rnd741.mockRestore();
     expect(g.dead).toBe(true);
     expect(v.hits).toEqual([81]);
     expect(mid.hits).toEqual([81]);
@@ -663,6 +677,7 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门弹幕域 + 
   }
 
   it('①弹幕域残窗拒爆裂：iframes>0 受害者整跳跳过且【不落局部免疫标】', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     const { hooks } = makeHooks([], undefined, new Player(120, 940, new Inventory()));
     const victim = mkEnemy(10, 494, 950, 18, 18);           // 落于爆裂 128 盒内
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
@@ -681,9 +696,11 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门弹幕域 + 
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g2, sceneB.hooks);
     expect(victim.hits).toEqual([81]);                      // 新弹无窗正常结算
+    rnd741.mockRestore();
   });
 
   it('②近战域簿对门位惰性（P1 勘误面）+受理写尾 noteNpcPlayerImmune(id,0) 出表照达', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     const p = new Player(120, 940, new Inventory());
     const scene = makeHooks([], undefined, p);
     const victim = mkEnemy(11, 494, 950, 18, 18);
@@ -698,9 +715,11 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门弹幕域 + 
       .killStellarTune as (gh: GameHooks) => void).call(gA, scene.hooks);
     expect(scene.winPeek(victim.id)).toBeUndefined();       // ★受理写尾桥面出表（W 刀 face=usesLocal→0）
     expect(victim.hits).toEqual([81]);                      // 弹幕域开门 → 照结
+    rnd741.mockRestore();
   });
 
   it('③独立计数隔离：弹幕域带窗者拒、不带者结；两账互不串扰,窗满释后后续弹照样落地', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：856 DV 接入——0.5 中性档
     const p = new Player(120, 940, new Inventory());
     const scene = makeHooks([], undefined, p);
     const wVictim = mkEnemy(12, 494, 950, 18, 18);          // 带弹幕域窗 10t
@@ -719,5 +738,6 @@ describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门弹幕域 + 
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (lh: GameHooks) => void).call(later, scene.hooks);
     expect(wVictim.hits).toEqual([81]);                     // 后续弹终获释放
+    rnd741.mockRestore();
   });
 });

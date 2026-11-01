@@ -378,7 +378,14 @@ describe('§4 946 城镇臂 tag 面（:12947 城镇同链）', () => {
     expect(block).toContain('this.townAcceptLadder(game, n, true)');   // StatusNPC+命中视效+清窗
     expect(block).toContain('darkHarvestChain');                        // 916 链电（OnHit :13711 位）
     expect(block).toContain('this.attackFlash = 24');
-    expect(block).toContain('kbDir * (this.knockback + mkb)');          // 裸kb+minionKB（:52477）
+    // ★BJ748（G39-A g36a D-⑧ 尾迹收口,2026-11-01）：召唤杖 Titan KB 序重构——
+    //  原版 :47558 GetWeaponKnockback 全武器出生定格（summon 分支 (kb+全池 minionKB)
+    //  ×Titan）,命中拍直读弹体 kb。旧形=命中拍 `kbDir * (this.knockback + mkb)`（装备
+    //  面 mkb 命中加算=双计+Titan 序不可交换）,G39 同刀拆除——重钉新形：
+    //  ①命中拍裸 kb（mkb 已出生烘焙进 this.knockback,Game wrapper summon 分支
+    //  getWeaponKnockback :53986-89）;②负锁防回潮（命中拍 +mkb 回归=双计）。
+    expect(block).toContain('kb: kbDir * this.knockback');              // 命中拍直读烘焙 kb（G39 D-⑧）
+    expect(block).not.toContain('this.knockback + mkb');                // 负锁：命中拍 +mkb 回归=双计恰红
   });
 });
 

@@ -29,11 +29,12 @@ import { TILE_DEFS, FORBIDS_SLOPING_IDS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
-import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt, hitTownNpcsAoeBox, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A：hitTownNpcs（D1 B26 接触面）+hitCrittersAll（930 爆散 D4 critter 臂）
+import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt, hitTownNpcsAoeBox, hitTownNpcs, hitCrittersAll, hitCritters } from './projTargets';   // ★BJ729-A：hitTownNpcs（D1 B26 接触面）+hitCrittersAll（930 爆散 D4 critter 臂）;★G37-A（D7）：hitCritters（MountShot 接触 critter 臂）
 import { projectileData } from '../data/vanillaProjectiles';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { canHitLine } from '../physics/LineOfSight';
 import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）
 import { nextVector2Circular } from './SparkleGuitarProj';   // ★BJ707-G31 Utils.NextVector2Circular(4,4) 扫帚 spark 面（Utils.cs:1301-1304 单源）
 // ★终清波批：930 圣坦爆散 gore 段（GorePiece.newGore 通道,旧"无 API 不接"退役）
 import { GorePiece } from './GorePiece';
@@ -178,8 +179,9 @@ export interface MountedPlayerView {
   jumpEdgePrev?: boolean;
   /** ★BJ704-G15（G13 登记债④）上一 tick 尾快照的 ↑ 键电平（Player.upEdgePrev ≙
    *  原版 releaseUp——UpdateControlHolds :29319-29327 移动段后刷新,次拍 :26939
-   *  tryStartHover 读 = ↑ 键上升沿配对位）。★与 jumpEdgePrev（Space∪Up 合成键）
-   *  分立：原版 controlUp=W 独立键面（PlayerInput.cs:2072/2076 默认绑定 + TriggersSet
+   *  tryStartHover 读 = ↑ 键上升沿配对位）。★与 jumpEdgePrev 分立（BJ737-A 起后者
+   *  =Space 单键面）：
+   *  原版 controlUp=W 独立键面（PlayerInput.cs:2072/2076 默认绑定 + TriggersSet
    *  CopyInto :786/:790 分立拷贝,Space 只入 Jump 不入 Up）——悬浮起飞边沿须读 ↑
    *  专属沿（持 Space 中按 W 亦触发=vanilla 语义,旧读合成跳键沿=漏触发）。
    *  缺省 false（合成视图旧义 = 边沿成立） */
@@ -469,7 +471,7 @@ export interface FishronView {
 
 /** WallID.Sets.AllowsWind（WallID.cs:54）= wall 0（无墙）+ 围栏族 12 型；
  *  InAPlaceWithWind 的挡风墙白名单——白名单外墙体即挡风（cs:88158） */
-const WALL_ALLOWS_WIND: ReadonlySet<number>
+export const WALL_ALLOWS_WIND: ReadonlySet<number>   // ★BJ745 A41 导出：ItemDrop.tryFillBucket 墙白名单单源共用
   = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
 
 /** WorldGen.InAPlaceWithWind int 重载（WorldGen.cs:88141-88163）1:1：tile 坐标域，
@@ -2171,9 +2173,10 @@ export class MountInstance {
    *  且 releaseUp 边沿）。★BJ704-G15（G13 登记债④,本刀修）：边沿通道换 ↑ 键
    *  专属沿（upEdgePrev）——原版 releaseUp 由 UpdateControlHolds :29319-29327
    *  （`controlUp ? false : true`,移动段【后】刷新）承载,:26939 读的是上拍尾值
-   *  ⇒ 语义 = ↑ 键（W）上升沿。旧读 `!jumpEdgePrev`（Space∪Up 合成跳键的上拍
-   *  电平——仓内 inputJump=Space∪Up,Game.ts 输入合成）：持 Space 中按 W 时合成
-   *  键上拍已真=不触发（vanilla 触发）——键面分叉面。CCed 清输入 (:25432-42 →
+   *  ⇒ 语义 = ↑ 键（W）上升沿。旧读 `!jumpEdgePrev`（合成跳键的上拍电平——BJ737-A
+   *  前仓内 inputJump=Space∪Up 并键面,Game.ts 输入合成;★BJ737-A 起 inputJump=Space
+   *  单键面=controlJump 精确）：持 Space 中按 W 时合成键上拍已真=不触发（vanilla
+   *  触发）——键面分叉面。CCed 清输入 (:25432-42 →
    *  仓 :6107) 在尾快照【前】=冻结拍 upEdgePrev=false,解冻持 W 即沿（vanilla
    *  同相:冻结拍 controlUp 清零 → releaseUp 刷新真）。
    *  ★BJ704-G5（G4-②）冲量 :26941 `-(Acceleration + gravity + 0.001)` 读 gravity
@@ -3486,16 +3489,33 @@ export class MountShot extends TownShot {
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
             pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
-        e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        // ★G37-A（D6,2026-10-31）：MountShot 606 flagless（零类掷）/14 ranged（掷）
+        //  ——TimerCrit :12928 两型照消费（ownedBySomeone 玩家骑乘弹）+DV :12970
+        //  逐靶掷（旧平值=BJ729-A D6 登记债）;critChance 路由门无载体（spawn 位不写）
+        //  → 类掷恒开（606 flagless 天然零掷,14 按数据面掷）。
+        const critMs = rollVanillaHitCritConsumeTimer(this.projId, game, e);
+        e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))), Math.sign(this.vx) * this.knockback, 0, game, 0, critMs, 0, true);   // 音/飘值=单点
         this.dead = true;   // penetrate 1 近似
         return;
       }
     }
     // ★BJ729-A（D1 B26a,2026-10-27）：城镇 voodoo 靶——MountShot 玩家骑乘施放
     //  （owner=本地玩家）friendly 弹巫毒窄门（:12618-12631）;AABB 自盒;settle 镜像
-    //  敌怪臂链（无 crit 掷/DV=面级既有形态[D6 族登记]）;penetrate 1 受理即消散。
+    //  敌怪臂链（★G37-A D6：crit 掷+TimerCrit+DV 补齐,旧无=面级既有形态[D6 族登记]）;
+    //  penetrate 1 受理即消散。
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
-      'playerProj', this.projId)) {
+      'playerProj', this.projId, undefined, undefined, undefined, undefined,
+      (tnMs) => ({
+        dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnMs),
+      }))) {
+      this.dead = true;
+      return;
+    }
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
+    //  动物同链（606/14 非 minion/sentry → CanNPCBeHit :20675 放行）;AABB 自盒;
+    //  penetrate 1 受理即消散（:14189-196 同相）。
+    if (hitCritters({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game)) {
       this.dead = true;
       return;
     }
@@ -3604,10 +3624,14 @@ export class SantankShellProj extends TownShot {
     //  Damage() 重跑 victim 循环（:12592）对小动物同链（930 非 minion/sentry →
     //  CanNPCBeHit :20675 放行）;penetrate=-1 多靶 → hitCrittersAll。
     hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
+    // ★BJ741 R19-5：settle 中心近似清偿——旧 `tn.x + 8` 假定城镇靶恒 16 宽（方向 sign
+    //  在宽靶上偏错）;G37-A 起 settle 参型已带受害靶 hitbox（x/y/w/h）,真中心 =
+    //  x+w/2（敌怪臂 :3617 `e.x + e.w / 2` 同式）。kb=8 语义不动（PrepareBombToBlow
+    //  :47683 单标量）。
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
       (tn) => ({
         dmg: Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0)),
-        kb: Math.sign((tn as unknown as { x: number }).x + 8 - this.cx) * 8,
+        kb: Math.sign(tn.x + tn.w / 2 - this.cx) * 8,
       }));
     // SelfHurtPlayers（Kill→friendly&&owner==myPlayer 分支 :71788-71795）：重盒相交伤主人
     const p = game.player;
@@ -3722,7 +3746,10 @@ export class SantankShellProj extends TownShot {
         // ★SW-T1：飞行命中面=Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)`
         //  【luck 正向】,DV 在旗乘区（applyBannerDamageDealt）前——原版同序
         const dmg = Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0));
-        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);
+        // ★G37-A（D6）：930 ranged（SetDefaults :8819-27 亲读）→ crit 掷 :12915-27
+        //  +TimerCrit :12928 接单源（旧静态 false=BJ729-A D6 crit 族登记债）。
+        const crit930 = rollVanillaHitCritConsumeTimer(this.projId, game, e);
+        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, 0, crit930, 0, true);
         this.hitCd.set(e.id, 10);
       }
     }
@@ -3732,7 +3759,11 @@ export class SantankShellProj extends TownShot {
     //  iframes 承载;penetrate=-1 无消亡位。
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
       'playerProj', this.projId, undefined, undefined, undefined, undefined,
-      () => ({ dmg: Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0)) }));
+      (tn930) => ({ dmg: Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0)),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn930) }));   // ★G37-A（D6）：城镇臂 crit 镜像
+    // ★G37-A（D7）：critter 臂——飞行接触面 victim 循环对小动物同链（930 非
+    //  minion/sentry）;AABB 自盒;penetrate=-1 无消亡位（per-target 10t 窗近似同敌怪臂）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game);
     if (--this.life <= 0) { this.explode(game); }  // timeLeft 尽 → Kill 爆散（3600s 档罕至）
   }
 

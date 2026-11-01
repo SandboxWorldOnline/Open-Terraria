@@ -10,8 +10,11 @@
 //   - 命中分支内无 return：消亡当拍仍执行速度混合 + 整批尾迹尘（:28954-28986）
 // 弹体参数（SetDefaults :3610-3617 / :3692-3698）：6×6、alpha 255、tileCollide=false
 // （穿墙）、298 magic=true（已由调用点魔法门保证）。
-// 单人语义：原版鬼疗跨队友选最缺血者（ghostHeal :11424-11434），本仓无队友体系，
-// ai[0] 恒 = 本地玩家（与吸血 305 同——vampireHeal :11447 也固定 owner）。
+// 单人语义（★BJ746 A23 勘正）：原版鬼疗【生成时】跨玩家槽选最缺血者
+// （ghostHeal :12097-12108：active∧!dead∧((!owner.hostile∧!cand.hostile)∨同队)∧
+// 距命中点≤3000，取 statLifeMax2−statLife 严格更大者；全满血回落 owner）——目标经
+// ai[0] 固化，AI_052 只追不动重选。本仓远端代理体系（candidatePlayers）已建，
+// 选择面落 Game.applyLifeSteal（vampireHeal :12118-12119 恒 owner 自己不变）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -27,10 +30,14 @@ export class HealProj extends Entity {
   readonly heal: number;
   /** 每子步次数（原版 extraUpdates+1） */
   private readonly extraUpdates: number;
-  /** 目标玩家引用（原版 ai[0] 玩家下标；单人 = 本地玩家） */
+  /** 目标玩家引用（原版 ai[0] 玩家下标；★BJ746 A23 起可为远端缺血队友代理） */
   private readonly target: { x: number; y: number; w: number; h: number;
     hp: number; maxHp: number };
-  private life = 3600;   // 兜底寿命（原版 NewProjectile 默认 timeLeft，防永不命中滞留）
+  /** ★BJ746 A24（issue#35）：timeLeft=3600（SetDefaults 缺省复位 :789）——原版
+   *  :17307 `timeLeft--` 在子步循环【内】（298 extraUpdates=3 → 4 次/tick、305=10
+   *  → 11 次/tick）⇒ 自然寿命=3600 子步=900t(15s)/327t(≈5.5s)。旧每 tick 一次
+   *  递减=60s（远离目标时四倍滞留）。 */
+  private life = 3600;
 
   // ---- ★通用湿段（Projectile.cs:16895-17113 全体弹共用段;2026-09-06 杂项弹簇批）----
   //  豁免核对：298（P.cs:3885-3893）/305（:3967-3974）SetDefaults【均无 ignoreWater
@@ -41,10 +48,9 @@ export class HealProj extends Entity {
   //  阻尼不适用：tileCollide=false（:3892/:3973）→ HandleMovement :17721 湿支不进。
   //  杀拍口径（Arrow.ts ⑥配方逐位核）：①命中消亡（:28952 Kill,命中分支内无 return
   //  ——当拍余段速度混合/尾迹尘照跑,湿段在其后=杀拍照跑,单调用点覆盖）;
-  //  ②life 头杀（fixedUpdate 首,本仓兜底寿位）——vanilla timeLeft 杀在 Update 尾
-  //  (:17307)湿段【后】,头杀拍由 dead 支补跑一次（湿段只在此拍单跑,与子步调用
-  //  互斥=天然防双跑,无需 wetSectionRan 机）。IsDestroyedByWater 域不含 298/305
-  //  （{85,15,188,34,1097,1106}）→ hooks 不接。
+  //  ②寿命杀（★BJ746 A24 改口径）——timeLeft-- 在子步尾（:17307,湿段/位移后）
+  //  ⇒ 杀拍湿段随该子步 wetStep 自然已跑（旧头杀位「补跑」机器退役）。
+  //  IsDestroyedByWater 域不含 298/305（{85,15,188,34,1097,1106}）→ hooks 不接。
   wet = false;
   lavaWet = false;
   honeyWet = false;
@@ -58,7 +64,12 @@ export class HealProj extends Entity {
     target: { x: number; y: number; w: number; h: number; hp: number; maxHp: number }) {
     super();
     this.projType = projType;
-    this.x = x; this.y = y;
+    // ★BJ746 A25（issue#35）：NewProjectile :10878-79 `position = (X,Y) − size/2`
+    // ——入参 (x,y)=出生【中心】（调用侧传命中敌心）,6×6 盒左上=中心−(3,3)。
+    // 旧直收当左上 ⇒ 中心偏右下 3px（issue：传 (100,100) 网页左上 100/100,
+    //  原 97/97）。305 同修（同 NewProjectile 通道）。
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
     this.heal = heal;
     this.target = target;
     this.extraUpdates = projType === 305 ? 10 : 3;   // :3696 / :3614
@@ -85,15 +96,10 @@ export class HealProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) {
-      // ★杀拍口径②（见字段块头注）：life 头杀拍湿段补跑一次（vanilla timeLeft 杀
-      // 在 Update 尾 :17307,湿段 :16895 该拍照跑;本仓头杀位曾整体跳过=杀拍溅花缺口）
-      this.dead = true;
-      this.wetStep(game);
-      return;
-    }
     // 原版 extraUpdates：每 tick AI+位移共 extraUpdates+1 次；消亡后 active=false
     // ⇒ 残余子步 AI 不再进（Projectile.Update :16878-16881）——当拍子步走完后止
+    // ★BJ746 A24：timeLeft-- 移入子步尾（:17307 位=AI/湿段/位移之后）——杀拍
+    //  湿段随本子步 wetStep 自然已跑（旧头杀位「补跑」机器随刀退役,口径②注作废）。
     for (let u = 0; u <= this.extraUpdates && !this.dead; u++) {
       const vcx = this.x + this.w / 2, vcy = this.y + this.h / 2;
       const dx = this.target.x + this.target.w / 2 - vcx;
@@ -153,6 +159,8 @@ export class HealProj extends Entity {
       this.wetStep(game);
       this.x += this.vx;   // tileCollide=false——穿墙不检碰撞（:3615/:3696）
       this.y += this.vy;
+      // ★BJ746 A24：timeLeft--（:17307 子步循环内,位移后）→ 3600 子步自然亡
+      if (--this.life <= 0) { this.dead = true; return; }
     }
   }
 }

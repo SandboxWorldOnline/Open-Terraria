@@ -131,6 +131,13 @@ describe('★生命水晶 shim ghost 修复锁（TileShine scratch 逐格 preTex
   it('④源级锁:Renderer 注册面（markWorldDynamicScratch 桥+一次性哨）在位', () => {
     expect(RDR).toContain('setShineScratchBakeHook((c, key) => this.markWorldDynamicScratch(c, key))');
     expect(RDR).toContain('_shineScratchHookSet');
-    expect(RDR).toContain("import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';");
+    // ★BJ743-A（R24 SEV-3 陈旧锁重钉,2026-10-31）：gladd 面③刀给本 import 追加
+    //   shineAddLayerOf（GL 桥访问器）未随刀重钉本锁 → 字面失配恒红。四符号断言
+    //   重钉为现行 import 行（Renderer.ts:343）——后续扩 import 须随刀同步本锁;
+    //   另按符号逐个断言（尾注变化不再脆红,符号缺一必红）。
+    expect(RDR).toContain("import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook, shineAddLayerOf } from './TileShine';");
+    for (const sym of ['drawTileShineGrid', 'drawTileShineAdditive', 'setShineScratchBakeHook', 'shineAddLayerOf']) {
+      expect(RDR).toContain(sym);
+    }
   });
 });

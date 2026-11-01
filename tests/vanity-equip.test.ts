@@ -21,10 +21,13 @@ describe('vanity 数据（van 标记）', () => {
     expect(st54.acc).toBe(1);
     expect(st54.van).toBeUndefined();
   });
-  it('提取覆盖面：stats 表 van=1 共 432 条（含 Boss 面具范围块;1 缺=非装备）', () => {
+  it('提取覆盖面：stats 表 van=1 共 552 条（含 Boss 面具范围块;1 缺=非装备）', () => {
     const t = JSON.parse(readFileSync('src/data/vanilla-itemstats.json', 'utf8')) as Record<string, { van?: number }>;
     const vanCount = Object.values(t).filter((e) => e.van === 1).length;
-    expect(vanCount).toBe(432);   // 420 case（token 级:落空标签组全体+嵌套 switch 命中分支,
+    // ★BJ744 改判史：BJ740 ACC16 补 helper 内置 vanity 位 120 键（音乐盒101/变声15/
+    //  巨柱4——DefaultToMusicBox 等 Item.cs:48625-48655 内置,case 块扫描天然漏）→
+    //  432→552。
+    expect(vanCount).toBe(552);   // 420 case（token 级:落空标签组全体+嵌套 switch 命中分支,
     //  2026-08-19 patch-vanity-stats 修;旧逐行扫描漏 DD2 面具 3863/3864、嵌套 5-tab 26 处
     //  与 3730/5104/5105 落空组）+ 10 Boss 面具范围块 + 3372/3373 算式 headSlot（2026-08-19
     //  表达式槽位提取入表）;1 缺 = 856 无槽位

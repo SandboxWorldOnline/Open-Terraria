@@ -150,14 +150,20 @@ describe('SW-BI1 TrapShot hostile 命中循环', () => {
 
 // ================= ③ Game.damagePlayer 反击面守卫（结构锁） =================
 describe('SW-BI1 damagePlayer attacker 反击面', () => {
-  it('结构锁：荆棘/日曜两反击支均以 attackerHurtOk 为前置门', () => {
+  it('结构锁：荆棘支以 attackerHurtOk 为前置门;日曜支 AoE 化后守卫迁入循环内', () => {
     const s = src('src/core/Game.ts');
     expect(s).toContain(
       "const attackerHurtOk = typeof (attacker as unknown as { hurt?: unknown } | undefined)?.hurt === 'function';");
     expect(s).toContain(
       'if (attacker && attackerHurtOk && contactOnly && !pvp && !attacker.dead && flag3 && !attacker.dontTakeDamage) {');
+    // ★BJ748（BJ745 A21 尾迹收口,2026-11-01）：日曜爆闪 608 AoE 化三修——原版 Kill
+    //  :73438 penetrate=-1 + Damage() 160×160 盒（盒心=玩家中心）打盒内全敌,无
+    //  attacker 门（弹族/环境耗盾也爆）⇒ 旧「attacker && attackerHurtOk && …」前置门
+    //  随刀整摘。SW-BI1 防炸面不降级：hurt 形状守卫迁入 AoE 循环内（二道防线）。
     expect(s).toContain(
-      'if (ok && p.solarShields < shieldsBefore && attacker && attackerHurtOk && !attacker.dead) {');
+      'if (ok && p.solarShields < shieldsBefore) {');
+    expect(s).toContain(
+      "if (typeof en.hurt !== 'function') continue;   // SW-BI1 二道防线（无 hurt 攻击者形状）");
   });
 
   it('类形状：TownNPC/Enemy 有 hurt（反击面合法接收者）', () => {

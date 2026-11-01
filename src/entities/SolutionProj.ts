@@ -31,8 +31,9 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B23）：城镇 voodoo 靶
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCritters } from './projTargets';   // ★BJ729-A（D1 B23）：城镇 voodoo 靶;★G37-A（D7）：critter 臂
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ494 掷率单源;★G37-A：crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
 
 /** 溶液弹型号表（AI_031 switch，1457 Projectile.cs:27165-27199）：projId → [conv, dust]。
  *  conv = BiomeConversionID（:27208 Convert 第三参）；dust = NewDust 型号 */
@@ -283,12 +284,11 @@ export class WaterSplashProj extends Entity {
         //  整段不存在=原版零掷;ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费
         //  照达（零掷≠跳消费,BJ492① 同谳）。critChance 字段缺省 0 保留=关断钉（掷臂对
         //  flagless 本就恒假;solution-family 直接构造测试依赖 0 缺省确定性,零改动）。
-        const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-        const timerCrit = (game.player as unknown as
-          { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
-          | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
-        const crit = rollCrit || timerCrit;
-        const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+        // ★G37-A（D5/D6 收编）：三行拆形迁单源 rollVanillaHitCritConsumeTimer
+        //  （:12915-28 类掷+TimerCrit 消费独立求值,零行为差）;DV :12970 逐靶掷
+        //  补齐（旧平值=BJ729-A D6 登记债）。
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+        const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后
         e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
         this.splash(game);
         return;
@@ -300,18 +300,19 @@ export class WaterSplashProj extends Entity {
     //  penetrate 1 受理即 splash 消亡（:14189-196 同相）。
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
       'playerProj', this.projId, undefined, undefined, undefined, undefined,
-      (tn) => {
-        void tn;
-        return {
-          crit: (this.critChance > 0 && rollVanillaHitCrit(this.projId, game))
-            || ((game.player as unknown as
-              { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
-              | null)?.tryConsumingTimerCrit?.(game,
-                (tn as unknown as { x: number }).x, (tn as unknown as { y: number }).y,
-                (tn as unknown as { w: number }).w, (tn as unknown as { h: number }).h) ?? false),
-          penPercent: this.armorPen,
-        };
-      })) {
+      (tnSol) => ({
+        // ★G37-A（D5/D6 收编）：TimerCrit 消费迁单源;DV 城镇臂镜像补齐。
+        dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnSol, this.critChance > 0),
+        penPercent: this.armorPen,
+      }))) {
+      this.splash(game);
+      return;
+    }
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环对小动物同链
+    //  （69/70/621 非 minion/sentry → CanNPCBeHit :20675 放行）;penetrate 1 受理
+    //  即 splash 消亡（:14189-196 同相,镜像敌怪/城镇支消亡位）。
+    if (hitCritters({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game)) {
       this.splash(game);
       return;
     }

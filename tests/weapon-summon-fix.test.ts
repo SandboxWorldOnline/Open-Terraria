@@ -12,6 +12,7 @@
 //  ⑩ 月主鞭 5480 proc：单发 1045 弧线弹（:14977-15011 num=1）+ 命中链式补发 ≤3（:14015-14018）
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { WhipProj } from '../src/entities/WhipProj';
 import { resolveWhipTagHit, MoonLordWhipProc } from '../src/entities/WhipTag';
 import { Arrow } from '../src/entities/Arrow';
@@ -368,8 +369,8 @@ describe('⑦ Foxparks 1094 翻转（1456 :56111-56120）', () => {
   });
 });
 
-describe('⑧ 致命球 533 自旋相位门（1456 :28874-28877）', () => {
-  it('冲刺段（ai[0] 3-8）不自旋;待机（0-2）自旋 rotation += vx×0.04', () => {
+describe('⑧ 致命球 533 自旋相位门（1456 :28874-28877 / 1457 :30471-30474）', () => {
+  it('冲刺 6/8 相每 AI 拍 rotation += π/6（MaxUpdates=2 → π/3/tick）;蓄力 3-5 不自旋;待机（0-2）自旋 rotation += vx×0.04', () => {
     const e = mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40);   // <800 触发攻击
     const { hooks, player, enemies } = makeHooks([e]);
     const m = mkMinion(533, player, player.cx + 200, player.cy - 60);
@@ -377,13 +378,26 @@ describe('⑧ 致命球 533 自旋相位门（1456 :28874-28877）', () => {
     expect((m as unknown as { dA0: number }).dA0).toBe(6);
     const rotInDash = m.rot;
     for (let i = 0; i < 10; i++) m.fixedUpdate(1, hooks);
-    expect(m.rot).toBe(rotInDash);                       // 3-8 相位零自旋（位移仍在）
-    // 清敌 → 待机相位（无触发）→ 恢复自旋
+    // ★G38-A 改判（2026-10-31,棘轮在途红收口）：旧断言「3-8 相位零自旋」= BJ696
+    //  （2026-10-20）重写冲刺块前的陈旧面。原版 1457 :30239-30294 亲读：冲刺 6/8 相
+    //  每 AI 拍 rotation += π/6（MaxUpdates=2 → 双子步 π/3/tick）、7 相 rotation =
+    //  velocity 角 + π——冲刺段旋转恒动（flag31 早 return,不经待机自旋门）;唯蓄力
+    //  3-5 相（:30190-30215）零 rotation 写。待机自旋门 ai[0]<3∨≥9 → rotation +=
+    //  vx×0.04（1457 :30471-30474）。
+    expect(m.rot).toBeCloseTo(rotInDash + (10 * Math.PI) / 3, 6);   // 冲刺自旋（位移仍在）
+    // 蓄力 3-5 相：零自旋（:30190-30215 无 rotation 写,velocity ×0.9/拍）
     enemies.length = 0;
+    (m as unknown as { dA0: number; dA1: number }).dA0 = 3;
+    (m as unknown as { dA0: number; dA1: number }).dA1 = 0;
+    const rotInCharge = m.rot;
+    for (let i = 0; i < 5; i++) m.fixedUpdate(1, hooks); // dA1=5 ≤ 16 全程蓄力相
+    expect(m.rot).toBe(rotInCharge);                     // 蓄力相零自旋
+    // 清敌 → 待机相位（无触发）→ 恢复自旋
     (m as unknown as { dA0: number; dA1: number }).dA0 = 0;
     (m as unknown as { dA0: number; dA1: number }).dA1 = 0;
+    const rotBeforeIdle = m.rot;
     m.fixedUpdate(1, hooks);
-    expect(m.rot).not.toBe(rotInDash);
+    expect(m.rot).not.toBe(rotBeforeIdle);               // 待机 vx×0.04 自旋恢复
   });
 });
 
@@ -447,7 +461,16 @@ describe('⑩ 月主鞭 5480 proc 1457 语义（Projectile.cs:14977-15011/:14015
     procs[2].fixedUpdate(1, hooks);
     procs = added.filter((a): a is MoonLordWhipProc => a instanceof MoonLordWhipProc);
     expect(procs.length).toBe(3);                        // 全程 ≤3（1+2 代补发）
-    expect(e.hp).toBe(100000 - 20 * 3);                  // 每代固定 20
+    // ★G37-A（D6,2026-10-31）改判史：1045 敌臂补 DV :12970 逐靶掷（BJ729-A 登记债
+    //  清偿）→ 旧「每代固定 20」总伤钉改三击各自 31 档 DV 域锁（bj735a 判例形;
+    //  pens.length=三击计数锚）。
+    expect(e.pens.length).toBe(3);
+    const dvDomain1045 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain1045.add(damageVarRoll(20, 0, () => i / 31));
+    const totalDmg = 100000 - e.hp;
+    expect(dvDomain1045.has(Math.round(totalDmg / 3)) || dvDomain1045.has(Math.floor(totalDmg / 3)) || dvDomain1045.has(Math.ceil(totalDmg / 3))).toBe(true);   // 均值落域（三档和的近似判别;域=7 离散值[17..23],20×±15% ToEven 合并档）
+    expect(totalDmg).toBeGreaterThanOrEqual(3 * 17);    // 3×min 档（20×0.85=17）
+    expect(totalDmg).toBeLessThanOrEqual(3 * 23);       // 3×max 档（20×1.15=23）
     expect(procs.every((p) => p.dead)).toBe(true);       // penetrate=1 首敌即逝
   });
 });

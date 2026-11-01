@@ -258,7 +258,7 @@ describe('BJ497-§2：443 孤儿平率收编+磁球传播链死值摘除', () =>
     const electro = stripAll(SRC('entities/ElectroSphereProj.ts'));
     expect(electro).not.toContain('critBonus');          // 孤儿字段摘除（块注释一并剥离）
     expect(electro).toContain('critChance = 0.04;');     // BeamBoltProj BJ489 同形路由门
-    expect(electro).toContain('rollVanillaHitCrit(ELECTROSPHERE_PROJ, game)');
+    expect(electro).toContain('rollVanillaHitCritConsumeTimer(ELECTROSPHERE_PROJ, game, e, this.critChance > 0)');   // ★G37-A（D6,2026-10-31）改判史：443 敌臂 crit 段迁单源（TimerCrit :12928 收编）
     const magnet = stripAll(SRC('entities/MagnetSphereProj.ts'));
     expect(magnet).not.toContain('critBonus');           // 254 字段+:400 传播写位全摘
     expect(magnet).toContain('bolt.critChance = this.critChance;');   // 透传保留（magnet-sphere.test :228 契约）

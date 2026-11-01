@@ -21,13 +21,20 @@ interface MockEnemy {
   cx: number; cy: number; hp: number;
   vanillaId?: number;
   vx?: number; vy?: number;
-  hurt: (d: number) => boolean;
+  // ★BJ739 B19：nanoMul 第 11 参（penAdd 并入后 ×1.05 截断,Projectile.cs:13684-13690）
+  hurt: (d: number, kx?: number, ky?: number, g?: unknown, pen?: number, crit?: boolean,
+    pierce?: number, fp?: boolean, pp?: number, sp?: number, nanoMul?: number) => boolean;
   hits: number[];
 }
 function mkEnemy(id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy {
   const e: MockEnemy = {
     id, x: cx - w / 2, y: cy - h / 2, w, h, dead: false, cx, cy, hp: 10000, hits: [],
-    hurt: (d: number) => { e.hp -= d; e.hits.push(d); return true; },
+    // ★BJ739 B19：mock 无防/无 pen ⇒ 应用式 = trunc((d+0)×nanoMul)（真式在 Enemy.hurt）
+    hurt: (d: number, _kx?: number, _ky?: number, _g?: unknown, _pen?: number, _crit?: boolean,
+      _pierce?: number, _fp?: boolean, _pp?: number, _sp?: number, nanoMul?: number) => {
+      const v = nanoMul !== undefined && nanoMul !== 1 ? Math.trunc(d * nanoMul) : d;
+      e.hp -= v; e.hits.push(v); return true;
+    },
   };
   return e;
 }
@@ -106,14 +113,20 @@ describe('F2：鞭命中环 nano ×1.05 / party 彩带 289', () => {
     expect(c.y + c.h / 2).toBeCloseTo(e1.y + e1.h / 2, 5);   // targetNPC.Center.Y
   });
 
-  it('两浸剂同挂 → 乘区与出弹并行生效（门同支不互斥）', () => {
+  it('两浸剂换挂 → B06 互斥仅后者在栏（Main.cs:9100-07 meleeBuff 表）：彩带照出、nano 不乘', () => {
+    // ★BJ739 B06 改判（2026-10-31,issue #29）：浸剂同刻仅一（AddBuff_RemoveOld
+    //  MeleeBuffsOfMatchingType Player.cs:5352-65）——旧「两浸剂同挂并行生效」夹具
+    // 系未建互斥期的 un-vanilla 前提。现语义：后挂的 party 顶掉 nano ⇒ 命中不 ×1.05、
+    // 彩带 289 照出（party 分支自身有效）
     vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ723-C S03 位移修复:DV 中性档
     const e = mkEnemy(5, 400, 600);
     const h = makeHooks([e]);
     h.player.buffs.apply(BuffType.ImbueNano, 30);
-    h.player.buffs.apply(BuffType.ImbueParty, 30);
+    h.player.buffs.apply(BuffType.ImbueParty, 30);   // 顶掉 nano（互斥）
+    expect(h.player.buffs.has(BuffType.ImbueNano)).toBe(false);
+    expect(h.player.buffs.has(BuffType.ImbueParty)).toBe(true);
     landOneHit(mkWhip(h.player, 200), h.hooks, e);
-    expect(e.hits[0]).toBe(Math.trunc(200 * 1.05));           // 210
+    expect(e.hits[0]).toBe(200);                               // 无 nano 乘区
     expect(h.spawned.some((x) => x instanceof ConfettiBurstProj)).toBe(true);
   });
 });

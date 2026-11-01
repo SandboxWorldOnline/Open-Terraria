@@ -37,7 +37,7 @@
 //   比对盲窗:BANNER_VID_RUNS 290 vid ⊆ BANNERS 316 探针实证,段缩即红）。三锁判别力
 //   经对象级变异探针验证必红。
 import { describe, it, expect } from 'vitest';
-import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_STABLE_OF_INTERNAL } from '../src/data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_STABLE_OF_INTERNAL, VANILLA_VID_NORMALIZE } from '../src/data/items';
 import { BANNER_STYLE_BY_VID } from '../src/data/vanillaStyleDrops';
 
 const VID_RE = /^vi_(\d+)_/;
@@ -136,10 +136,17 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
   it('全域别名一致性域扫：byKey 每个 vi_ 键与 VANILLA_ITEM_KEY_BY_ID[vid] 同靶（SW-BN4,替代代表抽验）', () => {
     const fail: string[] = [];
     const skipped: string[] = [];
+    const normalizedAway: string[] = [];
     let swept = 0;
     for (const k of Object.keys(ITEM_BY_KEY)) {
       const m = VID_RE.exec(k);
       if (!m) continue;
+      // ★BJ744 改判史：BJ738 P08 SetDefaults vid 归一化（226→227,Item.cs:4195-4212
+      //  case 226 共享块 type=227——226 非现役药水）把源 vid 的权威键重定向到目标件
+      //  （VANILLA_ITEM_KEY_BY_ID[226]=vi_227_…）,而 vi_226 def 有意保留注册（数组
+      //  下标不可删,金鱼掉魂平移事故先例）→ 归一化退位源键单列豁免（有界,新成员
+      //  必红——同 4143 豁免 idiom）。
+      if (VANILLA_VID_NORMALIZE[Number(m[1])] !== undefined) { normalizedAway.push(k); continue; }
       const aKey = VANILLA_ITEM_KEY_BY_ID[Number(m[1])];
       if (aKey === undefined) { skipped.push(k); continue; }
       swept++;
@@ -147,6 +154,9 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
         fail.push(`${k} → def#${ITEM_BY_KEY[k]} ≠ 权威 ${aKey} → def#${ITEM_BY_KEY[aKey]}`);
       }
     }
+    expect(normalizedAway, '归一化退位源键集漂移（BJ738 P08 域外新增?）').toEqual([
+      'vi_226_LesserRestorationPotion',
+    ]);
     expect(fail, `别名失靶 ${fail.length}/${swept} 键:\n${fail.slice(0, 20).join('\n')}`).toEqual([]);
     // ★SW-RB8d 2026-09-08 豁免单点断言：无权威反查 vi_ 键必须恰为 vi_4143_manacloakstar
     //   一件（vanilla.json 无 vid 4143 → 自动循环无 def,2026-08-27 显式手注册;BN4 曾

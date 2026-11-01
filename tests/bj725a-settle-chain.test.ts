@@ -58,7 +58,9 @@ const mkEnemy = (id: number, cx: number, cy: number, vanillaId = 15): MockEnemy 
 describe('BJ725-B D1：41 Kill 爆炸内联支 crit 掷+DV（R03 邻位）', () => {
   it('D1-1 结构锁：敌怪臂掷位在（critX41/dmgV41）,旧 trunc 固定档退役', () => {
     const s = SRC('core/Game.ts');
-    expect(s).toContain('const critX41 = rollVanillaHitCrit(projId, this);');
+    // ★G37-A（D5,2026-10-31）改判史：41 敌臂 crit 段迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 收编——BJ729-A 登记债 D5 清偿;锁语义=面存在性）。
+    expect(s).toContain('const critX41 = rollVanillaHitCritConsumeTimer(projId, this, e);');
     expect(s).toContain('const dmgV41 = damageVarRoll(dmg, this.player.luck ?? 0);');
     expect(s).not.toContain('applyBannerDamageDealt(this, e, Math.max(1, Math.trunc(dmg)))');
   });

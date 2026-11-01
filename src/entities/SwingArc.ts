@@ -31,8 +31,8 @@ import { texId, texReady } from '../render/texId';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
 import { cutTilesBox } from './ProjCutTiles';
-import { hitCritters } from './projTargets';
-import { rollVanillaHitCrit } from './proj1457';
+import { hitCritters, hitCrittersAll } from './projTargets';   // ★G37-A（D7）：hitCrittersAll=弧族 critter 臂（锥/圆几何 hitTest 消费位）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）;★G37-A（D6）：弧族 TimerCrit :12928 接入
 // L5 长尾批：真刃系挥弧命中编排（Projectile.Damage case972-985 收编池）
 import { nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -411,8 +411,8 @@ export class SwingArc extends Entity {
       //  item.crit/词条 crt 的静态冻结载体退役;:25712 持械折入由 rollVanillaHitCrit
       //  动态承载=命中拍现值,写位已摘）。
       //  critChance≤0 关断钉保留（dealContacts :482 同族习语,测试置 0 禁暴击）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）;★S02:crit ×2=Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）①：锚弧（this.projId=972/982/983/997/984，数据面 melee）
       // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤在 banner 外随暴击并入
       const snapBonusArc = projectileSnapStrikeBonus(game,
@@ -451,8 +451,22 @@ export class SwingArc extends Entity {
           || (num15T > 0 && coneHitsRect(tn.x, tn.y, tn.w, tn.h, this.cx, this.cy, reachT,
             num14T - Math.PI / 4 * this.ai0 * num15T, Math.PI / 4));
       }, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tnArc) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnArc, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
+    //  动物同链（弧族非 minion/sentry → CanNPCBeHit :20675 放行）;锥形几何镜像
+    //  敌怪臂（主锥+拖尾锥）;usesLocalNPCImmunity 单跳=hitCrittersAll 逐靶一次
+    //  （一击致死,无免疫窗消费面）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game,
+      undefined, (cArc) => {
+        const reachC = 94 * this.scaleCur;
+        const num14C = this.rot + Math.PI * 2 / 25 * this.ai0;
+        const num15C = remapArc(this.t, this.ai1 * 0.3, this.ai1 * 0.5, 1, 0);
+        return coneHitsRect(cArc.x, cArc.y, cArc.w, cArc.h, this.cx, this.cy, reachC, num14C, Math.PI / 4)
+          || (num15C > 0 && coneHitsRect(cArc.x, cArc.y, cArc.w, cArc.h, this.cx, this.cy, reachC,
+            num14C - Math.PI / 4 * this.ai0 * num15C, Math.PI / 4));
+      });
     if (this.t >= this.ai1) this.dead = true;
   }
 
@@ -656,8 +670,8 @@ export class TrueNightsEdgeSlash extends Entity {
         if (!(Math.hypot(cpx - this.cx, cpy - this.cy) < 100 * this.scaleCur)) continue;
         if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0, e.cx, e.cy, 0, 0)) continue;
         // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,973 melee 旗）。
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-        const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+        const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷;★S02:crit ×2=Enemy.hurt 防后
         // ★F3 接线（蓝队四轮）②：真永夜刃伸长斩 973（数据面 melee）——双支同序；
         // 排除面 = 本弹 local 免疫窗投影
         const snapBonusTrueEdge = projectileSnapStrikeBonus(game,
@@ -686,8 +700,18 @@ export class TrueNightsEdgeSlash extends Entity {
           && canHitLine(game.world.store, this.cx, this.cy, 0, 0,
             tn.x + tn.w / 2, tn.y + tn.h / 2, 0, 0);
       }, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn973) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn973, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7）：critter 臂——圆 100×scale+LOS 几何镜像敌怪臂（ClosestPointInRect）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game,
+      undefined, (c973) => {
+        const cpxC = Math.max(c973.x, Math.min(c973.x + c973.w, this.cx));
+        const cpyC = Math.max(c973.y, Math.min(c973.y + c973.h, this.cy));
+        return Math.hypot(cpxC - this.cx, cpyC - this.cy) < 100 * this.scaleCur
+          && canHitLine(game.world.store, this.cx, this.cy, 0, 0,
+            c973.x + c973.w / 2, c973.y + c973.h / 2, 0, 0);
+      });
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
@@ -829,8 +853,8 @@ export class NightsEdgeFly extends Entity {
         && !(num15F > 0 && coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reachF,
           num14F - Math.PI / 4 * this.ai0 * num15F, Math.PI / 4))) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,972 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）;★S02:crit ×2=Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）③：永夜刃飞斩变体 972（数据面 melee）——双支同序
       const snapBonusFly = projectileSnapStrikeBonus(game,
         { projId: 972 }, (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
@@ -849,16 +873,27 @@ export class NightsEdgeFly extends Entity {
     //  内收）;settle 镜像（crit 掷 melee/kb=sign(vx)×6.5）;9999 单跳由 TownNPC.hurt
     //  iframes 承载。
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 6.5, 'playerProj', 972,
-      (tn) => {
+      (tn972) => {
         const reachF2 = 94 * this.scaleCur;
         const num14F2 = this.rot + Math.PI * 2 / 25 * this.ai0;
         const num15F2 = remapArc(this.t, this.ai1 * 0.3, this.ai1 * 0.5, 1, 0);
-        return coneHitsRect(tn.x, tn.y, tn.w, tn.h, this.cx, this.cy, reachF2, num14F2, Math.PI / 4)
-          || (num15F2 > 0 && coneHitsRect(tn.x, tn.y, tn.w, tn.h, this.cx, this.cy, reachF2,
+        return coneHitsRect(tn972.x, tn972.y, tn972.w, tn972.h, this.cx, this.cy, reachF2, num14F2, Math.PI / 4)
+          || (num15F2 > 0 && coneHitsRect(tn972.x, tn972.y, tn972.w, tn972.h, this.cx, this.cy, reachF2,
             num14F2 - Math.PI / 4 * this.ai0 * num15F2, Math.PI / 4));
       }, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn972s) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn972s, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7）：critter 臂——锥形几何镜像敌怪臂。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game,
+      undefined, (c972) => {
+        const reachC9 = 94 * this.scaleCur;
+        const num14C9 = this.rot + Math.PI * 2 / 25 * this.ai0;
+        const num15C9 = remapArc(this.t, this.ai1 * 0.3, this.ai1 * 0.5, 1, 0);
+        return coneHitsRect(c972.x, c972.y, c972.w, c972.h, this.cx, this.cy, reachC9, num14C9, Math.PI / 4)
+          || (num15C9 > 0 && coneHitsRect(c972.x, c972.y, c972.w, c972.h, this.cx, this.cy, reachC9,
+            num14C9 - Math.PI / 4 * this.ai0 * num15C9, Math.PI / 4));
+      });
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
@@ -1162,11 +1197,12 @@ export class ZenithSword extends Entity {
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!this.bladeHits(e.x, e.y, e.w, e.h)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,933 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
       // Main.DamageVar ±15% 浮动——★SW-T1 2026-09-04：单源 damageVarRoll（31 档离散
       //  +float32 域+ToEven+luck 重掷;原连续因子内联式退役）。消费面=933 终弹命中 →
       //  Damage_PVE_Inner :12970 `Main.DamageVar(num15, owner.luck)` luck 正向。
-      //  crit ×2 维持仓内调用侧预倍（Enemy.hurt :13264 备案的既有位次,并行会话领走）
+      //  ★BJ741 R19-8：旧行「crit ×2 维持仓内调用侧预倍（并行会话领走）」系陈旧语
+      //  清除——S02(BJ723-B) 已由 Enemy.hurt 防后 ×2 统一承载（下行即其落刀注）。
       // ★S02(BJ723-B):DV 掷基数复位未翻倍值（原版 :12970 掷 num15=crit 无关）+
       //  crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)——旧「DV(×2 基)」中点档 ±1 偏差销账
       const dmg = Math.max(1, damageVarRoll(this.damage, game.player?.luck ?? 0));
@@ -1185,8 +1221,8 @@ export class ZenithSword extends Entity {
     hitTownNpcs(this, game, this.damage, this.spriteDir * this.knockback, 'playerProj', 933,
       (tn) => this.bladeHits(tn.x, tn.y, tn.w, tn.h),
       undefined, undefined, undefined,
-      () => ({ dmg: damageVarRoll(this.damage, game.player?.luck ?? 0),
-        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn933) => ({ dmg: damageVarRoll(this.damage, game.player?.luck ?? 0),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn933, this.critChance > 0),   // ★G37-A（D6）：TimerCrit 接单源
         penPercent: this.armorPen }));
     // TrailingMode 4 提交（:17197 块=AI :16880 与 Damage :17184 之【后】——
     // 命中采样读压栈前旧环,与原版 Damage 内 oldPos 读序一致）
@@ -1505,8 +1541,8 @@ export class LightsBaneSlash extends Entity {
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,974 melee 旗）。
       //  （出生拍 ai0 折叠掷在 Game.ts 974 分支——Player.cs:49369-49377 双掷面并存
       //  =原版同相,勿合并。）
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）;★S02:crit ×2=Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）⑤：魔光剑斩痕 974（数据面 melee）——双支同序
       const snapBonusLb = projectileSnapStrikeBonus(game,
         { projId: 974 }, (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
@@ -1521,8 +1557,11 @@ export class LightsBaneSlash extends Entity {
     //  10t 窗由 TownNPC.hurt iframes 承载。
     hitTownNpcs(this, game, this.damage, Math.sign(this.dirX) * 6.5, 'playerProj', 974,
       undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn974) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn974, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7）：critter 臂——AABB 自盒镜像敌怪臂。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 974 }, game);
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
@@ -1619,8 +1658,8 @@ export class GrassSlash extends Entity {
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,976 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）;★S02:crit ×2=Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）⑥：草剑飞叶 976（数据面 melee）——双支同序
       const snapBonusGrass = projectileSnapStrikeBonus(game,
         { projId: 976 }, (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
@@ -1637,8 +1676,11 @@ export class GrassSlash extends Entity {
     //  TownNPC.hurt iframes 承载。
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 6.5, 'playerProj', 976,
       undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn976) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn976, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7）：critter 臂——AABB 自盒镜像敌怪臂。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 976 }, game);
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
@@ -1755,8 +1797,8 @@ export class HorsemansPumpkin extends Entity {
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,321 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★G37-A（D6）：DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）;★S02:crit ×2=Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）⑦：无头骑士南瓜弹 321（数据面 melee）——双支同序
       const snapBonusPumpkin = projectileSnapStrikeBonus(game,
         { projId: 321 }, (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
@@ -1781,8 +1823,22 @@ export class HorsemansPumpkin extends Entity {
     //  即亡（Kill 特效同敌怪支=弹体消亡面与 victim 类型无关）。
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx || 1) * this.kb,
       'playerProj', 321, undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn321) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn321, this.critChance > 0),
         penPercent: this.armorPen }))) {
+      game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        for (const sc of [2, 1]) {
+          const kd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            -this.vx * 0.2, -this.vy * 0.2, 100, null, sc);
+          if (kd) { kd.vx *= 2; kd.vy *= 2; }
+        }
+      }
+      this.dead = true;
+    }
+    // ★G37-A（D7）：critter 臂——AABB 自盒;penetrate 1 受理即亡（Kill 特效同
+    // 敌怪/城镇支=弹体消亡面与 victim 类型无关,vanilla :14189-196 同相）。
+    if (hitCritters({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 321 }, game)) {
       game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) {
         for (const sc of [2, 1]) {

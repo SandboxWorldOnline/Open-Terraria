@@ -308,7 +308,7 @@ describe('BJ714-A §C 结构锁（钩暴露/三面接线/P2 字面）+ 基线守
     expect(SRC.types).toContain(':29095');                  // 判语锚（style12）
     expect(SRC.game).toContain('migrateMinecartOnTeleport(): void {');        // 公开（BJ714-A 升格）
     expect(SRC.game).not.toContain('private migrateMinecartOnTeleport(): void {');
-    expect((SRC.game.match(/this\.migrateMinecartOnTeleport\(\);/g) ?? []).length).toBe(4);   // BJ713-A 四汇线守恒
+    expect((SRC.game.match(/this\.migrateMinecartOnTeleport\(\);/g) ?? []).length).toBe(5);   // BJ713-A 四汇线 + ★BJ738 P01 回归药水返程腿（Teleport style8 面）
     expect((SRC.player.match(/game\.migrateMinecartOnTeleport\?\.\(\);/g) ?? []).length).toBe(2);   // 面1+面3
     expect(SRC.portal).toContain('game.migrateMinecartOnTeleport?.();');      // 面2
   });

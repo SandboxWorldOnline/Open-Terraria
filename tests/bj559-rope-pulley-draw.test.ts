@@ -263,8 +263,7 @@ describe.skipIf(EXT_MISSING)('BJ559 T6-T8 advancePulleyFrame（:26661-26681 块�
     const w = ropeWorld();
     const p = new Player(ROPE_COL * TILE + 8 - 10, 25 * TILE + 8, new Inventory());
     p.hp = 500;
-    p.inputUp = true;
-    p.inputJump = true;                            // W 语义（本仓攀爬键 = inputJump 并含 W,string-anchor 同款）
+    p.inputUp = true;                              // ★BJ737-A：攀爬键=W（inputUp;:26531 controlUp）——inputJump（Space）并设会被 findPulley !controlJump 门拒抓+绳上跳离
     tick(p, w);
     expect(p.pulley).toBe(true);                   // 抓绳自证（FindPulley,BJ527 同面）
     p.pulleyFrameCounter = 0;                      // 清抓绳拍攀爬起步积累（vy=−0.2 → 0.9）,钉稳态注入面
@@ -339,8 +338,13 @@ describe.skipIf(EXT_MISSING)('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 �
     tick(p, w);
     expect(p.pulley).toBe(true);                   // 吸附拍置位（:19835;BJ559 T8① 同面复验）
     expect(p.pulleyDir).toBe(1);                   // X 居中档吸附（FindPulley num8==2）
+    // ★BJ737-A（2026-10-31）：攀爬臂改读 inputUp（:26531 controlUp）后,抓绳拍（W 按住）
+    //   必带 -0.2 攀爬起步（原版同相——旧 inputJump 并键面在"仅设 inputUp 字段"的
+    //   夹具下不攀=字段面伪影）。静挂夹具=清起步瞬态（vy/counter/y 回锚,T8 注入同法）。
     p.inputUp = false;
-    p.inputJump = false;
+    p.vy = 0;
+    p.pulleyFrameCounter = 0;
+    p.y = 24 * TILE + 8;                           // 回锚行界（攀爬瞬态上移 0.2px 会翻头格行）
     for (let i = 0; i < 12; i++) tick(p, w);       // 松键静挂 12 拍（0.2s）
     expect(p.pulley, '松键静挂 pulley 须保持（:26328 清除面全键控,无静挂清除支）').toBe(true);
     expect(p.vy).toBe(0);                          // 静挂（:26120-26124 微速归零）
@@ -358,6 +362,8 @@ describe.skipIf(EXT_MISSING)('BJ570 T10-T11 静止挂绳滑轮恒显（branch1 �
     tick(p, w);
     expect(p.pulley).toBe(true);
     p.inputUp = false;
+    p.vy = 0;
+    p.y = 24 * TILE + 8;                           // ★BJ737-A：清抓绳拍攀爬起步+回锚行界（同 T10 注）
     w.store.setTileSilent(ROPE_COL, 24, 0, 0, 0);  // 挖头格绳（剑砍绳同效,496-wobble 空气惯例）
     tick(p, w);
     expect(p.pulley, '头格脱绳 → 清除（:26465）').toBe(false);

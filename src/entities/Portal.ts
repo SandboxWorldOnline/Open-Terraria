@@ -164,6 +164,9 @@ export class Portal extends Entity {
     //  MessageBuffer.cs:3557 同 style4）,Teleport :37698-37780 零 Dismount——
     //  不随迁=轨道旁门穿越下一拍被车「玩家坐骑位回写段」锁回。
     game.migrateMinecartOnTeleport?.();
+    p.teleportHeadReset?.();               // ★G39-A（g36a D-⑨）：Teleport :37702-37703 头段双字段
+    p.stopVanityActions?.();               // ★G36-A D4：Teleport :37708（style4 门穿越）
+    p.teleportClearShimmer?.();            // ★G36-A D4：Teleport :37709-37715
     this.cooldown = 10;
     other.cooldown = 10;
   }

@@ -276,8 +276,10 @@ describe('⑥ 蘑菇矿 Remap(1,0.75→1,0) 三态（:26015-26018）', () => {
     expect(base).toBeCloseTo(1.36, 6);     // 1 + 2757/2758/2759 fx 0.36（:14004/:14010/:14015）
     p.stealth = 0.875;                     // 平铺轴：因子 = 1−s = 0.125
     expect(p.rangedDamageMult('bullet') - base).toBeCloseTo(0.1, 6);   // 0.8×0.125 池加算
-    expect(p.critChance('ranged') - c1).toBe(Math.round(0.125 * 20));
-    expect(p.aggro).toBe(-Math.round(1200 * 0.125));
+    // ★BJ747 A05 改判史（2026-11-01,issue#35）：暴击 (int) 截断（1457 :26044）——
+    //   0.125×20=2.5 截 2（旧 Math.round=3）；aggro 1200×0.125=150 整，round/trunc 同值
+    expect(p.critChance('ranged') - c1).toBe(Math.trunc(0.125 * 20));
+    expect(p.aggro).toBe(-Math.trunc(1200 * 0.125));
   });
 });
 

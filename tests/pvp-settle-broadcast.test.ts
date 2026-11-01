@@ -643,11 +643,12 @@ function seedPeerF14(net: ClientNet, slot: number, defense: number | null = null
   const p: RemotePlayerState = {
     slot, name: `玩家${slot}`, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
     up: false, down: false, left: false, right: false, jump: false, useItem: false,
+    dash: false,   // ★BJ742-A R22-⑦：RemotePlayerState 新字段（ctrlBits[7]）
     facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
     hostile: true, team: 0, hp: 100, maxHp: 100, sleeping: false,
     deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
     pvpDefense: defense,
-    camTarget: null,
+    camTarget: null, sitting: false, porAnchors: null,   // G36-A D3 新字段
   };
   net.players.set(slot, p);
   return p;
@@ -828,7 +829,7 @@ describe('★F14 Game 近战 PvP 区接线（updateSwingHits 直驱）', () => {
     const sink = (g.net as unknown as { onMeleePvpBeetleCredit?: unknown }).onMeleePvpBeetleCredit;
     expect(typeof sink).toBe('function');
     (sink as (s: number, c: number, o: boolean) => void)(1, 777, true);
-    expect(meter.stateForTest()).toEqual({ counter: 777, countdown: 0 });   // beetleCounter += credit / countdown=0
+    expect(meter.stateForTest()).toEqual({ counter: 777, countdown: 0, lastFamily: 'offense' });   // beetleCounter += credit / countdown=0（★BJ745 A16 stateForTest 增 lastFamily 位——攻套 tick 置位）
   });
 
   it('攻套不在身：off=false 登记原样钉值，sink 传 false 时 registerHit 早退（vanilla :44456 门）', () => {

@@ -92,6 +92,16 @@ describe('A2 GLWorldCompose 结构锁', () => {
     // ★C10a（2026-09-24）：白名单扩入 GLSpriteLayer.ts（云管线后端,?cloudpipe=1）
     // ★C10b（2026-09-24）：白名单扩入 Renderer.ts（共管管线持有/revive/drop 治理面）
     // ★A1（2026-09-25）：白名单扩入 GLScreenFilters.ts（滤镜链入管线,?sfxgl）
-    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts'])");
+    // ★G38-A 改判（2026-10-31,棘轮在途红收口）：旧锁=四元素整串精确匹配——GhostBlur
+    //   （2026-10-07）/hooks（2026-10-12）/modShader（2026-10-14）相继入列后整串
+    //   失配=陈旧红。改为白名单行含 A2 相关键逐键断言（消费方增长由 a0 自身的
+    //   白名单锁权威承载,本锁只保 A2 消费面不跌出白名单）。
+    const a0 = src('../tests/a0-glpipeline-shell.test.ts');
+    const setStart = a0.indexOf('const ALLOWED = new Set([');
+    const wl = a0.slice(setStart, a0.indexOf(']);', setStart));
+    expect(setStart).toBeGreaterThanOrEqual(0);
+    for (const f of ['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts']) {
+      expect(wl).toContain(`'${f}'`);
+    }
   });
 });

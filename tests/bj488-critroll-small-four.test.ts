@@ -325,7 +325,7 @@ describe('BJ488-②：612 无类旗零掷（1091 判例族）+ :12928 TimerCrit 
     const srcCode = src.replace(/^\s*\/\/[^\n]*/gm, '');
     expect(srcCode).not.toContain('flare.critChance');        // 出生拍写位摘除
     expect(srcCode).not.toContain('Math.random() < this.critChance');
-    expect(srcCode.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(2);   // 611 敌怪面+BJ729-A 城镇 settle 面（D1 B19,2026-10-27,1→2;与 BJ486 3e 锚同步）
+    expect(srcCode.split('rollVanillaHitCritConsumeTimer(this.projId, game,').length - 1).toBe(2);   // 611 敌怪面+城镇 settle 面（★G37-A 2026-10-31 改判史：crit 段迁 ConsumeTimer 单源;与 BJ486 3e 锚同步）
   });
 });
 

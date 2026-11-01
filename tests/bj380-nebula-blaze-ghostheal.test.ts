@@ -11,7 +11,7 @@
 //   两类漏接（自绘 strike 环无 proc）——本文件锁两类落地 + 实参口径（BJ167-②③④ 同款）。
 // 判别面 spy：hurt 萰 StrikeNPC——lastStrikeDealt = 防后实扣（num41 等位,Enemy.ts:13959
 //   入口清零/:14195 实扣写点）；拒收（false）= 原版 immune 门整跳 → 无 proc 无 numHits++。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';   // ★BJ741 R19-1：vi=Math.random 0.5 中性档（634/635/645 敌臂 DV 接入随刀）
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -63,6 +63,7 @@ function emptyWorld(): World {
 
 describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）', () => {
   it('判别面（用户实报）：634 贴脸爆命中敌 → ghost proc,dmg=num41 防后实扣,首跳 numHits=0,出生点=受害者 Center', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：634/635 DV 接入——0.5 中性档（×1.00）
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 100);                       // Center (1308,1612),距弹心 8 < 20 → 搜敌即爆
     const game = makeGame(log, [e]);
@@ -78,9 +79,11 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(log[0].x).toBe(81 * TILE + 12);                // BJ167-④：受害者 Center（:13879）
     expect(log[0].y).toBe(100 * TILE + 12);
     expect(log[0].isMagic).toBe(true);                    // 634 magic 数据面
+    rnd741.mockRestore();
   });
 
   it('635 强发档同 proc（magic 数据面）', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：DV 中性档
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 100);
     const game = makeGame(log, [e]);
@@ -90,6 +93,7 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(log.length).toBe(1);
     expect(log[0].dmg).toBe(390 - DEFENSE);
     expect(log[0].isMagic).toBe(true);
+    rnd741.mockRestore();
   });
 
   it('Kill AoE 多敌 numHits 衰减：首敌 0 档、次敌 1 档（:14263 逐受理自增）;pveNumHits 终值 2（BJ157-④ PVP 读口）', () => {
@@ -108,6 +112,7 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
   });
 
   it('飞行盒接触命中（非贴脸爆）同 proc：追踪抵达 48×48 敌,接触 1 proc + burst skipId 不双发', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：DV 中性档
     const log: StealCall[] = [];
     const e = enemySpy(1, 84, 100, 48, 48);               // Center (1368,1624),盒 1344..1392
     const game = makeGame(log, [e]);
@@ -119,9 +124,11 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(log.length).toBe(1);                           // 接触 proc；Kill 爆 skipId 不重复
     expect(log[0].numHits).toBe(0);
     expect(log[0].dmg).toBe(130 - DEFENSE);
+    rnd741.mockRestore();
   });
 
   it('canGhostHeal=false 族 384：命中照常结算但零 proc（:13875 门）', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：DV 中性档
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 100, 24, 24, 384);
     const game = makeGame(log, [e]);
@@ -130,6 +137,7 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     bolt.fixedUpdate(1, game);
     expect(e.lastStrikeDealt).toBe(130 - DEFENSE);        // 结算面未被 victim 门吞
     expect(log.length).toBe(0);
+    rnd741.mockRestore();
   });
 
   it('飞行盒 flag3：iframes 残窗照打照 proc 照计数 + 命中写支 immune=5（:12635-12637 豁免/:14080-14082）——★清偿刀 F 翻案（X2-D1 旧钉基于 pierce=0 假红窗,退役）', () => {
@@ -208,6 +216,7 @@ describe('BJ380 月耀 645 爆炸相 ghostHeal proc', () => {
   });
 
   it('canGhostHeal=false 族 387：零 proc', () => {
+    const rnd741 = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // ★BJ741 R19-1：645 DV 接入——0.5 中性档
     const log: StealCall[] = [];
     const a = enemySpy(1, 81, 100, 24, 24, 387);
     const game = makeGame(log, [a]);
@@ -216,5 +225,6 @@ describe('BJ380 月耀 645 爆炸相 ghostHeal proc', () => {
     star.fixedUpdate(1, game);
     expect(a.lastStrikeDealt).toBe(100 - DEFENSE);
     expect(log.length).toBe(0);
+    rnd741.mockRestore();
   });
 });

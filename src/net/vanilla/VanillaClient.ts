@@ -692,7 +692,13 @@ export class VanillaClient {
         let vx = 0, vy = 0;
         if (c2 & 4) { vx = r.f32(); vy = r.f32(); }        // b25[2] vel 携带
         if (c2 & 128) r.u16();                              // b25[7] mount 类型
-        if (c3 & 0x40) { r.f32(); r.f32(); r.f32(); r.f32(); } // b26[6] 回城药双 Vector2
+        // ★G36-A D3（BJ738 登记债清偿,2026-10-31）：b26[6] 回城药双 Vector2
+        //  （NetMessage.cs:501-505 bitsByte23[6] → OriginalUse+Home 成对）——曾 skip
+        //  走线对齐正确,今存入代理（Renderer 远端门 opacity 0.1 消费）
+        let por: { exit: { x: number; y: number }; home: { x: number; y: number } } | null = null;
+        if (c3 & 0x40) {
+          por = { exit: { x: r.f32(), y: r.f32() }, home: { x: r.f32(), y: r.f32() } };
+        }
         const camT = c4 & 0x20 ? { x: r.f32(), y: r.f32() } : null; // b27[5] 观战相机目标
         const rp = this.players.get(slot) ?? this.mkRemote(slot);
         rp.x = x; rp.y = y; rp.vx = vx; rp.vy = vy;
@@ -702,6 +708,8 @@ export class VanillaClient {
         rp.facing = c1 & 64 ? 1 : -1;
         rp.selectedItem = sel;
         rp.sleeping = !!(c4 & 1);
+        rp.sitting = !!(c3 & 4);   // ★G36-A D3：b23[2] sitting.isSitting（门分组判据）
+        rp.porAnchors = por;
         rp.camTarget = camT;
         rp.fresh = true;
         rp.lastFresh = performance.now();
@@ -1020,11 +1028,13 @@ export class VanillaClient {
       slot, name: `玩家${slot}`, appearance: '',
       x: 0, y: 0, vx: 0, vy: 0,
       up: false, down: false, left: false, right: false, jump: false, useItem: false,
+      dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash（原版服 msg13 c1[7]）
       facing: 1, selectedItem: 0, dead: false,
       fresh: false, active: true, lastFresh: performance.now(),
       hostile: false, team: 0, deathsPve: 0, deathsPvp: 0,
       hp: 100, maxHp: 100, mana: 20, manaMax: 20, luck: 0,
       pvpImmuneT: 0, pvpDefense: null, sleeping: false, camTarget: null,
+      sitting: false, porAnchors: null,   // ★G36-A D3：msg13 bitsByte23[2]/[6]+尾段
     };
   }
 
@@ -1231,27 +1241,46 @@ export class VanillaClient {
     const p = this.game.player as null | {
       x: number; y: number; vx: number; vy: number;
       facing: number; inputX: number; inputUp: boolean; inputDown: boolean; inputJump: boolean;
+      inputDash: boolean;   // ★BJ742-A R22-⑦：bit7 controlDash 电平（Player.inputDash）
       gravDir: number; dead: boolean; mount?: { active?: boolean; type?: number };
       inv: unknown;
+      /** ★G36-A D3：bitsByte23[2] sitting / [6] 回城药双锚（NetMessage.cs:474/:478/:501-505） */
+      sitting?: boolean;
+      potionOfReturnOriginalUsePosition?: { x: number; y: number } | null;
+      potionOfReturnHomePosition?: { x: number; y: number } | null;
     };
     if (!p || p.dead) return;
     const sel = ((p.inv as { selected?: number })?.selected ?? 0) & 0xff;
     const inp = (this.game as { input?: { mouseDown: boolean; rightDown: boolean } }).input;
     // c1（NetMessage case13）：[0]up [1]down [2]left [3]right [4]jump [5]useItem [6]dir==1 [7]dash
+    // ★BJ742-A R22-⑦（2026-10-31）：补 bit7 controlDash（NetMessage.cs:459
+    //   `bitsByte21[7] = player7.controlDash`）——原版服务端以同步控制位跑
+    //   DoCommonDashHandle :21740（Quick Dash 键面发起）;缺位=服务端侧玩家
+    //   永不冲刺,冲刺期位置差全靠 netOffset 回拉=橡皮筋（原版服直连实害面）。
+    //   本仓 controlDash 电平 = Player.inputDash（BJ508 键面注入,TriggersSet.cs:825）。
     const c1 = (p.inputUp ? 1 : 0) | (p.inputDown ? 2 : 0)
       | (p.inputX < 0 ? 4 : 0) | (p.inputX > 0 ? 8 : 0)
       | (p.inputJump ? 16 : 0)
       | (inp?.mouseDown && !inp.rightDown ? 32 : 0)
-      | (p.facing > 0 ? 64 : 0);
+      | (p.facing > 0 ? 64 : 0)
+      | (p.inputDash ? 128 : 0);
     const velNZ = p.vx !== 0 || p.vy !== 0;
     const mountActive = !!p.mount?.active;
     // c2：[0]pulley [1]pulleyDir2 [2]vel!=0 [3]vortexStealth [4]gravDir==1 [5]shieldRaised [6]ghost [7]mount
     const c2 = (velNZ ? 4 : 0) | (p.gravDir === 1 || p.gravDir === undefined ? 16 : 0)
       | (mountActive ? 128 : 0);
-    const w = new VWriter().u8(this.mySlot).u8(c1).u8(c2).u8(0).u8(0).u8(sel)
+    // ★G36-A D3：c3（bitsByte23）[2]sitting / [6]回城药双锚成对（:474/:478/:501-505
+    //  ——门在则两位 Vector2 同拍发;清空拍只清位不发尾段）
+    const porOn = !!p.potionOfReturnOriginalUsePosition && !!p.potionOfReturnHomePosition;
+    const c3 = (p.sitting ? 4 : 0) | (porOn ? 0x40 : 0);
+    const w = new VWriter().u8(this.mySlot).u8(c1).u8(c2).u8(c3).u8(0).u8(sel)
       .f32(p.x).f32(p.y);
     if (velNZ) w.f32(p.vx).f32(p.vy);
     if (mountActive) w.u16(p.mount?.type ?? 0);
+    if (porOn) {
+      w.f32(p.potionOfReturnOriginalUsePosition!.x).f32(p.potionOfReturnOriginalUsePosition!.y);
+      w.f32(p.potionOfReturnHomePosition!.x).f32(p.potionOfReturnHomePosition!.y);
+    }
     this.send(w.finish(MsgId.PlayerControls));
   }
 

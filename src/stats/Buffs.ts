@@ -512,10 +512,37 @@ export enum BuffType {
   RatMount = 382,     // 大鼠本性(374)：骑乘 55 变身鼠
   BatMount = 383,     // 蝙蝠诅咒(377)：骑乘 56 变身蝠
   PixieMount = 384,   // 法埃的形态(384)：骑乘 61 变身妖精——「附魔精灵尘」5662 召唤物
+  // ★BJ739 B11（2026-10-31）：Slimed(137) 玩家侧建模——史莱姆枪 406 对射手外
+  //  玩家 180t（Projectile.cs:29441-29498 flag25 玩家臂,非 PvP 门）/鞭 1104 对
+  //  NPC（:11257）。效果 = drippingSlime 六火族 DoT 翻倍（UpdateLifeRegen
+  //  :19102-19179,SLIME_DOUBLED_DOTS）+ 敌侧既有 slimedT 染色族。Main.debuff
+  //  [137]=true（Main.cs:9040）→ DEBUFFS 在册;137 在 Main.buffNoSave（存档
+  //  不落盘）与 PVP_BUFF_WHITELIST。★产源净债（BJ739 D-①）：本仓 victim-settles
+  //  架构下 shooter→远端玩家的 buff 传播无通道（msg50 未实现+代理无 buff 同步）,
+  //  SlimeGlob 玩家臂暂缓——消费面先就位（mods/未来产源/测试可达）
+  Slimed = 385,
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
 const BUFF_TIME_EXTENDED_BY_DEAD_CELLS = new Set([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,104,105,106,107,108,109,110,111,112,113,114,115,116,117,121,122,123,124,257,343]);
+
+/** ★BJ739 B01/B02（2026-10-31）：BuffID.Sets.TimeLeftDoesNotDecrease（1457
+ *  Terraria.ID/BuffID.cs:22 `Factory.CreateBoolSet(28, 334, 29, 159, 150, 93,
+ *  348, 366)`——1458 diff 零差异）。成员 = 工位六站 {29 水晶球预见/159 磨刀石/
+ *  150 附魔台/93 弹药箱/348 战争桌/366 炼金药瓶} + 334 极饿 + 28 狼人：
+ *  UpdateBuffs 递减循环（1457 Player.cs:9958 `whoAmI==Main.myPlayer &&
+ *  !TimeLeftDoesNotDecrease[buffType[j]]` 才 buffTime--）对表内 id 不倒数——
+ *  108000t 授予后保持到死亡（UpdateDead 清非持久）/右键取消/昼夜门（狼人白天
+ *  DelBuff :11993-11996）/食物重置（334 走 TryToResetHungerToNeutral）。
+ *  旧通用递减 = 工位 1800s 自删（B01）+ 极饿 5t 自灭再被 updateStarvingState
+ *  重授 332 的循环重启（B02，issue#29）。 */
+const TIME_LEFT_DOES_NOT_DECREASE = new Set<number>([28, 334, 29, 159, 150, 93, 348, 366]);
+
+/** ★BJ739 B06：Main.meleeBuff 表（1457 Main.cs:9100-9107 逐字面量）——八武器浸剂
+ *  {71 毒液/73 诅咒焰/74 烈火/75 黄金/76 灵液/77 纳米/78 派对/79 剧毒}。同刻仅容
+ *  一种在栏（AddBuff_RemoveOldMeleeBuffsOfMatchingType Player.cs:5352-5365）。
+ *  72 Midas（敌 debuff）不在表内——勿混。 */
+const MELEE_BUFF_VANILLA = new Set<number>([71, 73, 74, 75, 76, 77, 78, 79]);
 
 const BUFF_TIME_EXTENDED_BY_DIFFICULTY = new Set([20, 22, 23, 24, 323, 30, 31, 32, 33, 35, 36, 39, 44, 324, 46, 47, 69, 70, 80]);
 
@@ -690,6 +717,9 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.WitheredWeapon]: { vanillaBuff: 196, descKey: 'BuffDescription.WitheredWeapon', fallbackName: '枯萎武器' },
   // 潮湿：描述走原版 BuffDescription.Wet（"你在滴水"，12 语言现成，同 Chilled 先例）
   [BuffType.Wet]: { vanillaBuff: 103, descKey: 'BuffDescription.Wet', fallbackName: '潮湿' },
+  // ★BJ739 B11：Slimed(137)——名称/描述走原版 BuffName/BuffDescription.Slimed
+  //  （zh-Hans「黏液」/「你黏糊糊的」,12 语言现成零自造键）;图标 Buff_137.png 在库
+  [BuffType.Slimed]: { vanillaBuff: 137, descKey: 'BuffDescription.Slimed', fallbackName: '黏液' },
   // 日耀护盾三档（170-172）：名称 BuffName.SolarShieldN（日耀烈焰）+ 原版描述
   [BuffType.SolarShield1]: { vanillaBuff: 170, descKey: 'BuffDescription.SolarShield1', fallbackName: '日耀烈焰' },
   [BuffType.SolarShield2]: { vanillaBuff: 171, descKey: 'BuffDescription.SolarShield2', fallbackName: '日耀烈焰' },
@@ -946,6 +976,13 @@ export const BUFF_NO_SAVE = new Set([
   140, 144, 146, 147, 150, 158, 159, 161, 163, 164, 170, 171, 172, 173, 174,
   175, 176, 177, 178, 179, 180, 181, 182, 187, 188, 194, 195, 196, 197, 198,
   199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
+  // ★BJ742-A R21-④（2026-10-31）：补 7 员——156 Stoned（Main.cs:9124）/149 Webbed
+  //   （:9125）/395 PotentAcid（:9137）/397-400 ChlorophyteSpore·AcceleratePoisons·
+  //   Blue/RedLightning（:9205-9208,1457 新 DoT/视觉族）——旧缺=石化/结网/强酸等
+  //   状态跨存档落盘,读档幻影 debuff（原版不写）。七员 BuffType 全已映射（本表
+  //   交集生效）。173-181 非多收：原版 :9209-9212 for 循环整段置位（R21 审计
+  //   「存量多收」系对显式赋值清单比对所得,循环段在案——备案勿动照留）。
+  149, 156, 395, 397, 398, 399, 400,
   366, 385, 386, 389, 390, 393, 394,   // 1457 Palworld 随从伴生（Main.cs:9199-9204）
   374, 377, 384, 391, 392,   // ★BJ357 变身坐骑伴生 + ★清偿刀 P4（2026-09-30）补收
                              //  391/392 疾旋鼬族——Main.cs:9345-9352 for 循环对【全部】
@@ -1024,14 +1061,20 @@ const DOT_CHUNK: Partial<Record<BuffType, number>> = {
   [BuffType.Suffocation]: 5,
 };
 
-/** 环境 DoT 表（NaturalLifeRegen Player.cs:18775-18904 原版求值顺序 1:1：
- *  poisoned→venom→onFire→onFire3→onFrostBurn→onFrostBurn2→onFire2→burned→
- *  suffocating→electrified；速率 = lifeRegen 负项 / 2 = HP/s）。每个 DoT 结算前
- *  先清零正 lifeRegen——恢复类 buff 不能抵消 DoT（tick 内消费）。
+/** 环境 DoT 表（NaturalLifeRegen 原版求值顺序 1:1：poisoned→venom→onFire→
+ *  onFire3→onFrostBurn→onFrostBurn2→onFire2→burned→suffocating→electrified；
+ *  速率 = lifeRegen 负项 / 2 = HP/s）。★R21-⑥/BJ743-A（2026-10-31）行号双标注：
+ *  1456 Player.cs:18775-18904 ↔ 1457 :19065-19202（diff 亲读仅两漂——①1457 于
+ *  venom 后插叶绿孢子块 :19083-19091,1456 无此块（故该条锚 1457）;②1456 Burning
+ *  段 moveSpeed*=0.5 :18881 在 1457 移入 strongestMoveSpeedDebuff,moveSpeedMult
+ *  已注）。本注与表内条目行号锚缺省均为 1456 行号。每个 DoT 结算前先清零正
+ *  lifeRegen——恢复类 buff 不能抵消 DoT（tick 内消费）。
  *  ★每段另伴 lifeRegenTime=0（爬坡计时清零）与 drippingSlime 翻倍（:18782 等）——
  *  前者=Player.ts lifeRegenTime 模型同门（受击 :37784/DoT :18781/流血 :19000 三源
- *  清零,Player.ts:1206-1230,旧"sinceHurt 近似"已废）;后者依赖 Slimed(137) buff
- *  未移植,登记 GAP（OnFire 的 vampireSeed 翻番 slime 分支同理 :18803-18805） */
+ *  清零,Player.ts:1206-1230,旧"sinceHurt 近似"已废）;后者=Slimed(137) 翻倍,
+ *  ★R21-⑦/BJ743-A 改判（原「未移植,登记 GAP」注退役）：BJ739 B11（2026-10-31）
+ *  已实装（SLIME_DOUBLED_DOTS 六火族表）;OnFire 的 vampireSeed 翻番 slime 分支
+ *  同支覆盖（1456 :18803-18805,见 VAMPIRE_ON_FIRE_HP_S 注） */
 const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.Poisoned, -2],    // lifeRegen-4（:18782）
   [BuffType.Venom, -15],      // lifeRegen-30（:18791）
@@ -1048,12 +1091,34 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   //  lifeRegen -= 30 = 15 HP/s——与 NPC 侧 DOTTally 90 HP/s（:92755）不同轴,
   //  勿互搬；孢子云 1/60 发射器在 Player.fixedUpdate（需 game 钩子,不入本表）
   [BuffType.ChlorophyteSpore, -15],
+  // ★G36-A D-⑥（BJ739 登记债清偿,2026-10-31）：狂卷之舌 38 专家档（UpdateLifeRegen
+  //  :19203-19211 `if (tongued && Main.expertMode)` lifeRegen -= 100 = 50 HP/s;
+  //  非专家无 DoT——tick 内 expertMode 门 skip）。曾独立账 Player.tongueDotAcc
+  //  直扣 hp,专家舌+灼烧共享 -600 块的合并面偏差（量级守恒/节拍与蜂蜜对冲/星云
+  //  免/闪亮石减半不入账）随本刀收口：入 ENV_DOTS 单账后 -600 块门
+  //  `burned || suffocating || (tongued && expert)`（:19434）1:1。
+  [BuffType.TheTongue, -50],
 ];
 /** Electrified 移动惩罚（Player.cs:18900-18903：controlLeft||controlRight 时
  *  lifeRegen 额外 -32 → +16 HP/s）——tick 前由 Player.fixedUpdate 写入开关 */
 const ELECTRIFIED_MOVE_EXTRA = -16;
+
+/** ★BJ739 B11（2026-10-31）：drippingSlime（Slimed 137 在栏）翻倍的六火族 DoT
+ *  （UpdateLifeRegen 各 DoT 段的第二 `if (drippingSlime) lifeRegen -= 同额` 项：
+ *  onFire(24) :19110-19113（vampireSeed 段 :19102-19105 同）/onFire3(323)
+ *  :19124-19127/onFrostBurn(44) :19137-19140/onFrostBurn2(324) :19150-19153/
+ *  onFire2(39 诅咒焰) :19163-19166/burned(67) :19176-19179。窒息 :19188/感电
+ *  :19197/中毒 :19172/毒液 :19181/叶绿孢子 :19190 无 slime 支——中毒/毒液不翻倍
+ *  （issue#29 B11 边界）。 */
+const SLIME_DOUBLED_DOTS: ReadonlySet<BuffType> = new Set([
+  BuffType.OnFire, BuffType.OnFire3, BuffType.Frostburn, BuffType.Frostburn2,
+  BuffType.CursedInferno, BuffType.Burning,
+]);
 /** vampireSeed 世界 OnFire 特档（Player.cs:18798-18802）：lifeRegen -100 = 50 HP/s
- *  （常规世界 -8 = 4 HP/s；slime 翻倍分支 :18803-18805 依赖 Slimed 未移植） */
+ *  （常规世界 -8 = 4 HP/s；slime 翻倍分支 :18803-18805——★R21-⑦/BJ743-A 改判：
+ *  BJ739 B11 已实装,OnFire∈SLIME_DOUBLED_DOTS ⇒ vampireSeed+Slimed rate×2 =
+ *  -100 HP/s（1456 :18803-18805 再 -100 = lifeRegen -200 同值）;原「依赖 Slimed
+ *  未移植」注退役） */
 const VAMPIRE_ON_FIRE_HP_S = -50;
 
 export class BuffState {
@@ -1088,6 +1153,8 @@ export class BuffState {
                          //（BuffID.cs:32）——红药水 678 减益族（2026-08-22 补 B 批）
     BuffType.Wet,      // Main.debuff[103]=true（Main.cs:8833）——潮湿可被护士计价清除；
                        // 103 不在 NurseCannotRemoveDebuff 排除表（BuffID.cs:30）
+    BuffType.Slimed,   // ★BJ739 B11：Main.debuff[137]=true（1457 Main.cs:9040）——
+                       // 右键不可解/护士可清;不在护士排除表
     // 终零波补档两条（2026-09-01；均不在护士排除表 → 可计价/可清除）
     BuffType.Dazed,      // 眩晕(160)——美杜莎之首 PvP 命中族（Main.cs:9005）
     BuffType.OgreSpit,   // 分泌物(197)——DD2 巨魔喷吐团消亡近身 900t(:74097)
@@ -1165,11 +1232,22 @@ export class BuffState {
   electrifiedMoving = false;
   /** Main.vampireSeed（Main.cs:327；秘密种子世界位，NetMessage :363 同步）：
    *  On Fire!(24) 对玩家从 -8 提到 -100 lifeRegen（50 HP/s，Player.cs:18798-18802；
-   *  drippingSlime 再翻到 -200 :18803-18805——Slimed(137) 未移植,登记）。
+   *  drippingSlime 再翻到 -200 :18803-18805——★R21-⑦/BJ743-A 改判：Slimed(137)
+   *  已随 BJ739 B11 实装,该翻番支经 OnFire∈SLIME_DOUBLED_DOTS 覆盖,原「未移植,
+   *  登记」注退役）。
    *  接线 = Player.updateSunScorch 每帧自 world.seedFlags.vampireSeed 刷新
    *  （SeedEasterEggs "what a horrible night to have a curse"）。另 Main.cs:42715
    *  buff 图标 <10t 不显示秒数（buff 24/23/32）已接 UI.refreshBuffs */
   vampireSeed = false;
+  /** ★G36-A D-⑦：闪亮石静止档门（UpdateLifeRegen :19060-19064 flag =
+   *  shinyStone && IsConsideredStandingStill(:3307 |vx|<0.05&&|vy|<0.05) &&
+   *  itemAnimation==0）——Player.fixedUpdate buffs.tick 前喂入;消费 = DoT 流量
+   *  折半门（:19224-19227）。自然回复 boost 段（:19241-19249/:19333-19345）
+   *  在 Player.ts shinyStill 同谓词,两消费位同拍喂值 */
+  shinyStillGate = false;
+  /** ★G36-A D-⑥：Main.expertMode（狂卷之舌 DoT 专家门 :19203 / -600 块门 :19434）
+   *  ——Player.fixedUpdate buffs.tick 前喂入（mainExpertMode(world)） */
+  expertMode = false;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
@@ -1204,20 +1282,25 @@ export class BuffState {
   /** 饥饿链事件回调（Player 注入：表情 146/147/148 + SoundID.Hungry）——
    *  UpdateHungerBuffs :11705/:11726 的 EmoteBubble.MakeLocalPlayerEmote + :11728 PlaySound */
   onHungerEvent: ((kind: 'neutral' | 'hungry' | 'starving') => void) | null = null;
-  /** 极饿流干账（lifeRegenCount 语义,HP 口径:-num2/2 HP/s 入账,每 -num12 结算
-   *  num12 伤——R5-F7 单通道化后复用原 2s 直伤计时器字段） */
-  private starvingHitAccum = 0;
+  /** 极饿流干账——★BJ739 B09：随共享账重构退役（极饿流量直入 dotLifeRegenCount） */
+  // private starvingHitAccum（退役字段,2026-10-31）
   /** 本 tick ENV_DOTS 是否有 DoT 流量在账（含被星云免掉的——原版 DoT 段照写
    *  lifeRegenTime=0,星云只免伤害不清爬坡;Player 消费于 lifeRegenTime 复位门） */
   dotActiveTick = false;
-  /** 蜂蜜对冲整数位账（:19212-19214 lifeRegen+4 钳≤0 = 2HP/s——分块架构下的流量
-   *  对冲账,单位=原版 lifeRegen 单位（120 单位=1HP,Player.cs:1919/:1921 双 int）:
-   *  逐 tick 整数计提 +4,兑付按整 HP（120 单位）抵减已弹出的 DoT 分块;余数
-   *  （<120 单位）跨 tick 结转,蜂蜜/DoT 离栏即弃。★BJ447 整数化（原 lifeRegen
-   *  Accum 浮点 2×dt 计提携分数入 heal→hp 真值面,BJ443 登记债） */
-  private honeyOffsetUnits = 0;
-  /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费） */
+  /** ★BJ739 B09（2026-10-31）：DoT 共享整数账（vanilla Player.lifeRegenCount,
+   *  Player.cs:1921 int / :19384 `lifeRegenCount += lifeRegen` 全流量单账 /
+   *  :19434/:19458/:19478 三分块环）——单位=原版 lifeRegen/tick,120 单位=1HP。
+   *  全 ENV_DOTS + 极饿覆写流量单账累积,余数跨 buff 组合/空档结转（断流拍清账,
+   *  见 tick 注）。正流量面（自然回复/装备回复）在 Player 独立账,不入本账。 */
+  private dotLifeRegenCount = 0;
+  /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费）
+   *  ★BJ747 A18（2026-10-31,issue#35）：双消费面 = ①负值钳 0（tick 内 :19220 位）
+   *  ②正项 3 HP/s/级（UpdateBuffs :10538-39 `lifeRegen += 6×级`——DoT 清零面内,
+   *  中毒期被清,原版中毒+星云净 0）;旧独立直写 hp 已拆除（Player 侧） */
   nebulaLifeLevel = 0;
+  /** ★BJ747 A18：星云生命正项累加器（heal 账 HP 整数域,3 HP/s/级——分数余数跨拍
+   *  结转 = 原版 lifeRegenCount 114/120 型残账同构） */
+  private nebulaLifeHealAccum = 0;
   /** ★五百四十二:mod DoT 减免乘区(Reaver defense=DoT×0.5;【赋值】语义=每 tick
    *  mod 侧重写,缺省 1=无减免;ENV_DOTS 结算尾乘区——负 dot 减额回流 heal 对冲池) */
   modDotMult = 1;
@@ -1313,7 +1396,19 @@ export class BuffState {
         this.active.set(t, Math.max(5 / 60, left / (v === 46 ? 4 : 2)));
       }
     }
+    // ★BJ739 B06（2026-10-31）：浸剂互斥——AddBuff_RemoveOldMeleeBuffsOfMatchingType
+    //  （1457 Player.cs:5352-5365：新浸剂入栏前删栏内【其它】meleeBuff 成员；Main.cs
+    //  9100-9107 meleeBuff 表 = {71,73,74,75,76,77,78,79} 八浸剂）——调用位 :5284-89
+    //  仅在 TryUpdatingExistingBuffTime 落空（=新授予，非续期）后执行。旧通用 apply
+    //  无互斥 → 灵液+毒浸剂可同栏并存、命中链双施（issue#29 B06）。金浸剂 75 亦在
+    //  表内（meleeBuff 全八员，互斥按原表）
     const cur = this.active.get(type);
+    if (cur === undefined && vb !== undefined && MELEE_BUFF_VANILLA.has(vb)) {
+      for (const [t] of [...this.active]) {
+        const v2 = BUFF_DEFS[t]?.vanillaBuff;
+        if (v2 !== undefined && v2 !== vb && MELEE_BUFF_VANILLA.has(v2)) this.active.delete(t);
+      }
+    }
     // R5-F20：槽位 44 上限（maxBuffs :1491）+ 满时驱逐第一个非 debuff 槽、
     // 全 debuff 则拒绝（AddBuff_ActuallyTryToAddTheBuff :5317-5351）——旧无上限。
     // 本仓 Map 无空槽概念,等价实现 = size≥44 时删首个非 debuff 键
@@ -1360,8 +1455,18 @@ export class BuffState {
   set(type: BuffType, durationSec: number) {
     this.active.set(type, durationSec);
   }
-  /** 存档序列化（Player.cs:53913-53925 buffType+buffTime 槽位语义）:
-   *  存 vanilla id + 剩余秒;Main.buffNoSave 名单(Main.cs:8896-8990)过滤不落盘的 buff */
+  /** 存档序列化（Player.cs:55518-55530 写 / :56243-56252 读——buffType Int32 +
+   *  buffTime Int32【tick 域】,往返逐位无损）:
+   *  存 vanilla id + 剩余秒（JSON 浮点域,1/60 整数倍）;Main.buffNoSave 名单
+   *  (Main.cs:8896-8990)过滤不落盘的 buff。
+   *  ★BJ742-A R21-⑥（2026-10-31）：保 tick 精度——旧 Math.round(sec) 整秒化,
+   *  存档往返每 buff 至多 +0.5s 膨胀（药水病 21 等 ApplyPotionDelay
+   *  Player.cs:52487-52516 的 2400-4200 随机 tick 档经往返系统性偏移;报告锚
+   *  :52487 即该生产端）。现 Math.round(sec*60)/60 重钉 1/60 网格=原版 tick 语义;
+   *  下限 1t（0.05s 过滤后恒 ≥3t,防御位）。读侧 applySaved 直收浮点,旧档整秒
+   *  值兼容。★同病登记（D-BJ742-⑥）：PlrImport.ts:303 .plr 导入
+   *  `Math.max(1, Math.round(time/60))` 同整秒化 + :627 导出 round 回 tick——
+   *  tick→秒→tick 双掷漂移 ≤30t,导入面另刀。 */
   toSave(): Array<[number, number]> {
     const out: Array<[number, number]> = [];
     for (const [t, sec] of this.active) {
@@ -1371,7 +1476,7 @@ export class BuffState {
       // → 2t=1/30s;原版存原始 2t,读档即刻消散）。本仓序列化强制 ≥1s 会造读档后
       // ~1 秒的"1 秒/0 秒"幻影倒计时——亚 50ms 一律不落盘
       if (sec < 0.05) continue;
-      out.push([v, Math.max(1, Math.round(sec))]);
+      out.push([v, Math.max(1 / 60, Math.round(sec * 60) / 60)]);
     }
     return out;
   }
@@ -1398,6 +1503,10 @@ export class BuffState {
     //      UpdateHungerBuffs；死亡态整体冻结（UpdateDead 无该链）----
     this.updateStarvingState(true);
     for (const [t, time] of [...this.active]) {
+      // ★BJ739 B01/B02：不递减表门（Player.cs:9958）——工位六站/极饿 334/狼人 28
+      //  的 buffTime 不随 tick 减少（详表注 TIME_LEFT_DOES_NOT_DECREASE）
+      const vbTick = BUFF_DEFS[t]?.vanillaBuff;
+      if (vbTick !== undefined && TIME_LEFT_DOES_NOT_DECREASE.has(vbTick)) continue;
       const left = time - dt;
       if (left <= 0) this.active.delete(t);
       else this.active.set(t, left);
@@ -1421,6 +1530,26 @@ export class BuffState {
     //      贡献全在 UpdateLifeRegen 内（:19212 对冲档 + :19250-19254 flat +2）,位于
     //      DoT 段【之后】不被清零。R5 蓝队勘误：旧把 1HP/s 正项放在 DoT 前被清零,
     //      DoT+蜂蜜期间少回 1HP/s,已移到 DoT 后（见下方 honeyFlat）----
+    // ★BJ739 B07（2026-10-31）：狂犬病 148 随机短减益（1457 Player.cs:11412-437
+    //  UpdateBuffs buffType==148 支——每帧 Next(1200)==0 掷,Next(6) 六选一 +
+    //  num18=Next(60,100)×0.01 系数：22 黑暗×3 / 23 诅咒×0.75 / 31 困惑×1.5 /
+    //  32 缓慢×3.5 / 33 虚弱×5 / 35 沉默×1（t = (int)(60×num18×因子),AddBuff 经
+    //  apply 含专家/大师时长延展表——22/23/31/32/33/35 全在 BuffID.cs:28 集内）。
+    //  位次 = 免疫摘除后、正项聚合前（原版在 buff 槽循环效果段头部）。随机源 =
+    //  Math.random（战斗掷族先例：Enemy 脑臂同式）
+    if (this.active.has(BuffType.Rabies) && Math.floor(Math.random() * 1200) === 0) {
+      const num17 = Math.floor(Math.random() * 6);
+      const num18 = (60 + Math.floor(Math.random() * 40)) * 0.01;   // Next(60,100)×0.01 ∈ [0.6,0.99]
+      const dur = (mul: number) => Math.max(1, Math.trunc(60 * num18 * mul) / 60);
+      switch (num17) {
+        case 0: this.apply(BuffType.Darkness, dur(3)); break;
+        case 1: this.apply(BuffType.Cursed, dur(0.75)); break;
+        case 2: this.apply(BuffType.Confused, dur(1.5)); break;
+        case 3: this.apply(BuffType.Slow, dur(3.5)); break;
+        case 4: this.apply(BuffType.Weak, dur(5)); break;
+        case 5: this.apply(BuffType.Silenced, dur(1)); break;
+      }
+    }
     heal += this.rateAccum(BuffType.Regen, 2, dt);
     // 树妖祝福 165（:9986 lifeRegen += 6 = 3 HP/s）——同在 UpdateBuffs 正项段，
     // NaturalLifeRegen 求值于其后（与 Regen 同批，可被 DoT 清零）
@@ -1431,11 +1560,34 @@ export class BuffState {
       this.werewolfAccum += dt;
       if (this.werewolfAccum >= 2) { this.werewolfAccum -= 2; heal += 1; }
     }
-    // ---- DoT 段（NaturalLifeRegen :18779-18911）：每个 DoT 先 if(lifeRegen>0)
-    //      lifeRegen=0 再累加负项——恢复类 buff **不能**抵消 OnFire/Burning 等
-    //      （曾直接相加，恢复池被 DoT 按净额吃掉）。分块弹出（DOT_CHUNK），
-    //      净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费 ----
-    let dots = 0;
+    // ★BJ747 A18（2026-10-31,issue#35）：星云生命 173-175 正项入公共 heal 账
+    //   （1457 Player.cs:10538-10539 UpdateBuffs `lifeRegen += 6 * nebulaLevelLife`
+    //   = 3 HP/s/级）。层位 = UpdateBuffs 正项段（Regen/树妖/狼人同段）——在下方
+    //   DoT 段 `if (heal > 0) heal = 0` 清零面【内】：原版 UpdateBuffs 先于
+    //   UpdateLifeRegen,中毒期星云正项先被清（净 0,星云只钳负值 0 见 :19220 位
+    //   flow 钳）；旧实现 = Player 独立直写 hp 绕过清零 → 中毒期间仍 +3HP/s/级
+    //   （issue#35 A18）。
+    if (this.nebulaLifeLevel > 0) {
+      this.nebulaLifeHealAccum += 3 * this.nebulaLifeLevel * dt;
+      if (this.nebulaLifeHealAccum >= 1) {
+        const n = Math.floor(this.nebulaLifeHealAccum);
+        this.nebulaLifeHealAccum -= n;
+        heal += n;
+      }
+    }
+    // ---- DoT 段（NaturalLifeRegen :18779-18911 + UpdateLifeRegen 共享计数
+    //      :19384/:19434-19478）★BJ739 B09（2026-10-31）：全 DoT 单账 lifeRegenCount
+    //      （单位=原版 lifeRegen/tick，120 单位=1HP）——多 DoT 余数合并、节拍按
+    //      原版 -600/-120 分块规则。旧 per-buff rateLeft 各存计数 → 组合 DoT 节拍
+    //      错（OnFire+Poisoned 10/20/30 帧 0/-1/-3，应 -1/-2/-3）+ buff 空档残余
+    //      负量保留（ENV_DOTS 循环 continue 跳过 rateAccum 清账分支,毒 15t→空档
+    //      →再毒首块提前，issue#29 B09）。每个 DoT 仍先 if(lifeRegen>0) lifeRegen=0
+    //      ——恢复类 buff 不能抵消 DoT。分块规则 1:1：
+    //      burned/suffocating → 每 -600 弹 5（:19434-4456）；极饿 → 每 -num13 弹
+    //      num12×(沙/雪?2)（:19458-4476）；其余 → 每 -120 弹 min(count/-120,4)
+    //      爆发（:19478-4506）。净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费 ----
+    let dots = 0;       // 本 tick 弹出的 DoT 分块合计（HP 口径,负）
+    let flow = 0;       // 本 tick lifeRegen 单位流量（负;极饿=覆写值）——120×HP/s×dt
     let dotFlow = false;   // DoT 流量在账（非块发射瞬间——对冲门/再生复位用流量口径）
     for (const [t, hpPerSec] of ENV_DOTS) {
       if (!this.active.has(t)) continue;
@@ -1447,82 +1599,93 @@ export class BuffState {
       // vampireSeed OnFire 特档（Player.cs:18798-18802）：-8 → -100 lifeRegen
       // （4 → 50 HP/s）。仅 buff 24——onFire3(323) 恒 -8（:18819-18827 无该分支）
       if (t === BuffType.OnFire && this.vampireSeed) rate = VAMPIRE_ON_FIRE_HP_S;
-      const d = this.rateAccum(t, rate, dt);
-      dots += d;
-      heal += d;
+      // ★BJ739 B11：Slimed(137) drippingSlime 火族 DoT 翻倍（:19102-19113 onFire
+      //  含 vampireSeed 双段各再 -100/:19124-27 onFire3/:19137-40 onFrostBurn/
+      //  :19150-53 onFrostBurn2/:19163-66 onFire2/:19176-79 burned——六火族各
+      //  「lifeRegen -= 同额」二次项;窒息/感电/中毒/毒液无此支）。vampireSeed 特档
+      //  rate 已是 -100 单位口径,翻倍 = -200 = :19101+:19104 两段之和 ✓
+      if (this.active.has(BuffType.Slimed) && SLIME_DOUBLED_DOTS.has(t)) rate *= 2;
+      // ★G36-A D-⑥：狂卷之舌仅专家档计流（:19203 `tongued && Main.expertMode`——
+      //  非专家无 DoT 段,skip 即零贡献;expertMode 由 Player.fixedUpdate 喂入）
+      if (t === BuffType.TheTongue && !this.expertMode) continue;
+      flow += rate * 120 * dt;                      // HP/s → lifeRegen 单位流量
       dotFlow = true;
     }
-    if (dots < 0) this.dotChunkOut += -dots;
     this.dotActiveTick = dotFlow;
+    // ---- 蜂蜜对冲（:19212-19219 flow 域：lifeRegen<0 → +4/tick 钳 ≤0）★BJ739 B09：
+    //      BJ447 的「块兑付账 honeyOffsetUnits」随共享账重构退役——原版对冲作用在
+    //      【流量】上（每 tick -56 而非 -60 的 Burning），弹出块恒原额（5）只是
+    //      节拍放缓;BJ447 块抵减模型（5,5,4 节拍）系分块架构时期的等价近似,净流率
+    //      两模型一致,本刀回归原版逐拍形态（bj447 ④/bj443 对冲断言随刀改判）。
+    //      极饿期不生效：原版 :19255 覆写在 :19212 之后,对冲与 flat 全被抹掉 ----
+    if (flow < 0 && this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)) {
+      flow = Math.min(0, flow + 240 * dt);          // :19214 +4 单位/tick = +2 HP/s
+    }
     // ---- 星云生命套 DoT 全免（UpdateLifeRegen :19220-19223：`lifeRegen < 0 &&
     //      nebulaLevelLife > 0 → lifeRegen = 0`——位于 ENV_DOTS 之后、极饿段之前,
-    //      故【极饿不掉免】。R5-F1：旧只做 +3HP/s/级正项,负项照扣,已补）----
-    if (dots < 0 && this.nebulaLifeLevel > 0) {
-      heal -= dots;
-      dots = 0;
-    }
+    //      故【极饿不掉免】（极饿 :19275 覆写在其后,星云免不掉极饿流）。R5-F1：
+    //      旧只做 +3HP/s/级正项,负项照扣,已补）----
+    if (flow < 0 && this.nebulaLifeLevel > 0) flow = 0;
+    // ★G36-A D-⑦（BJ739 登记债清偿,2026-10-31）：闪亮石静止档 DoT 减半
+    //  （UpdateLifeRegen :19224-19227 `if (flag && lifeRegen < 0) lifeRegen /= 2`——
+    //  flag=shinyStone&&IsConsideredStandingStill&&itemAnimation==0,:19061-19064。
+    //  位序=星云免（:19220）之后、极饿覆写（:19255）之前：蜂蜜对冲（:19212）先加
+    //  后折半、极饿整值覆写不吃折半。lifeRegen 为 C# int（/2 截断）——本仓 flow
+    //  连续域折半,标准 60Hz 拍 DoT 流量恒偶单位=逐位等价）
+    if (flow < 0 && this.shinyStillGate) flow /= 2;
     // ★五百四十二:mod DoT 减免乘区(C# CalamityPlayerLifeRegen :285-287 Reaver
     //  defense helm=totalNegativeLifeRegen ×(1−0.5)——减额口径=乘后余量;
     //  【赋值】语义=每 tick mod 侧重写,缺省 1=无减免)
-    if (dots < 0 && this.modDotMult < 1) {
-      const reduced = dots * this.modDotMult;
-      heal -= dots - reduced;
-      dots = reduced;
-      this.dotChunkOut = 0;
-    }
-    // ---- 极饿 334 单通道流干（Player.cs :19255-19276 + :19458-19477）：
-    //      lifeRegen = -num2（num2=max(4,120×maxLife/3000)）逐 tick 入 lifeRegenCount,
-    //      每 -num13（=120×num12,num12=max(2,maxLife/50)）结算一次 num12 伤
-    //      （ZoneDesert/ZoneSnow → dmg×2,流速不变）。R5-F7：旧"连续流失 + 每 2s
-    //      直伤"双通道并行（400HP:8+4=12HP/s +50%,周期 2s vs 原版 60t）,已废——
-    //      400HP 基准 = num2=16/t → 60t 一跳 8 伤 = 8HP/s */
+    if (flow < 0 && this.modDotMult < 1) flow *= this.modDotMult;
+    // ---- 极饿 334 覆写（Player.cs :19255-19276）：lifeRegen = -num2 整值覆写
+    //      （num2=max(4,⌊120×maxLife/3000⌋)——C# int 除法;DoT/蜂蜜流量全部丢弃）,
+    //      逐 tick 入共享账,每 -num13（=120×num12,num12=max(2,⌊maxLife/50⌋)）结算
+    //      一次 num12 伤（ZoneDesert/ZoneSnow → dmg×2,流速不变 :19465）----
     if (this.active.has(BuffType.Starving)) {
-      if (heal > 0) heal = 0;                                  // :19257-19260 清正项
-      const num2 = Math.max(4, 120 * this.starvingMaxHp / 3000);
-      const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
-      const num13 = 120 * num12;                               // :19466（lifeRegen 单位）
-      // lifeRegenCount 流干账（HP 口径:num13 单位 = num12 HP;浮点累加补 epsilon）
-      this.starvingHitAccum += (-num2 / 2) * dt;
-      while (this.starvingHitAccum <= -num12 + 1e-9) {
-        this.starvingHitAccum += num12;
-        const hit = num12 * (this.starvingZoneBoost ? 2 : 1);  // :19465 沙漠/雪原 dmg×2
-        dots -= hit;
-        heal -= hit;
+      if (heal > 0) heal = 0;                      // :19257-19260 清正项
+      const num2 = Math.max(4, Math.floor(120 * this.starvingMaxHp / 3000));   // C# int 除
+      flow = -num2 * 60 * dt;                      // :19275 覆写（U/tick × 60t/s × dt）
+    }
+    // ---- 共享账入账 + 分块结算（:19384 → :19434/:19458/:19478）----
+    this.dotLifeRegenCount += flow;
+    if (!dotFlow && !this.active.has(BuffType.Starving) && this.dotLifeRegenCount < 0) {
+      // ★BJ739 B09：负流量断流拍残账回收——原版 lifeRegenCount 单账由自然回复正
+      //  流量逐 tick 对冲回收（:19384 无条件累加 + :19407 正兑付环）;本仓正流量
+      //  在 Player 独立账（regenAccum）,等价近似 = 断流拍清残账（净额守恒:残账
+      //  <120 单位=亚 HP 尘埃;不清 = 毒 15t→空档→再毒的首块假提前,issue#29 B09
+      //  第二观测面。IIIII219 极饿毛刺清账同判并入）
+      this.dotLifeRegenCount = 0;
+    }
+    {
+      const burnedOrSuffocating = this.active.has(BuffType.Burning)
+        || this.active.has(BuffType.Suffocation)
+        // ★G36-A D-⑥：-600 共享块门三源（:19434 `burned || suffocating ||
+        //  (tongued && Main.expertMode)`——专家舌与灼烧同块结算/同节拍,量级与
+        //  原版合并账一致;死亡文案链 tongued 优先级见 Player 消费位注）
+        || (this.active.has(BuffType.TheTongue) && this.expertMode);
+      if (burnedOrSuffocating) {
+        // :19434-4456（含 return 语义:跳过极饿/通用环——本块 if/else-if 同构）
+        while (this.dotLifeRegenCount <= -600 + 1e-9) {
+          this.dotLifeRegenCount += 600;
+          dots -= 5; heal -= 5;                     // HurtLifeRegen(5)
+        }
+      } else if (this.active.has(BuffType.Starving)) {
+        const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
+        const num13 = 120 * num12;                  // :19466
+        while (this.dotLifeRegenCount <= -num13 + 1e-9) {
+          this.dotLifeRegenCount += num13;
+          const hit = num12 * (this.starvingZoneBoost ? 2 : 1);  // :19465 沙漠/雪原 dmg×2
+          dots -= hit; heal -= hit;
+        }
+      } else {
+        // :19478-4506：num14 = min(⌊count/-120⌋,4) 追赶爆发
+        while (this.dotLifeRegenCount <= -120 + 1e-9) {
+          const n = Math.min(Math.floor(-this.dotLifeRegenCount / 120), 4);
+          this.dotLifeRegenCount += 120 * n;
+          dots -= n; heal -= n;                     // HurtLifeRegen(num14)
+        }
       }
       if (dots < 0) this.dotChunkOut += -dots;
-    } else {
-      // ★IIIII219：极饿离栏清账——vanilla lifeRegenCount 在非极饿拍由自然回复正项
-      //   逐 tick 回收（:19382 lifeRegenCount += lifeRegen 无条件跑 + :19398-19408
-      //   ≥120 正项兑付,满血也照走），5t 极饿毛刺（UpdateHungerBuffs :11722 334 恒
-      //   5t 无自持重钉→毛刺后 UpdateStarvingState 重授 332）累计 −20≪−num13 永不
-      //   出伤；本仓累加器若跨毛刺结转会造 12 毛刺后凭空 −2HP 的净偏差 → 离栏即清。
-      this.starvingHitAccum = 0;
-    }
-    // 蜂蜜对冲（Player.cs:19212-19219：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
-    // 对冲后钳回 ≤0）。原版按 tick 连续流量结算;本仓 DoT 分块弹出,按块发 +1 HP 会在
-    // 块边界整 HP 漂移——改为【整数位对冲账】（原版同构）：计提端逐 tick 整数
-    //   +4 lifeRegen 单位（:19214 原式;120 单位=1HP,:19478 弹出门同单位,原版
-    //   lifeRegen(:1919)/lifeRegenCount(:1921) 双 int 全程整数）,兑付端按账面折整 HP
-    //   抵减本 tick 已弹出的 DoT 分块（钳 ≤0 语义 = cancel ≤ -dots）,余数（<120 单位）
-    //   跨 tick 结转、蜂蜜/DoT 离栏即弃——长期对冲总量 2HP/s 与原版 :19384 净流率
-    //   精确一致,heal/dotChunkOut 全程整数
-    // ★BJ443 登记债清偿（BJ447,2026-10-03）：旧 cancel=honeyOffsetAccum（+= 2×dt
-    //   浮点计提）携分数经 heal → Player.ts buffHeal 流入 hp 真值面;现计提/兑付双端
-    //   整数化,分数源消除,Player.ts consumeDotChunk 调用点 + Game.ts addDamageNumber
-    //   入口双截断保留为兜底（对整数输入恒等）。
-    if (this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)
-      && (this.dotActiveTick || dots < 0)) {
-      this.honeyOffsetUnits += 4;               // :19214 +4 lifeRegen 单位/tick（整数计提）
-      if (dots < 0) {
-        const cancel = Math.min(-dots, Math.floor(this.honeyOffsetUnits / 120));
-        this.honeyOffsetUnits -= 120 * cancel;  // 兑付按整 HP 折 120 单位,余数结转
-        dots += cancel;
-        heal += cancel;
-        this.dotChunkOut -= cancel;
-        if (heal > 0) heal = 0;
-      }
-    } else {
-      this.honeyOffsetUnits = 0;                // 蜂蜜离栏即清账（原版对冲无跨期结转）
     }
     // 蜂蜜 flat 正项（UpdateLifeRegen :19250-19254：honey → lifeRegenTime+=2、
     // lifeRegen+=2 = 1 HP/s——位于 DoT/对冲段后不被清零,R5 蓝队勘误移出正项池）。
@@ -1573,19 +1736,41 @@ export class BuffState {
     return heal;
   }
   // ---- 属性聚合（幂等读取，不做副作用写入）----
+  /** ★BJ739 B03（2026-10-31）：加法池重构——原版 moveSpeed 是单加算字段（ResetEffects
+   *  :25688 清 1f → UpdateBuffs :25763 逐 buff += → UpdateEquips :25830 装备 += →
+   *  Update 尾才乘 strongestMoveSpeedDebuff/特殊乘区）。蛋糕/狼人/虚弱曾被拆成乘区
+   *  （×1.2/×1.05/×0.9）与迅捷基乘 1.25 复合 → 组合面系统性偏快（迅捷+蛋糕 1.50
+   *  应 1.45、迅捷+10% 配饰 1.375 应 1.35，issue#29 B03）。本 getter = 1+Σ buff
+   *  加算项（向日葵第一步 +0.1 同入池；第二步 ×1.1 单列 sunflowerMoveMult，消费端
+   *  在【buff 加算池之后、装备加算之前】施加——终值=(1+B)×1.1+E（Player.
+   *  moveSpeedPool；=原版 UpdateBuffs 两步→UpdateEquips 装备 += 在后序））。装备
+   *  加算由 Player 侧 moveSpeedMult+(equipStats.moveMult-1) 同池合成。
+   *  ★R21-⑧/BJ743-A（2026-10-31）向日葵槽位序约定补注（Webbed 同款「以本序为约」）：
+   *  原版两步同槽相邻（:11089 +=0.1 → :11090 ×=1.1）——严格槽序下仅先于该槽的
+   *  buff（kite :10003/糖分 :10026/迅捷 :10042）吃 ×1.1,其后槽位（webbed :11964/
+   *  狼人 :11991/虚弱 :12004/食物 :12032+）不吃;本池以【全 buff 先加后乘】为约
+   *  （既定解读,与 Webbed 序注同款钉法,勿按槽序重拆）。Webbed = 赋值清池
+   *  （:11964 moveSpeed=0f，其后 kite/食物 += 档照加——既有序解读保持，原版槽序
+   *  依赖以本序为约）。 */
   get moveSpeedMult(): number {
-    let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
     // 1457: Burning/Slow/Chilled 三项从 moveSpeed 乘法链移除（Update :26132-26165
     // 改折入 strongestMoveSpeedDebuff 取最强不叠加；1456 为 else-if 乘法链）
-    if (this.active.has(BuffType.Webbed)) m = 0;             // Webbed moveSpeed = 0（:11471，
-                                                             // 赋值非乘算——后续食物 += 档照加，原版同序）
-    if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
-    if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
-    if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）
+    let m = 1;
+    if (this.active.has(BuffType.Agility)) m += 0.25;        // Swiftness moveSpeed += 0.25（:10042）
+    if (this.active.has(BuffType.Sunflower)) m += 0.1;       // 向日葵第一步 moveSpeed += 0.1（:11089）
+    if (this.active.has(BuffType.Weak)) m -= 0.1;            // 虚弱 moveSpeed -= 0.1（:12004）
+    if (this.active.has(BuffType.Werewolf)) m += 0.05;       // 狼人 moveSpeed += 0.05（:11991）
+    if (this.active.has(BuffType.SugarRush)) m += 0.2;       // 糖分冲刺 moveSpeed += 0.2（:10026）
+    if (this.active.has(BuffType.Webbed)) m = 0;             // Webbed moveSpeed = 0（:11964 赋值非乘算）
     if (this.active.has(BuffType.KiteBuff)) m += 0.15;       // 风筝 moveSpeed += 0.15（★1457 :10003；旧 1456 钉 0.25 已反转）
-    if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
-    m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
+    m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:12032/:12048/:12064）
     return m;
+  }
+  /** ★BJ739 B03：向日葵第二步 moveSpeed *= 1.1（:11090）——独立乘区；原版 Update 序
+   *  （UpdateBuffs 两步 → UpdateEquips 装备 += 在后）⇒ 终值 = (1+buff 加算)×1.1+装备
+   *  加算。消费端 Player 移速四处合成位 */
+  get sunflowerMoveMult(): number {
+    return this.active.has(BuffType.Sunflower) ? 1.1 : 1;
   }
   /** 1457 新机制 strongestMoveSpeedDebuff（Player.cs:26132-26165）：移动减速 debuff
    *  全部折算 min 只取最强单项不叠加——OgreSpit(197) 1/3、Dazed(160) 1/3、
@@ -1639,10 +1824,14 @@ export class BuffState {
   get hungerPickSpeed(): number {
     return [0, 0.05, 0.15][this.hungerTier];
   }
-  /** 召唤击退 buff 加算（MinionProj 裸 kb 之上加）：醉酒 +1（:11520）/
-   *  饥饿 -0.5（:11570）/ 极饿 -1（:11594） */
+  /** 召唤击退 buff 加算（MinionProj 裸 kb 之上加）。★BJ739 B14/B15（2026-10-31）
+   *  改判：三档食物 +0.5/+0.75/+1（1457 Player.cs:12031/12047/12063 `minionKB +=
+   *  0.5f/0.75f/minionKB++`——旧面整缺,issue#29 B14）；醉酒 25 **无** minionKB 项
+   *  （:12006-12017 全支无——旧注「醉酒 +1（:11520）」锚漂进宠物段=错锚,issue#29
+   *  B15 摘除）;饥饿 -0.5（:12079）/极饿 -1（:12094）保持。fed-state 互斥（apply
+   *  换档删旧）⇒ 食物档与饥饿档不并存,直加安全 */
   get minionKbBonus(): number {
-    return (this.active.has(BuffType.Tipsy) ? 1 : 0) + [0, -0.5, -1][this.hungerTier];
+    return [0, 0.5, 0.75, 1][this.wellFedTier] + [0, -0.5, -1][this.hungerTier];
   }
   /** 魔力上限加成：水晶球预见 statManaMax2 += 20（:11481） */
   get manaMaxBonus(): number {
@@ -1660,8 +1849,16 @@ export class BuffState {
   /** 水晶球预见耗魔 -2%（manaCost -= 0.02f，Player.cs:11485）——原版 manaCost 是
    *  1f 起的加算聚合（饰品/药水同池），消费端 (int)(item.mana × manaCost)；
    *  本仓折成乘法因子并入 equipStats.manaCostMul（Player.computeEquipStats） */
-  get clairvoyanceManaCostMult(): number {
-    return this.active.has(BuffType.Clairvoyance) ? 0.98 : 1;
+  /** ★BJ739 B05（2026-10-31）：耗魔 -2% 改【加算】入 manaCostOff 池——1457
+   *  Player.cs:11979 `manaCost -= 0.02f`：原版 manaCost 是 1f 起单加算浮点池
+   *  （:1859 ResetEffects 复位），与大自然恩赐 -0.06（:13061）/魔力花 -0.08
+   *  （:14040）同池；消费单点截断 `(int)(item.mana × manaCost)`（:5875/:5878）。
+   *  旧折乘 0.98 并入 manaCostMul = 合法配装每发多扣 1 蓝（Inept 爬藤杖 44 蓝：
+   *  trunc(44×0.86×0.98)=37 应 trunc(44×0.84)=36，issue#29 B05）。消费端 =
+   *  Player.computeEquipStats manaCostOff 位（buffs.active 在 equipStatsTailKey
+   *  缓存键内，失效面已覆盖）。旧名 clairvoyanceManaCostMult 随刀退役。 */
+  get clairvoyanceManaCostOff(): number {
+    return this.active.has(BuffType.Clairvoyance) ? 0.02 : 0;
   }
   /** 弹药箱 20% 不耗弹（PickAmmo :52746 rand.Next(5)==0） */
   get hasAmmoBox(): boolean {
@@ -1775,7 +1972,13 @@ export class BuffState {
   get manaSickMagicMult(): number {
     const left = this.active.get(BuffType.ManaSickness);
     if (left === undefined) return 1;
-    return 1 - Math.min(0.25, 0.25 * (left / 5));
+    // ★BJ739 B04：摘 25% 钳——1457 Player.cs:10412-14 `manaSickReduction = 0.25f ×
+    //  (buffTime / manaSickTime)` 原式无钳（manaSickTime=300t=5s 静态 :955；喝蓝
+    //  AddBuff(94,300) :52576；BuffID.cs:34 AddBuffTimeAdditivelyToCap 94→600t 叠加
+    //  上限）。满叠 10s 剩余期 reduction=0.5 → magicDamage ×0.5（消费 :26098-26100
+    //  `*= 1f - manaSickReduction`）。旧 Math.min(0.25,·) 把叠层 5-10s 段钳回 25%
+    //  （issue#29 B04：两瓶蓝后剩 10s 乘数应 0.50 旧 0.75）
+    return 1 - 0.25 * (left / 5);
   }
   /** 射手 buff 箭速 ×1.2（Player.cs:52717-52722） */
   get arrowSpeedMult(): number {

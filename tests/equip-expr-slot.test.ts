@@ -163,12 +163,14 @@ describe('翅膀绘制表（PlayerDrawLayers.cs generic 尾段分支）', () => 
     return { stdout: r.stdout ?? '', status: r.status };
   };
 
-  it('pinned 表达式槽位件与已提交 JSON 一致 + 基数（itemstats 1014 / wing 51 / head 270→273;★BJ183 1457 基准重计）', () => {
+  it('pinned 表达式槽位件与已提交 JSON 一致 + 基数（itemstats 1129 / wing 51 / head 273;★BJ183 1457 基准重计）', () => {
     const { stdout, status } = run();
     const j = JSON.parse(stdout.trim().split('\n').pop()!);
     // ★BJ183 2026-09-20 基准 1456→1457:1457 新配饰 6156-6195 族入表(31 件)+贯穿组
     // 归属修复,基数 983→1014/head 270→273/body 199→201/legs 167→169/acc 340→371
-    expect(j.counts).toEqual({ itemstats: 1014, head: 273, body: 201, legs: 169, acc: 371, wing: 51 });
+    // ★BJ744 改判史：BJ740 ACC15/16（itemstats −5 手机族误资格键 +120 音乐盒101/
+    //  变声15/巨柱4 helper 内置位 {acc:0,van:1}）→ itemstats 1014→1129 / acc 371→486。
+    expect(j.counts).toEqual({ itemstats: 1129, head: 273, body: 201, legs: 169, acc: 486, wing: 51 });
     // 翅膀四件：提取器输出 = 已提交条目（无 van，无差异）
     for (const vid of [3468, 3469, 3470, 3471]) {
       expect(j.pinned[String(vid)]).toEqual(vanillaStatOfVid(vid));

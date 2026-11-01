@@ -110,6 +110,20 @@ function angleLerp134(cur: number, target: number, amt: number): number {
   if (angle <= Math.PI && angle >= -Math.PI) return angle;
   return angle > Math.PI ? angle - Math.PI * 2 : angle + Math.PI * 2;
 }
+/** ★G39-A（bj746a D6,2026-11-01）：玩家 owned 弹 spawn 穿甲注入（Damage_PVE
+ *  :12852 `num6 = Main.player[owner].GetArmorPenetration(melee) + armorPenetration`
+ *  ——melee=false 支=裸通用池（Player.cs:4350-4357）;:13684-86 `ownedBySomeone &&
+ *  !hostile` 门=一切玩家 owned 弹（哨兵塔/随从/鞭 tag 继承弹）命中时吃池）。
+ *  仓内 spawn 烘焙模型（Game 发射链 `eq.armorPen ?? 0` 同式）：MinionProj 弹族
+ *  旧漏注入 ⇒ settlePen 只剩型号份。弹体型号份（armorPenetration 字段）由
+ *  Arrow.settlePen 自动相加,此处只注入玩家池。桩 player=可选链 0（零扰动）。 */
+export function ownerArmorPenOf(game: GameHooks): number {
+  // ★BJ748（G39-A D6 尾迹收口）：括号习语对齐 playerArmorPenOf（MountCombat:659）
+  //  ——`?? 0` 紧随读面（armorpen-stub-nan-guard 闸的守卫形）;旧形把整条可选链
+  //  多包一层括号再 `) ?? 0`,语义等价但静态闸不认（rest 以 ) 开头=判 unguarded）。
+  return ((game.player as unknown as
+    { equipStats?: { armorPen?: number } } | null | undefined)?.equipStats?.armorPen ?? 0);
+}
 /** DD2 套装旗标消费位（2026-08-31 批②接线）。原版写入链 =
  *  ballistaPanic（buff 205,Player.cs:11933 读面——SquireT2 受击 AddBuff(205,300) :38526）：
  *  ★GB3（2026-08-31 清零批二波）：population 位补齐——Player.damage 授予端已落地，
@@ -192,8 +206,26 @@ function ballistraShotDelayOf(player: object): number {
 const AURA_TOWER = new Set([688, 689, 690]);
 /** 爆炸机关三档（AI_138 :66059）：帧 4 张每 12t 连续循环；触发检测每 3t——
  *  中心上方 48px 处 144×144 盒内有敌 → 原地爆炸（proj 694/695/696 等价 AoE），
- *  冷却 GetExplosiveTrapCooldown=90 */
+ *  冷却 GetExplosiveTrapCooldown（基础 90） */
 const TRAP_TOWER = new Set([691, 692, 693]);
+/** ★BJ745 A27（issue#35,2026-11-01）：GetExplosiveTrapCooldown 1:1（1457
+ *  Projectile.cs:70453-70463）——基础 90 → 女猎手 T2 套装 60 → T3 30。
+ *  旧恒 90=T2/T3 频率仅 2/3 与 1/3。setHuntressT2/T3 读 summonSet 投影
+ *  （vanillaArmorSets HuntressTier2/Tier3 条目,T3 条目同置双旗 :106-110）+
+ *  p.setHuntressT2/T3 直连位（GW/测试后备,同 dd2SetFlags 双读形）。 */
+export function explosiveTrapCooldownOf(player: unknown): number {   // ★BJ745 A27 导出：行为锁单测面
+  const p = player as {
+    setHuntressT2?: boolean; setHuntressT3?: boolean;
+    equipStats?: { summonSet?: { huntressT2?: boolean; huntressT3?: boolean } };
+  } | null | undefined;
+  const ss = p?.equipStats?.summonSet ?? undefined;
+  const t2 = ss?.huntressT2 === true || p?.setHuntressT2 === true;
+  const t3 = ss?.huntressT3 === true || p?.setHuntressT3 === true;
+  let result = 90;
+  if (t2) result = 60;
+  if (t3) result = 30;
+  return result;
+}
 /** AI_130 三档弹/速度/周期分层（★F5,2026-08-30；case 链 Projectile.cs:69166-69398,
  *  1456 同构 :65194-65350）：
  *  - T1 663：shot 664 / speed num4=12 / 开火帧 num3=12 / cycle num6*num7=24 /
@@ -1877,6 +1909,9 @@ export class MinionProj extends Entity {
   }
   /** 不占随从槽位（沙漠虎/阿比盖尔本体、龙身体段、星尘守护者——原版 minionSlots=0/不统计） */
   noSlot = false;
+  /** ★BJ746 A33：623 守护者卸装/死亡宽限计数（stardustGuardian 旗掉后 timeLeft=2
+   *  自然衰减的等价承载——AI 拍尾递减,>0 期间照常索敌/拳击） */
+  expireGraceT = 0;
   /** 龙链父段引用（626/627/628 跟随前段） */
   parentRef: (() => MinionProj | null) | null = null;
   /** 虎扑链状态（AI_067）：ai[0] 4=链发后等待 / ai[1]=剩余等待 tick（:46702-46718） */
@@ -5032,6 +5067,7 @@ export class MinionProj extends Entity {
             //  → 左上=Center−2（旧 −5 写死=弹心偏 3px）
             const laser = new Arrow(this.cx - 2, this.cy - 2, dx / d * 8, dy / d * 8,
               Math.max(1, Math.trunc(dmg0 * 1.15)), 0, 389, { grav: 0, life: 300 });
+            laser.armorPen = ownerArmorPenOf(game);   // ★G39-A（bj746a D6）:owner 穿甲池
             laser.whipTagShot = true;                // 389 ∈ MinionShot（ProjectileID.cs:291）
             laser.bonusTagDmg = this.bonusTagDmg;    // ★BJ723-C S05：:11140 随从弹继承
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(laser, 'projectiles');
@@ -5268,7 +5304,6 @@ export class MinionProj extends Entity {
           const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);   // 946 非 sentry 恒假,形位对齐
           const owner0 = this.ownerRef() as unknown as
             { cx: number; equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;   // cx=Player 本有（kbDir :4970 读位,纯类型面窄化补声明）
-          const mkb = (owner0?.equipStats?.minionKB ?? 0) + (owner0?.buffs?.minionKbBonus ?? 0);
           const pen0 = (owner0?.equipStats?.armorPen ?? 0)
             + (projectileData(this.projId)?.armorPenetration ?? 0);   // :13686-87 两源（同 ai156Strike）
           const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
@@ -5281,7 +5316,7 @@ export class MinionProj extends Entity {
             dmg: res.dmg,
             crit: critTown,
             flatPen: pen0,
-            kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477-52482,同敌怪臂）
+            kb: kbDir * this.knockback,   // ★G39-A（g36a D-⑧）：mkb 出生烘焙（Game wrapper summon 分支）,命中拍拆除
           };
         });
     }
@@ -5470,7 +5505,6 @@ export class MinionProj extends Entity {
     const golemCrit = rollGolemSentryCrit(game, this.projId, this.sentry);
     const owner0 = this.ownerRef();
     const o0 = owner0 as unknown as { equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;
-    const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
     const pen0 = (o0?.equipStats?.armorPen ?? 0) + (projectileData(this.projId)?.armorPenetration ?? 0);
     const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
       ? (owner0.cx < en.cx ? 1 : -1)
@@ -5481,7 +5515,7 @@ export class MinionProj extends Entity {
     //  （tag 乘后基数;★S02 BJ723-B:res.crit ×2 已摘,DV 掷基数复位未翻倍值=登记债①清偿）
     const dmgV156 = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
     en.hurt?.(applyBannerDamageDealt(game, en, dmgV156),
-      kbDir * (this.knockback + mkb), 0, game, pen0, critHit, -3, true);
+      kbDir * this.knockback, 0, game, pen0, critHit, -3, true);   // ★G39-A（g36a D-⑧）：mkb 出生烘焙,命中拍拆除
     if (!mainGated) {
       ghostHealProc(game, this.projId, this.pveNumHits,
         en as unknown as Parameters<typeof ghostHealProc>[3]);
@@ -5963,6 +5997,7 @@ export class MinionProj extends Entity {
             const shot = new Arrow(this.cx - hw, this.cy - hh, (ax - this.cx) / l * shooter.speed,
               (ay - this.cy) / l * shooter.speed, dmg, this.knockback, shooter.shot,
               { grav: 0, life: shooter.life ?? 1200 });
+            shot.armorPen = ownerArmorPenOf(game);   // ★G39-A（bj746a D6）:owner 穿甲池
             shot.whipTagShot = true;   // MinionShot 吃鞭 tag（ProjectileID.Sets.MinionShot）
             shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
             if (shooter.shot === 614) {
@@ -7168,6 +7203,7 @@ export class MinionProj extends Entity {
     const ay0 = this.cy + (shooter.muzzleY ?? 0);
     const shot = new Arrow(this.cx - hw, ay0 - hh, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
       dmg, this.knockback, shooter.shot, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
+    shot.armorPen = ownerArmorPenOf(game);   // ★G39-A（bj746a D6）:owner 穿甲池
     shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
     shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
     if (foxAi1 !== undefined) shot.foxAi1 = foxAi1;   // ★BJ525(c)：NewProjectile Ai1 形参直传（:62753 num159——1113 3/1 循环,余型缺省 0 不写）
@@ -7592,8 +7628,15 @@ export class MinionProj extends Entity {
     const restY = p.cy - 25;                        // :45485
     if (this.gA0 === 2) {
       // ---- 状态 2：冲刺拳击 ----
+      // ★BJ746 A32（issue#35,2026-11-01）：锁靶失效门补 CanBeChasedBy（AI_120
+      //  :45705-45712 `nPC3 = Main.npc[num17]; if (!nPC3.CanBeChasedBy(this) ||
+      //  Distance > num3) nPC3 = null`——NPC.cs:91139 active∧chaseable∧lifeMax>5∧
+      //  !dontTakeDamage∧!friendly∧!immortal）。旧 enemyById 只查 !dead：锁靶转
+      //  dontTakeDamage（克脑一阶/伪装等）后守护者滞留拳击态不弃（issue 实报连
+      //  8 拍 state2/target1,原版首拍即退 state0）。
       const tgt = this.enemyById(game, this.gA1);
-      const inRange = tgt && Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) <= 500; // :42203（Distance > num3=500 作废）
+      const inRange = tgt && canBeChasedBy(tgt)
+        && Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) <= 500; // :42203（Distance > num3=500 作废）
       const nearPlayer = Math.hypot(p.cx - this.cx, p.cy - this.cy) < 500;          // :42196（flag5）
       if (!tgt || !inRange || !nearPlayer) {
         this.gA0 = 0; this.gA1 = -1; // :42208-42212
@@ -8015,8 +8058,7 @@ export class MinionProj extends Entity {
       // buff 段 = 醉酒 +1 :11520 / 饥饿 -0.5 / 极饿 -1 :11570/:11594，2026-08-20 饥饿链补）
       const owner0 = this.ownerRef();
       const o0 = owner0 as unknown as { equipStats?: { minionKB?: number }; buffs?: { minionKbBonus?: number } } | null;
-      const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
-      const pen0 = ((owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0)
+        const pen0 = ((owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0)
         + (projectileData(this.projId)?.armorPenetration ?? 0); // StrikeNPC :12068:玩家AP+弹幕AP 两源
       // 击退方向（StrikeNPC 第 3 参 num40,Projectile.cs:13648-13677）：缺省=随从→敌
       // sign;★方向表族（:13652-13660 switch 697/699/707/708/759 + ★1458 新增 1118
@@ -8051,7 +8093,7 @@ export class MinionProj extends Entity {
       //  掷基数复位未翻倍值=BJ716-A 登记债①清偿;crit ×2 统一在 Enemy.hurt 防后）
       const dmgVContact = damageVarRoll(res.dmg, this.ownerRef()?.luck ?? 0);
       en.hurt(applyBannerDamageDealt(game, en, dmgVContact),
-        kbDir * (this.knockback + mkb), 0, game, pen0, critContact,
+        kbDir * this.knockback, 0, game, pen0, critContact,   // ★G39-A（g36a D-⑧）：mkb 出生烘焙,命中拍拆除
         spec === CONTACT_PLAYER_WINDOW ? 0 : -3, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       // ★BJ436 GC1 写方桥接线（近战域 immune 表 npcImmuneByAttacker 同步,原版
       //  单表语义;ForbiddenSignProj 同式）：受理命中才写梯（!mainGated=dead/
@@ -8119,7 +8161,6 @@ export class MinionProj extends Entity {
     if (!townList.length) return false;
     const owner0 = this.ownerRef();
     const o0 = owner0 as unknown as { equipStats?: { minionKB?: number; armorPen?: number }; buffs?: { minionKbBonus?: number } } | null;
-    const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
     const pen0 = (o0?.equipStats?.armorPen ?? 0)
       + (projectileData(this.projId)?.armorPenetration ?? 0);   // :13686-87 num6 两源（同敌怪环 :4383）
     const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
@@ -8195,7 +8236,7 @@ export class MinionProj extends Entity {
           dmg: res.dmg,   // ★S02:tag-crit ×2 已在 WhipTag 尾摘除——res.dmg 即防前值,勿再摘半
           crit: critTown,
           flatPen: pen0,
-          kb: kbDir * (this.knockback + mkb),   // 裸kb+minionKB（:52477,同敌怪环）
+          kb: kbDir * this.knockback,   // ★G39-A（g36a D-⑧）：mkb 出生烘焙（Game wrapper summon 分支）,命中拍拆除
         };
         return settle;
       });
@@ -9184,7 +9225,7 @@ export class MinionProj extends Entity {
             //   抛物线系误植，改显式 grav 0
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               Object.assign(new Arrow(s.x - 8, s.y - 8, vx, vy, dmgOf(), this.knockback, tier.shot, { grav: 0 }),
-                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
+                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg, armorPen: ownerArmorPenOf(game) }),   // ★BJ723-C S05：:11140 随从弹继承;★G39-A（bj746a D6）:owner 穿甲池
               'projectiles');
           }
           if (++this.sFireT >= tier.cycle) { this.sFire = 0; this.sCool = tier.cool; } // cycle=num6*num7=24/32/32、cd num8=80/70/60（:69228/:69281 分层）
@@ -9284,7 +9325,7 @@ export class MinionProj extends Entity {
               //   = 侍从 T2 套装「弩车可穿透」——发射点覆写审计批（2026-09-03）补
               Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680,
                 setf134.squireT2 ? { pierce: 7 } : undefined),
-                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
+                { whipTagShot: true, bonusTagDmg: this.bonusTagDmg, armorPen: ownerArmorPenOf(game) }),   // ★BJ723-C S05：:11140 随从弹继承;★G39-A（bj746a D6）:owner 穿甲池
               'projectiles');
           }
           if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = ballistraShotDelayOf(game.player); } // num5*num6=25（:69686）
@@ -9593,7 +9634,7 @@ export class MinionProj extends Entity {
             canBeChasedBy(en) && Math.abs(en.cx - ecx) < trapHalf + en.w / 2
             && Math.abs(en.cy - ecy) < trapHalf + en.h / 2);
           if (hit) {
-            this.sCool = 90;
+            this.sCool = explosiveTrapCooldownOf(this.ownerRef());   // ★BJ745 A27：90/60/30（GetExplosiveTrapCooldown :70453-63）
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
             // 原版塔体 691/692/693 生成【爆炸弹】694/695/696（AI_138 :66063-66073）,
             // StatusNPC 走爆炸弹型号——Oiled 门在 694 族(:10786,setHuntressT2 套装门)
@@ -9860,7 +9901,7 @@ export class MinionProj extends Entity {
           const s53life = sp53?.timeLeft ?? 1200;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - s53hw, my - s53hh, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
-              dmgOf(), this.knockback, s53.shot, { grav: 0, life: s53life }), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）;★BJ723-C S05 :11140 继承
+              dmgOf(), this.knockback, s53.shot, { grav: 0, life: s53life }), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg, armorPen: ownerArmorPenOf(game) }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）;★BJ723-C S05 :11140 继承;★G39-A（bj746a D6）:owner 穿甲池
             'projectiles');
         }
         if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
@@ -10021,7 +10062,7 @@ export class MinionProj extends Entity {
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - hw26, my - hh26, ((tgt.cx - mx) / d) * 12, ((tgt.cy - my) / d) * 12,
               dmgOf(), this.knockback, 1026, { grav: 0, life: life26, extraUpdates: 2 }),
-              { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // SENTRY_SHOT_SET 吃鞭 tag;★BJ723-C S05 :11140 继承
+              { whipTagShot: true, bonusTagDmg: this.bonusTagDmg, armorPen: ownerArmorPenOf(game) }),   // SENTRY_SHOT_SET 吃鞭 tag;★BJ723-C S05 :11140 继承;★G39-A（bj746a D6）:owner 穿甲池
             'projectiles');
         }
         return;
@@ -10102,7 +10143,7 @@ export class MinionProj extends Entity {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg }),   // ★BJ723-C S05：:11140 随从弹继承
+            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId), { whipTagShot: true, bonusTagDmg: this.bonusTagDmg, armorPen: ownerArmorPenOf(game) }),   // ★BJ723-C S05：:11140 随从弹继承;★G39-A（bj746a D6）:owner 穿甲池
             'projectiles');
         }
       }
@@ -10201,7 +10242,16 @@ export class MinionProj extends Entity {
     // 小雪怪 951（BJ435 定谳刀）：AI_067 flag5 地面步行族正轨——原「统一飞行」近似
     // 落通用悬停 = 用户实报「召唤浮空」根因（flying 分发于 2026-10-02 退役）
     if (this.projId === 951) { this.flinxStep(game, p, dmg0); return; }
-    if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
+    // ★BJ746 A33（issue#35,2026-11-01）：623 卸装/死亡宽限尾拍——原版旗停后续写
+    //  timeLeft（AI_120 :45468-73 `if (player.stardustGuardian) timeLeft = 2`）→ 旗
+    //  掉后 timeLeft 停在 2,通用梯 :17307 逐拍递减 ⇒ AI 再跑 2 拍（含拳击机会）后
+    //  自然亡。旧 Game 侧卸装即 dead=真吞掉尾拍。expireGraceT>0 = 旗已掉：先跑
+    //  本拍 AI（guardianBody 全量）,拍尾递减,归零亡（:17307 AI 后尾位同序）。
+    if (this.projId === 623) {
+      this.guardianBody(game, p, dmg0);
+      if (this.expireGraceT > 0 && --this.expireGraceT <= 0) this.dead = true;
+      return;
+    }
     if (this.projId === 317) { this.ravenBody(game, p, dmg0); return; }
     // ★BJ635：AI_066 双子（387/388）专支——此前落通用飞行路径（追击恒速 5/无 388
     //  冲刺态/387 激光固定 cd）;533 同函数 533 面全式（旧=相位机+通用运动覆写）
@@ -10255,6 +10305,7 @@ export class MinionProj extends Entity {
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * flameSpd, this.foxAimY * flameSpd,
           Math.max(1, Math.trunc(dmg0 * 0.85)), 0, 1106,
           { grav: 0, life: 72, pierce: 4 });
+        flame.armorPen = ownerArmorPenOf(game);   // ★G39-A（bj746a D6）:owner 穿甲池
         // 命中火 buff:速度门 StatusNPC :11665-11668——velocity.Length()>10 →
         // OnFire3(323) else OnFire(24),300t 定值。弹速=num17 字面（5/10.5）→
         // 1094 恒 OnFire(24)、1113 恒 OnFire3(323)（:60072-60074）
@@ -10322,6 +10373,7 @@ export class MinionProj extends Entity {
         const shot = new Arrow(this.cx - 5, this.cy - 5, dx / d * 32, dy / d * 32,
           Math.max(1, Math.round(dmg0)), this.knockback, 1120,
           { grav: 0, life: 300, pierce: 2, gem: { fastThenSlow: true } });
+        shot.armorPen = ownerArmorPenOf(game);   // ★G39-A（bj746a D6）:owner 穿甲池
         shot.whipTagShot = true;   // MinionShot（ProjectileID.Sets.MinionShot[1120] :291）
         shot.bonusTagDmg = this.bonusTagDmg;   // ★BJ723-C S05：:11140 随从弹继承
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');

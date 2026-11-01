@@ -54,7 +54,7 @@ import { drawStripTrail, type TrailPt, type TrailSpec } from '../fx/TrailShader'
 import type { Renderer } from '../render/Renderer';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitCrittersAll, hitTownNpcs, playerCanHitEnemy, hitTownNpcsAoeBox } from './projTargets';   // ★BJ729-A：hitCrittersAll（KILL_BURST D4 critter 臂）
-import { rollVanillaHitCrit } from './proj1457';
+import { rollVanillaHitCrit, rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：ConsumeTimer=爆面 crit 段完整单源（:12915-28）
 import type { VDust } from '../fx/VanillaDust';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -979,7 +979,7 @@ export class MagicMissileProj extends Entity {
         if (!(Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2)) continue;
         if (!playerCanHitEnemy(e, game, this.projId)) continue;
         // ★BJ489 def-3：Kill 死亡爆掷率=rollVanillaHitCrit（命中拍动态,冻结载体退役）
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D5）：TimerCrit :12928 接单源（Resize+Damage() 重跑同段）
         // ★F3 对账收口（蓝队四轮）：Kill 死亡爆 = Resize 后 Damage()
         // 二次结算面 → 双支单源站位（79/16 数据面 magic ⇒ 恒拒=原版同真值,翻旗自动生效）
         const snapBonusRainbow = projectileSnapStrikeBonus(game,
@@ -1003,9 +1003,9 @@ export class MagicMissileProj extends Entity {
       //  面 :847/:1689/:1862 hitCritters 单发档与此分立,两 bucket 面各自 1:1）。
       hitCrittersAll({ x: this.cx - R, y: this.cy - R, w: R * 2, h: R * 2, projId: this.projId }, game);
       hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
-        () => ({
+        (tnKB) => ({   // ★G37-A（D5）：城镇臂 TimerCrit 同扩
           dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
-          crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+          crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnKB, this.critChance > 0),
           penPercent: this.armorPen,
         }));
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);

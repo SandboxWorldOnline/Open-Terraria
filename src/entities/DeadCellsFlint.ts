@@ -39,13 +39,18 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt, resolveProjClass, IS_A_WHIP_PROJS } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
+// ★BJ741 R19-1（2026-10-31）：DV 单源（:12970——1043/1041 敌臂整缺=旧恒平值）+ Nano/
+// confetti 面（Projectile.cs:13688-13696）+ BuffType（浸剂 buff 门）
+import { damageVarRoll } from '../stats/DamageVar';
+import { BuffType } from '../stats/Buffs';
+import { ConfettiBurstProj } from './meleeOnHitProjs';   // 289 彩纸泡（meleeEnchant==7,:13693-96）
 // Spawn_DeadCellsFlint 编排本体（收编池;L5 批 2026-08-31——本地直生 + broadcast 上行同用）
 import { deadCellsFlintFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ741 R19-1/G37①：TimerCrit :12928 消费并单源
 
 /** 玩家侧挂点（MonkOwner 同口径；cx/cy/facing 实时引用） */
 export interface FlintOwner {
@@ -58,12 +63,17 @@ const TAU = Math.PI * 2;
 /** 敌怪桶最小形状（Enemy.hurt 单点结算） */
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number, nanoMul?: number) => boolean;   // ★BJ741 R19-1：nanoMul 尾参（Enemy.hurt 第 11 参）
 };
 
 /** 近战弹命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计）
  *  ★F3 接线（蓝队四轮）：火石枪族弹（1043 斩击波/1041 尖刺，数据面 melee）→
- *  焰爆石/拍击石双支（Projectile.cs:13439-13446）在本共享出口单点接线 */
+ *  焰爆石/拍击石双支（Projectile.cs:13439-13446）在本共享出口单点接线
+ *  ★BJ741 R19-1（2026-10-31）：浸剂三链由调用点收编进本共享出口【hurt 前】=
+ *  StatusNPC(:13634)→StrikeNPC(:13702) 原序（α-H6/A5「ichor 池反例」同款——首轮命中
+ *  即吃 ichor(+15) 穿甲池）。nano ×1.05（meleeEnchant==6,:13689）+ confetti 289
+ *  （==7,:13693-96）同块接入——nanoMul 经 Enemy.hurt 第 11 参在 penAdd 并入后施加
+ *  （BJ739 B19 通道,勿调用侧预乘）。 */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number,
   host?: { projId: number; x: number; y: number; w: number; h: number }): void {
@@ -71,24 +81,34 @@ function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
     { projId: host?.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
       targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
-  e.hurt(applyBannerDamageDealt(game, e, dmg)
-    + (snapBonusFlint ? snapBonusFlint : 0),
-    kdir * kb, 0, game, pen, crit, 0, true);
-}
-
-/** 浸剂三链（melee=true 弹命中侧；MonkStaffFury.applyImbue 同式） */
-function applyImbue(game: GameHooks, e: EnemyLike): void {
-  const pl = game.player as unknown as { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
-  if (pl?.buffs) {
-    applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
+  // ★BJ741 R19-1：(melee||IsAWhip) 门（:13688）——1043/1041 数据面 melee,门保数据驱动
+  const meleeGate741 = resolveProjClass({ projId: host?.projId }) === 'melee'
+    || IS_A_WHIP_PROJS.has(host?.projId ?? 0);
+  const pl741 = game.player as unknown as
+    { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
+  if (meleeGate741 && pl741?.buffs) {
+    applyMeleeImbue(pl741.buffs, e as unknown as Record<string, number>,
       () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
         ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+    if (pl741.buffs.has(BuffType.ImbueParty as unknown as never)) {
+      game.spawnFriendlyProj?.(new ConfettiBurstProj(
+        e.x + e.w / 2, e.y + e.h / 2,
+        (e as unknown as { vx?: number }).vx ?? 0,
+        (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
+    }
   }
-  if (pl?.equipStats) {
-    applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
-    applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
+  if (meleeGate741 && pl741?.equipStats) {
+    applyFrostBurn(pl741.equipStats.frostBurn, e as unknown as Record<string, number>);
+    applyMagmaStoneProj(pl741.equipStats.magmaStone, e as unknown as Record<string, number>);
   }
+  const nanoMul741 = meleeGate741 && pl741?.buffs?.has(BuffType.ImbueNano as unknown as never) ? 1.05 : 1;
+  e.hurt(applyBannerDamageDealt(game, e, dmg)
+    + (snapBonusFlint ? snapBonusFlint : 0),
+    kdir * kb, 0, game, pen, crit, 0, true, 0, 0, nanoMul741);   // ★BJ741 R19-1：nanoMul 尾参
 }
+
+/** 浸剂三链已收编 hurtEnemy 共享出口（hurt 前=StatusNPC :13634 原序,★BJ741 R19-1
+ *  ——旧 applyImbue 调用点形退役,两站统一） */
 
 /** 命中域外接盒（hitTownNpcs 盒接口适配——锥/线判定域的保守包围） */
 function bboxOf(x0: number, y0: number, x1: number, y1: number): { x: number; y: number; w: number; h: number } {
@@ -363,14 +383,16 @@ export class FlintWaveProj extends Entity {
       if (!inArc) continue;
       this.hitDone.add(e.id);
       this.hits++;
-      // ★BJ489 def-3：1043 斩击波掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+
-      //  :25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      // ★BJ489 def-3：1043 斩击波掷率=rollVanillaHitCritConsumeTimer（melee 旗,命中拍
+      //  owner 装配+:25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0
+      //  关断钉保留
+      //  ★BJ741 R19-1（G37① DV✗T✗ 残差族）：TimerCrit :12928 消费并单源+DV :12970
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV 首掷（旧恒平值）
       // 击退=远离玩家中心（:13664-13666 aiStyle 188-191 特列）
       const kdir = this.owner.cx < ecx ? 1 : -1;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
       if (this.hits >= 2) break;                                // penetrate=2 上限
     }
     // ---- CutTiles（:15336-15343）：rotation±π/4 端点连线宽 60×scale ----
@@ -505,15 +527,15 @@ export class FlintSpikeProj extends Entity {
       if (d2 > halfW * halfW) continue;
       this.hitCd.set(e.id, 25);
       this.hits++;
-      // ★BJ489 def-3：1041 尖刺掷率=rollVanillaHitCrit（melee 旗,命中拍动态;
+      // ★BJ489 def-3：1041 尖刺掷率=rollVanillaHitCritConsumeTimer（melee 旗,命中拍动态;
       //  emitFlintSpikes 入参载体退为关断钉传播面,值不作掷率消费）
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★BJ741 R19-1：TimerCrit 并单源+DV
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV :12970 首掷（旧恒平值）
       // 击退=远离玩家中心（1041 属 AI_190 特列? 否——1041 走默认弹体向;
       // 但 EmitSpikes 弹速自带出手向,原版 num40 缺省=弹体速度向投影。取速度 x 向）
       const kdir = Math.sign(this.vx) || 1;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
       if (this.hits >= 4) break;                      // penetrate=4 上限
     }
     // ---- CutTiles（CanCutTiles :15410 门已过）——沿判定线采样 ----

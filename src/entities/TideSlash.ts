@@ -13,11 +13,13 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B28）：城镇 voodoo 靶
-import { rollVanillaHitCrit } from './proj1457';
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
+import { hitCritters } from './projTargets';   // ★G37-A（D7）：critter 臂
 
 export class TideSlash extends Entity {
   readonly projId = 451;
@@ -159,8 +161,9 @@ export class TideSlash extends Entity {
       if (e.dead || this.hitSet.has(e.id) || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,451 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      //  ★G37-A（D6）：TimerCrit :12928 接单源 + DV :12970 逐靶掷（旧平值=BJ729-A D6 登记债）。
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));   // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）：波涌之刃弹 451 数据面 melee（SetDefaults 类旗投影）→
       // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
       // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -183,8 +186,13 @@ export class TideSlash extends Entity {
     //  穿甲 armorPen）;hitSet/hitCd 单跳由 TownNPC.hurt iframes 承载。
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
       'playerProj', 451, undefined, undefined, undefined, undefined,
-      () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(451, game),
+      (tn451) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(451, game, tn451, this.critChance > 0),
         penPercent: this.armorPen }));
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小动物
+    //  同链（451 非 minion/sentry → CanNPCBeHit :20675 放行）;AABB 自盒几何镜像;
+    //  hitSet 单跳语义（usesLocalNPCImmunity 同敌一次）→ 单发 hitCritters。
+    hitCritters({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 451 }, game);
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {

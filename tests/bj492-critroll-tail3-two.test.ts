@@ -236,7 +236,9 @@ describe('BJ492-②：SkyDragonSwing/Shot/Circle 静态载体退役→rollVanill
     const fury = SRC('entities/SkyDragonFury.ts');
     expect(fury).not.toContain('Math.random() < this.critChance');   // 旧冻结掷复辟必红
     // 四型现役同形（707=BJ489 迁移既有位 + 708/709/1110=本刀）
-    expect(fury.match(/const crit = this\.critChance > 0 && rollVanillaHitCrit\(this\.projId, game\);/g)?.length).toBe(4);
+    // ★BJ744 改判史：BJ741 G37①（R19-1）四站掷面迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 并单源+DV :12970）——plain 形退役,同数四站锁随迁。
+    expect(fury.match(/const crit = rollVanillaHitCritConsumeTimer\(this\.projId, game, e, this\.critChance > 0\);/g)?.length).toBe(4);
     expect(fury.match(/critChance = 0\.04;/g)?.length).toBe(4);      // 关断钉字段（含 707）保留
     const game = SRC('core/Game.ts');
     expect(game).not.toMatch(/const swCrit = /);                     // 载体计算块摘除

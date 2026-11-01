@@ -330,6 +330,11 @@ import {
   voidLensEchoAlpha, voidLensEchoRadius, voidLensEchoAngle, voidLensDustSpec,
   voidLensComplementTint,
 } from './VoidLens';   // ★BJ429 虚空保险库悬浮透镜纯算面（VoidLensHelper.cs 1:1）
+import {
+  GATE_FW, GATE_FH, potionOfReturnGateCenterOf, potionOfReturnGateFrameOf,
+  potionOfReturnGateDustSpec, GATE_ECHO_PHASES,
+  gateEchoPulse, gateEchoAlpha, gateEchoRadius, gateEchoAngle,
+} from './PotionOfReturnGate';   // ★BJ738 P01 回归药水返程门纯算面（PotionOfReturnGateHelper.cs 1:1）
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
@@ -1255,6 +1260,7 @@ import {
 import { BOSS_BAG_IDS } from '../data/vanillaBossBags';   // ★BJ603 掉落环绕光斑集（ItemID.Sets.BossBag）
 import { globalTimeWrappedHourly, gameTickCount } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
 import { drawInfernoRings, ensureFlameRingImage, type FlameRingPlayer } from './InfernoRing';   // ★BJ579 狱火药水火圈
+import { CRITTER_CATCH_BY_NPC } from '../data/critters';   // ★BJ739 B12 狩猎 friendly 谓词（NPC.catchItem>0 面）
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
@@ -6716,6 +6722,23 @@ export class Renderer {
       this.drawPylonCrystals(cam, world, viewW, viewH, z);
     }
 
+    // 2c'.2 ★BJ738 P01 + ★G36-A D3/D5（2026-10-31）回归药水 4870 返程门层
+    //   （ReturnGatePlayerRenderer.DrawReturnGateInWorld——Main.cs:22503/:22511,
+    //   仅对 PotionOfReturnOriginalUsePosition.HasValue 玩家）。两门：Entry（家,
+    //   Extra_183,可右键交互）+ Exit（饮用点,Extra_184,纯标记）。
+    //   ★G36-A D5 层序分档 1:1（Main.cs:57853-57868）：玩家按 isLockedToATile
+    //   （坐/睡锁位）分两组——坐/睡组 DrawPlayers_BehindNPCs（NPC 前=门在 NPC 下,
+    //   本位=2c' 系 tile 上/NPC 下恰同相）;站立组 DrawPlayers_AfterProjectiles
+    //   （弹与 NPC 之后=门在 NPC 上,本仓在 drawPlayer 前位补画,见 6983 前注）。
+    //   ★G36-A D3：远端玩家门（opacity 0.1,ReturnGatePlayerRenderer.cs:69）——
+    //   各玩家按自身坐/睡态归组,组内序=门先画后画玩家（vanilla 组序）。
+    if (player.sitting || player.sleeping) {
+      this.drawPotionOfReturnGates(player, cam, viewW, viewH, z);
+    }
+    for (const rp of this.remotePlayers) {
+      if (rp.sitting || rp.sleeping) this.drawPotionOfReturnGates(rp, cam, viewW, viewH, z, 0.1);
+    }
+
     // 2c''.4 高尔夫蓄力显示：预测弹道点（FancyGolfPredictionLine 近似：同物理步进）+
     //   力度条（GolfSwingBarFill：宽 54×rel，玩家脚下）
     if (this.golfPower) {
@@ -6911,8 +6934,12 @@ export class Renderer {
         if ('projId' in (e as object)) {
           const ee = e as unknown as { draw(r: Renderer, cam: Camera): void };
           // ★刀2-C1:mod 弹 overPlayers 声明(drawLayer 4/7/8 族=post 玩家)
+          // ★G39-A（bj746a D5,2026-11-01）：动态 drawLayer 员（908 钛金碎片
+          //  AI_175 :46174 localAI[0]≤0?3:4——下半圈 OverPlayers=玩家后）
+          //  经实体自带 projOverPlayers 位声明（静态表外的第三分派源）。
           const mpId = (e as { projId?: number }).projId ?? -1;
           const queue = PROJ_DRAW_OVER_PLAYERS.has(mpId) || modProjSpecOf(mpId)?.overPlayers === true
+            || (e as { projOverPlayers?: boolean }).projOverPlayers === true
             ? postPlayerDraws
             : prePlayerDraws;
           queue.push(() => ee.draw(this, cam));
@@ -6964,6 +6991,16 @@ export class Renderer {
       // ParticleSystem_World_BehindPlayers,Main.cs:63206-63209 投射物后/玩家前;
       // 湖面星闪 Spawn_LakeSparkle 同池）。步进在 Game.update updateFakeFishSchool
       drawFakeFishSchool(this);
+    }
+    // ★G36-A D5：站立组返程门（DrawPlayers_AfterProjectiles Main.cs:57868——
+    //  组内序=PotionOfReturnRenderer 先画、PlayerRenderer 后画=门在弹/NPC 之上、
+    //  玩家本体之下;本位=FlameParticle(3.85) 后/drawPlayer 前,与 vanilla 组序同相。
+    //  坐/睡玩家门在 2c'.2 位（BehindNPCs 组）;远端门 opacity 0.1 同组序）
+    if (!(player.sitting || player.sleeping)) {
+      this.drawPotionOfReturnGates(player, cam, viewW, viewH, z);
+    }
+    for (const rp of this.remotePlayers) {
+      if (!(rp.sitting || rp.sleeping)) this.drawPotionOfReturnGates(rp, cam, viewW, viewH, z, 0.1);
     }
     if (!directorPlayerHidden()) this.drawPlayer(player, world, swing, flicker);   // ★导演模式:cutscene 可隐藏本体
     // ★第四批:mod 玩家外观自绘 overlay(drawPlayer 返回后;ModDrawCtx 受限算子面)
@@ -21378,14 +21415,25 @@ export class Renderer {
     // alpha=色档）;格挡窗口 shieldParryTimeLeft>0 时外扩副本（scale=1+1.5t、alpha=1-t、
     // 锚沿 (锚-中心)·1.5t 外推）。★原版 :3096-3106 的脉动叠画副本未入 DrawDataCache
     // （反编译无 Add 调用=死代码,登记不画）。盾贴图 40 宽与 bodyFrame 同宽→宽度修正无感
-    if (ad.shield > 0) {
-      const tex = atlas.ensureVImage(`vanilla/Acc_Shield_${ad.shield}.png`);
+    // ★G39-A（g36a D-⑩,2026-11-01）：4760 联合盾持盾视觉（Player.cs:37090-37094
+    //  `if (HeldItem.type == 4760 && ownedProjectileCounts[866] < 1) { shield = 9;
+    //  cShield = 0; }`——PlayerDrawInfo 组装期覆写:持 4760 恒画 9 号盾图(染料清
+    //  0),盾掷出期(866 在飞)不画。equipStats 内容键缓存不含 866 在飞态(每拍
+    //  翻转),故在绘制消费点局部覆写(勿改 ad 共享缓存对象);heldShield866InFlight
+    //  =fixedUpdate 快照(g36a BJ740 D2 同源,Player.ts:5186)。
+    const held4760 = p.inv.heldItem();
+    const shield4760Active = !!held4760 && (ITEM_DEFS[held4760.id]?.vid ?? -1) === 4760
+      && !p.heldShield866InFlight;
+    const shieldSlot4760 = shield4760Active ? 9 : ad.shield;
+    const dyeShield4760 = shield4760Active ? 0 : ad.dyeShield;
+    if (shieldSlot4760 > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Shield_${shieldSlot4760}.png`);
       if (tex && tex.width > 0) {
         const dy = p.shieldRaised ? -4 : 0;
         if (p.shieldRaised) {
           const t = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly——★BJ330 GTW 单源（PlayerDrawLayers.cs:3083 sin(GTW×2π)）
           const halo = shieldHaloFactor(t);
-          const dyeEmu = ad.dyeShield > 0 ? dyeApplyOf(ad.dyeShield) : null;
+          const dyeEmu = dyeShield4760 > 0 ? dyeApplyOf(dyeShield4760) : null;
           if (dyeEmu) dyeEmu.uniforms.uDirection = p.facing;
           const ga = ctx.globalAlpha;
           const gop = ctx.globalCompositeOperation;
@@ -21396,16 +21444,16 @@ export class Renderer {
             const ox = halo.x * Math.cos(ang);
             const oy = halo.x * Math.sin(ang);
             ctx.globalAlpha = ga * stealthClamp * halo.a;
-            this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeShield, 1, p.facing, ox, dy + oy);
+            this.drawAccBodyFrame(ctx, tex, bodyRow, dyeShield4760, 1, p.facing, ox, dy + oy);
           }
           ctx.globalCompositeOperation = gop;
           ctx.globalAlpha = ga;
         }
-        this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeShield, stealthClamp, p.facing, 0, dy);
+        this.drawAccBodyFrame(ctx, tex, bodyRow, dyeShield4760, stealthClamp, p.facing, 0, dy);
         if (p.shieldRaised && p.shieldParryTimeLeft > 0) {
           const pf = shieldParryTransform(p.shieldParryTimeLeft, p.h);
           const s = pf.scale;
-          const dyeEmu = ad.dyeShield > 0 ? dyeApplyOf(ad.dyeShield) : null;
+          const dyeEmu = dyeShield4760 > 0 ? dyeApplyOf(dyeShield4760) : null;
           if (dyeEmu) dyeEmu.uniforms.uDirection = p.facing;
           const sc = dyeEmu ? this.wingTexSource(tex, 0, bodyRow * 56, tex.width, 56, dyeEmu, null) : null;
           const ga = ctx.globalAlpha;
@@ -26133,6 +26181,170 @@ export class Renderer {
     }
   }
 
+  /** ★BJ738 P01（2026-10-31,issue #28）回归药水 4870 返程门层
+   *  （ReturnGatePlayerRenderer.DrawReturnGateInWorld + PotionOfReturnGateHelper.cs
+   *  1:1;纯算面 = render/PotionOfReturnGate.ts,判别测试 bj738a）。
+   *  双门（仅 PotionOfReturnOriginalUsePosition.HasValue 时画,本地玩家 opacity=1
+   *  :74;远端玩家 0.1 面=MP 边界不建模）:
+   *  · Entry 门（家,可右键交互,Game.potionOfReturnReturnToOriginalUsePosition）:
+   *    贴图 Extra_183、位 = homeHitbox.Center;
+   *  · Exit 门（饮用点,纯标记）:贴图 Extra_184、位 = original+(0,−21);
+   *    两位于 Helper ctor 再 Y−2（potionOfReturnGateCenterOf）。
+   *  · 帧 = (int)((tileFrameCounter[491]+X+Y)%40)/5,Exit 反序 7−n（:30-36）;
+   *  · 本体顶点色 = Lerp(光照,White,0.5)×opacity（:109-111）——与虚空透镜同构,
+   *    走 Z4/BJ429-D4 判例:世界层 ×light 基底 + flushVoidLensComplements 后
+   *    'lighter' 补差（_voidLensComps 加 fw/fh=36×46）;
+   *  · 回声×3（:113-125）与 VoidLensHelper.cs:87-97 逐字同式 → 复用
+   *    _voidLensEchoComps（同 fw/fh 面）;
+   *  · 光 = 0.4/0.2/0.9（Update :36,渲染端次帧生效坐骑灯惯例）;
+   *  · 尘 = SpawnReturnPortalDust（:40-97,EntryPoint 含 240 号支;1/3 掷,
+   *    !gamePaused 门 :429）→ potionOfReturnGateDustSpec 纯函数 1:1;
+   *  · 智能光标选中辉光（Extra_242,:127-141 + SmartInteractPotionOfReturn 候选
+   *    提供者）——SmartCursor 非弹体候选集成未建模,selectionMode 恒 0（鼠标
+   *    无智能光标态原版本就 0 :63-64）,登记边界。
+   *  Extra_183/184 走 loadExtraSprite 专用直载通道（vanilla.json 无清单键,
+   *  22945 判例同款;36×368=8 帧×36×46）。 */
+  private drawPotionOfReturnGates(
+    player: Player | null, cam: Camera, viewW: number, viewH: number, z: number,
+    /** ★G36-A D3：远端玩家门 opacity（ReturnGatePlayerRenderer.cs:69
+     *  `whoAmI==Main.myPlayer ? 1f : 0.1f`——本地 1/远端 0.1;缺省 1=本地） */
+    opacity = 1,
+  ): void {
+    if (!player || !player.potionOfReturnOriginalUsePosition
+      || !player.potionOfReturnHomePosition) return;   // :52-54 TryGetGateHitbox/HasValue 门
+    const texEntry = loadExtraSprite(183);   // Entry（家）
+    const texExit = loadExtraSprite(184);    // Exit（饮用点）
+    if (!texEntry || !texExit) return;       // 半加载窗次帧生效（loadExtraSprite 惯例）
+    const tick = tileAnim.tick;              // ⟺ tileFrameCounter[491]（每 tick +1 回卷 40）
+    const t = this.lighting?.clock?.globalTimeWrappedHourly ?? 0;
+    const pulseX = gateEchoPulse(t);
+    const wKg = this._worldLowK || 1;
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
+    const zz = z * wKg;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    try {
+      // 两门同构单站：Entry（家,183）+ Exit（饮用点,184,帧反序）
+      const drawGate = (
+        img: CanvasImageSource, anchor: { x: number; y: number }, isExit: boolean,
+      ): void => {
+        const [cx, cy] = potionOfReturnGateCenterOf(anchor);
+        const frameNum = potionOfReturnGateFrameOf(tick, cx, cy, isExit);
+        const dw = Math.max(1, Math.round(GATE_FW * zz)), dh = Math.max(1, Math.round(GATE_FH * zz));
+        const xd = ox + Math.round((cx - camRX) * zz) - dw / 2;
+        const yd = oy + Math.round((cy - camRY) * zz) - dh / 2;
+        // 点光 0.4/0.2/0.9（Helper.Update :36;!gamePaused 门 :429,渲染端次帧生效）
+        if (!this._worldPaused) {
+          this.lighting?.addLight(Math.floor(cx / 16), Math.floor(cy / 16), 0.4, 0.2, 0.9);
+        }
+        // 本体（scale 1,世界层 ×light 基底;白化半项经 _voidLensComps 补差——
+        // fw/fh=36×46 透镜表复用,Z4/BJ429-D4 判例）
+        // ★G36-A D3：opacity——原版 color*=_opacity 顶点色乘（本地 1/远端 0.1）,
+        //  本仓=本体 globalAlpha + 补差 mul + 回声 α 同拍缩放（代数等价）
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(img, 0, frameNum * GATE_FH, GATE_FW, GATE_FH, xd, yd, dw, dh);
+        ctx.globalAlpha = 1;
+        {
+          const gx = Math.floor(cx / 16), gy = Math.floor(cy / 16);
+          const [lr, lg, lb] = this.lighting?.lightAt(gx, gy) ?? [255, 255, 255];
+          this._voidLensComps.push({
+            img, sx: 0, sy: frameNum * GATE_FH, xd, yd, dw, dh, lr, lg, lb,
+            fw: GATE_FW, fh: GATE_FH,
+            mul: opacity,
+          });
+        }
+        // 回声×3（:113-125 与 VoidLensHelper 同式——tint(127,50,127)/scale×1.1/
+        // 轨道 1..3px/α=0.3+0.1·cos;经 _voidLensEchoComps 补差表,fw/fh 面）
+        {
+          const dw2 = Math.max(1, Math.round(GATE_FW * 1.1 * zz));
+          const dh2 = Math.max(1, Math.round(GATE_FH * 1.1 * zz));
+          const exs: number[] = [], eys: number[] = [];
+          for (const num of GATE_ECHO_PHASES) {
+            const ang = gateEchoAngle(t, num);
+            const rad = gateEchoRadius(pulseX);
+            exs.push(ox + Math.round((cx + Math.cos(ang) * rad - camRX) * zz) - dw2 / 2);
+            eys.push(oy + Math.round((cy + Math.sin(ang) * rad - camRY) * zz) - dh2 / 2);
+          }
+          this._voidLensEchoComps.push({
+            img, sx: 0, sy: frameNum * GATE_FH, exs, eys, dw2, dh2,
+            alpha: gateEchoAlpha(pulseX) * opacity, fw: GATE_FW, fh: GATE_FH,
+          });
+        }
+        // 悬浮尘（SpawnReturnPortalDust :40-97,!gamePaused 门 :429=Update 整跳;
+        // 1/3 掷两支分型,纯函数 1:1,Math.random 独立流=既有惯例）
+        if (this.vanillaDust && !this._worldPaused) {
+          const spec = potionOfReturnGateDustSpec(cx, cy, !isExit, Math.random);
+          if (spec) {
+            const d = this.vanillaDust.spawn(spec.x, spec.y, 0, 0, spec.type);
+            if (d) {
+              d.x = spec.x; d.y = spec.y;
+              d.vx = spec.vx; d.vy = spec.vy;
+              d.scale = spec.scale;
+              d.fadeIn = spec.fadeIn;
+              d.noGravity = true;
+              d.noLight = spec.noLight;
+              d.noLightEmittance = spec.noLightEmittance;
+            }
+          }
+        }
+      };
+      // ★BJ742-A R23-⑩（2026-10-31）：双门绘序归位——原版 ReturnGatePlayerRenderer.
+      //   DrawReturnGateInWorld（:77-80）Exit（饮用点,Extra_184）先入 _voidLensData、
+      //   Entry（家,Extra_183）后入（DrawToDrawData 第二参 selectionMode=num 智能光标
+      //   选中辉光只喂 Entry 门——:63 num=(int)hoverStatus,SmartInteractPotionOfReturn
+      //   才非 0）;后入者叠上层=Entry 在上。旧序 Entry→Exit=Exit 反压 Entry（贴
+      //   门重叠区家门口被出口门盖）。Extra_242 选中辉光面=BJ738 D2 既有登记债。
+      drawGate(texExit, player.potionOfReturnOriginalUsePosition, true);
+      drawGate(texEntry, player.potionOfReturnHomePosition, false);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  /** ★G36-A D1（BJ738 登记债清偿,2026-10-31）：DrawMapIcons_PotionOfReturn{Home,
+   *  AppearAfterUse}Position（Main.cs:57315-57368）三地图面共用体——全图
+   *  （:56754 drawScale=UIScale）/mapStyle2 覆盖图（:56453 =(zoom×0.4+1)/3 钳 1
+   *  ×UIScale,mapRect=null）/mapStyle1 角框小地图（:56534 =(zoom×0.5+1)/3 钳 1
+   *  【无 UIScale】,mapRect=角框窗）。图标=Extra_175 家门/Extra_173 出口（28×30）,
+   *  位=(锚+(0,−h/2)) tile 域经 toX/toY 世界像素变换后 Floor（:57329-57332——
+   *  vanilla 只读 LocalPlayer,本仓亦只喂本地玩家）;悬停盒=CenteredRectangle(vec,
+   *  size×iconScale)（:57338-57341）→ 返回文案（mouseTextString 单槽语义,
+   *  家门支先写）。mapRect≠null 时中心点界检（:57333 Contains）。 */
+  private drawPotionOfReturnMapIcons(
+    ctx: CanvasRenderingContext2D, player: Player | null, iconScale: number,
+    toX: (wx: number) => number, toY: (wy: number) => number,
+    clipRect: { x: number; y: number; w: number; h: number } | null,
+    mouse: { x: number; y: number } | null,
+  ): string | null {
+    if (!player || (!player.potionOfReturnOriginalUsePosition
+      && !player.potionOfReturnHomePosition)) return null;
+    let hover: string | null = null;
+    const icons: Array<[number, { x: number; y: number } | null, string]> = [
+      [175, player.potionOfReturnHomePosition, 'GameUI.PotionOfReturnHomePortal'],
+      [173, player.potionOfReturnOriginalUsePosition, 'GameUI.PotionOfReturnExitPortal'],
+    ];
+    for (const [spriteN, anchor, textKey] of icons) {
+      if (!anchor) continue;                          // :57325/:57355 HasValue 早退
+      const icon = loadExtraSprite(spriteN);
+      if (!icon) continue;                            // 半加载窗次帧生效
+      const mx = Math.floor(toX(anchor.x));
+      const my = Math.floor(toY(anchor.y - player.h / 2));
+      if (clipRect && !(mx >= clipRect.x && mx < clipRect.x + clipRect.w
+        && my >= clipRect.y && my < clipRect.y + clipRect.h)) continue;   // :57333
+      const w = icon.width * iconScale, h = icon.height * iconScale;
+      ctx.drawImage(icon, mx - w / 2, my - h / 2, w, h);
+      if (mouse && Math.abs(mouse.x - mx) < w / 2 && Math.abs(mouse.y - my) < h / 2) {
+        hover = Lang.text(textKey) ?? hover;          // :57338-57341（家门支先写=不被出口覆盖）
+      }
+    }
+    return hover;
+  }
+
   /**
    * ★Z4/BJ429-D4 透镜白化补差回放（render 7b0 段调用,compositeLight 之后）。
    * 逐库三步刮擦烘焙:①帧图入布 ②multiply 补差色 0.5×(255−light)/255
@@ -26183,15 +26395,17 @@ export class Renderer {
         }
         sc.imageSmoothingEnabled = false;
         sc.globalCompositeOperation = 'source-over';
-        sc.drawImage(c.img, c.sx, c.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, c.dw, c.dh);
+        sc.drawImage(c.img, c.sx, c.sy, c.fw ?? VOID_LENS_FW, c.fh ?? VOID_LENS_FH, 0, 0, c.dw, c.dh);   // ★BJ738 P01:fw/fh 可选帧尺寸
         sc.globalCompositeOperation = 'multiply';
         sc.fillStyle = `rgb(${cr},${cg},${cb})`;
         sc.fillRect(0, 0, c.dw, c.dh);
         sc.globalCompositeOperation = 'destination-in';
-        sc.drawImage(c.img, c.sx, c.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, c.dw, c.dh);
+        sc.drawImage(c.img, c.sx, c.sy, c.fw ?? VOID_LENS_FW, c.fh ?? VOID_LENS_FH, 0, 0, c.dw, c.dh);   // ★BJ738 P01:fw/fh 可选帧尺寸
         sc.globalCompositeOperation = 'source-over';
         ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = c.mul ?? 1;   // ★G36-A D3：远端门补差 ×opacity（缺省 1）
         ctx.drawImage(scr, c.xd, c.yd);
+        ctx.globalAlpha = 1;
       }
       // ★Z4/BJ429-D5：回声×3 补画（乘光后 'lighter'——原版回声顶点色不含 light,
       // VoidLensHelper.cs:90/:93 全通道零 GetColor;扫描期 2c'.0 只收集,此处防
@@ -26206,12 +26420,12 @@ export class Renderer {
         }
         sc.imageSmoothingEnabled = false;
         sc.globalCompositeOperation = 'source-over';
-        sc.drawImage(e.img, e.sx, e.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, e.dw2, e.dh2);
+        sc.drawImage(e.img, e.sx, e.sy, e.fw ?? VOID_LENS_FW, e.fh ?? VOID_LENS_FH, 0, 0, e.dw2, e.dh2);   // ★BJ738 P01
         sc.globalCompositeOperation = 'multiply';
         sc.fillStyle = 'rgb(127,50,127)';
         sc.fillRect(0, 0, e.dw2, e.dh2);
         sc.globalCompositeOperation = 'destination-in';
-        sc.drawImage(e.img, e.sx, e.sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, e.dw2, e.dh2);
+        sc.drawImage(e.img, e.sx, e.sy, e.fw ?? VOID_LENS_FW, e.fh ?? VOID_LENS_FH, 0, 0, e.dw2, e.dh2);   // ★BJ738 P01
         sc.globalCompositeOperation = 'source-over';
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = e.alpha;
@@ -26374,6 +26588,11 @@ export class Renderer {
     img: CanvasImageSource; sx: number; sy: number;
     xd: number; yd: number; dw: number; dh: number;
     lr: number; lg: number; lb: number;
+    /** ★BJ738 P01：源帧尺寸（虚空透镜=34×48 缺省;回归药水门=36×46 复用本表） */
+    fw?: number; fh?: number;
+    /** ★G36-A D3：补差 α 倍率（远端玩家门 opacity 0.1——原版 color*=_opacity
+     *  顶点色乘;缺省 1=虚空透镜/本地门零变化） */
+    mul?: number;
   }> = [];
   /** ★Z4/BJ429-D5 透镜回声规格收集表（drawVoidLenses 2c'.0 收集 → 7b0 乘光后
    *  'lighter' 补画,逐帧重建）——原版回声顶点色 = Color(127,50,127,0)*opacity*
@@ -26382,6 +26601,8 @@ export class Renderer {
   private _voidLensEchoComps: Array<{
     img: CanvasImageSource; sx: number; sy: number;
     exs: number[]; eys: number[]; dw2: number; dh2: number; alpha: number;
+    /** ★BJ738 P01：源帧尺寸（同 _voidLensComps.fw 注） */
+    fw?: number; fh?: number;
   }> = [];
 
   /** 荧光涂层叠层（render 7-涂层钩子）：把各 chunk 的 pair.glow（荧光涂层格 16×16
@@ -26787,7 +27008,8 @@ export class Renderer {
     const sc = scr?.getContext('2d') ?? null;
     if (!scr || !sc) { this.gladdVLensStats.fb++; return null; }
     const bake = (img: CanvasImageSource, sx: number, sy: number,
-      dw: number, dh: number, cr: number, cg: number, cb: number): void => {
+      dw: number, dh: number, cr: number, cg: number, cb: number,
+      fw = VOID_LENS_FW, fh = VOID_LENS_FH): void => {
       if (scr.width !== dw || scr.height !== dh) { scr.width = dw; scr.height = dh; }
       else {
         sc.globalCompositeOperation = 'source-over';
@@ -26795,12 +27017,12 @@ export class Renderer {
       }
       sc.imageSmoothingEnabled = false;
       sc.globalCompositeOperation = 'source-over';
-      sc.drawImage(img, sx, sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, dw, dh);
+      sc.drawImage(img, sx, sy, fw, fh, 0, 0, dw, dh);
       sc.globalCompositeOperation = 'multiply';
       sc.fillStyle = `rgb(${cr},${cg},${cb})`;
       sc.fillRect(0, 0, dw, dh);
       sc.globalCompositeOperation = 'destination-in';
-      sc.drawImage(img, sx, sy, VOID_LENS_FW, VOID_LENS_FH, 0, 0, dw, dh);
+      sc.drawImage(img, sx, sy, fw, fh, 0, 0, dw, dh);
       sc.globalCompositeOperation = 'source-over';
     };
     gl.begin('vlens');
@@ -26832,12 +27054,12 @@ export class Renderer {
     for (const c of comps) {
       const [cr, cg, cb] = voidLensComplementTint([c.lr, c.lg, c.lb]);
       if (cr + cg + cb === 0) continue;
-      bake(c.img, c.sx, c.sy, c.dw, c.dh, cr, cg, cb);
+      bake(c.img, c.sx, c.sy, c.dw, c.dh, cr, cg, cb, c.fw, c.fh);   // ★BJ738 P01:fw/fh
       if (!emitSlot(c.xd, c.yd, c.dw, c.dh, 1)) { failed = true; break; }
     }
     if (!failed) {
       for (const e of echoes) {
-        bake(e.img, e.sx, e.sy, e.dw2, e.dh2, 127, 50, 127);
+        bake(e.img, e.sx, e.sy, e.dw2, e.dh2, 127, 50, 127, e.fw, e.fh);   // ★BJ738 P01
         for (let i = 0; i < e.exs.length; i++) {
           if (!emitSlot(e.exs[i]!, e.eys[i]!, e.dw2, e.dh2, e.alpha)) { failed = true; break; }
         }
@@ -28810,13 +29032,59 @@ export class Renderer {
   /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（模块级缓存；spelunker=原版全表 1:1，
    *  danger/biome 仍为 key 启发式备案） */
   private static HIGHLIGHT_SETS = (() => {
-    const spelunker = new Set<number>(), danger = new Set<number>(), biome = new Set<number>();
+    const spelunker = new Set<number>(), danger = new Set<number>(), dangerGated = new Set<number>();
+    // ★BJ739 B13（2026-10-31）：群系视觉三色分道——IsTileBiomeSightable（1457
+    //  Main.cs:22006-22024）按 TileID.Sets 三集分色：CorruptBiomeSight
+    //  {23,661,25,112,163,398,400,636,24,32}→(200,100,240)、CrimsonBiomeSight
+    //  {199,662,203,234,200,399,401,205,201,352}→(255,100,100)、HallowBiomeSight
+    //  {109,492,117,116,164,402,403,115,110,113}→(255,160,240)。旧 key 正则
+    //  /corrupt|crimson|…/ 统一 #C060FF = 三群系同紫（issue#29 B13）。荆棘 32/352
+    //  在腐化/猩红集内（原版如此——腐化荆棘可被群系视觉点亮）
+    const biomeCorrupt = new Set<number>(), biomeCrimson = new Set<number>(), biomeHallow = new Set<number>();
+    // ★BJ739 B18（2026-10-31）：危险感知集原版表 1:1 重建——IsTileDangerous
+    //  （TileDrawing.cs:4473-4487）：无门基集 = {135 压板,137 巨石,Boulders
+    //  {138,484,664,665,711-716},141 炸药,210 地雷,442/443/444 巨石族,411 起爆器,
+    //  485,85 火焰陷阱,654 TNT,58 狱石}（58 基集直入,虽也在 Hot 集）;坡面/致动
+    //  门集（slope==0 且 !inActive 才危险,消费端判）= TouchDamageImmediate {32,69,
+    //  352,655,48,232,484,750} + {483,482,481 裂砖,51 蛛网,229 蜂蜜块} +
+    //  TouchDamageHot {37,58,76,684,230}（另需 !fireWalk）+ 162 薄冰（另需 !iceSkate）
+    //  + 80 仙人掌（TouchDamageImmediate 成员,另需 dontStarve 世界）;314 压板轨道
+    //  帧单独走 frameX∈{20,21} 判（Minecart.cs:549 IsPressurePlate）;230 getGood
+    //  面走 crispyHoney。旧 key 正则 /spike|dart_trap|…/ 两向偏差：漏 v_51_cobweb/
+    //  v_32_corrupt_thorns/v_69_jungle_thorns/v_352_crimtane_thorns（issue#29 B18）,
+    //  同时混入非原版成员——本表 1:1 收敛（行为变化：spike 关键词族旧亮新不亮
+    //  =向原版收敛,石制尖刺 21/23 非原版 danger 成员;木刺 232 在
+    //  TouchDamageImmediate 内保持亮）
+    const DANGER_BASE_SHEETS = new Set([135, 137, 138, 484, 664, 665, 711, 712, 713, 714,
+      715, 716, 141, 210, 442, 443, 444, 411, 485, 85, 654, 58]);
+    const DANGER_TOUCH_SHEETS = new Set([32, 69, 352, 655, 48, 232, 484, 750, 80]);
+    const DANGER_EXPLICIT_SHEETS = new Set([483, 482, 481, 51, 229]);
+    const DANGER_HOT_SHEETS = new Set([37, 58, 76, 684, 230]);
+    const THIN_ICE_SHEET = 162, CACTUS_SHEET = 80, PRESSURE_PLATE_TRACK_SHEET = 314;
+    const CORRUPT_SHEETS = new Set([23, 661, 25, 112, 163, 398, 400, 636, 24, 32]);
+    const CRIMSON_SHEETS = new Set([199, 662, 203, 234, 200, 399, 401, 205, 201, 352]);
+    const HALLOW_SHEETS = new Set([109, 492, 117, 116, 164, 402, 403, 115, 110, 113]);
+    const dangerHot = new Set<number>(), dangerTouch = new Set<number>(), dangerExplicit = new Set<number>();
+    let thinIce = -1, cactus = -1, pressurePlateTrack = -1;
     for (let i = 0; i < TILE_DEFS.length; i++) {
       const d = TILE_DEFS[i];
-      const k = d?.key ?? '';
-      if (d?.vanilla?.sheet !== undefined && Renderer.TILE_SPELUNKER_SHEETS.has(d.vanilla.sheet)) spelunker.add(i);
-      if (/spike|dart_trap|boulder|landmine|geyser|flame_trap|v_21[3-9]|v_137|v_138|v_139|v_140/i.test(k)) danger.add(i);
-      if (/corrupt|crimson|ebon|crims|hallow|pearl/i.test(k)) biome.add(i);
+      const sheet = d?.vanilla?.sheet;
+      if (sheet === undefined) continue;
+      if (Renderer.TILE_SPELUNKER_SHEETS.has(sheet)) spelunker.add(i);
+      if (DANGER_BASE_SHEETS.has(sheet)) danger.add(i);
+      if (DANGER_TOUCH_SHEETS.has(sheet) || DANGER_EXPLICIT_SHEETS.has(sheet)
+        || DANGER_HOT_SHEETS.has(sheet) || sheet === THIN_ICE_SHEET || sheet === CACTUS_SHEET) {
+        dangerGated.add(i);
+      }
+      if (DANGER_TOUCH_SHEETS.has(sheet)) dangerTouch.add(i);
+      if (DANGER_EXPLICIT_SHEETS.has(sheet)) dangerExplicit.add(i);
+      if (DANGER_HOT_SHEETS.has(sheet)) dangerHot.add(i);
+      if (sheet === THIN_ICE_SHEET) thinIce = i;
+      if (sheet === CACTUS_SHEET) cactus = i;
+      if (sheet === PRESSURE_PLATE_TRACK_SHEET) pressurePlateTrack = i;
+      if (CORRUPT_SHEETS.has(sheet)) biomeCorrupt.add(i);
+      if (CRIMSON_SHEETS.has(sheet)) biomeCrimson.add(i);
+      if (HALLOW_SHEETS.has(sheet)) biomeHallow.add(i);
     }
     // ★IIIII224（Main.cs:22008/22013 IsTileBiomeSightable）：remix 世界 474 腐蚀块
     //  （紫 200,100,240）/195 血肉块（红 255,100,100）纳入群系视野
@@ -28826,7 +29094,9 @@ export class Renderer {
     //  危险感知高亮（`flag |= Main.getGoodWorld && typeCache == 230`）——world 旗在
     //  消费端判（本静态表无世界上下文,同 remix lesion/flesh 判例）
     const crispyHoney = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 230);
-    return { spelunker, danger, biome, lesion, flesh, crispyHoney };
+    return { spelunker, danger, dangerGated, dangerHot, dangerTouch, dangerExplicit,
+      thinIce, cactus, pressurePlateTrack,
+      biomeCorrupt, biomeCrimson, biomeHallow, lesion, flesh, crispyHoney };
   })();
 
   /** R3 视觉 Buff 高亮叠层：Spelunker(9)/Dangersense(111)/Hunter(17)/BiomeSight(343) */
@@ -28848,6 +29118,11 @@ export class Renderer {
     const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
     const ty1 = Math.min(st.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
     ctx.globalAlpha = pulse;
+    // ★BJ739 B18：危险感知消费端门——TouchDamage 族/明示族/灼热族/薄冰均需
+    //  slope==0 且 !inActive（TileDrawing.cs:4478）;灼热族另需 !fireWalk
+    //  （:4502-4506）、薄冰需 !iceSkate（:4481-4484）、仙人掌 80 需 dontStarve
+    //  （:4492-4495）;灰烬块 58/压板轨道帧 314(frameX∈{20,21}) 无坡面门
+    const eqHi = player.equipStats;
     for (let y = ty0; y <= ty1; y++) {
       for (let x = tx0; x <= tx1; x++) {
         const i = st.idx(x, y);
@@ -28856,36 +29131,109 @@ export class Renderer {
         if (spel && Renderer.HIGHLIGHT_SETS.spelunker.has(t)) {
           ctx.fillStyle = '#FFC419';
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
-        } else if (dang && (Renderer.HIGHLIGHT_SETS.danger.has(t)
-          || (!!world.seedFlags?.getGoodWorld && t === Renderer.HIGHLIGHT_SETS.crispyHoney))) {
-          ctx.fillStyle = '#FF4040';
-          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (dang) {
+          const HS = Renderer.HIGHLIGHT_SETS;
+          let dangerHit = HS.danger.has(t)
+            || (!!world.seedFlags?.getGoodWorld && t === HS.crispyHoney);
+          if (!dangerHit && HS.dangerGated.has(t)) {
+            const slopeOk = st.slope[i] === 0 && !(st.wire[i] & 32);   // slope==0 && !inActive
+            if (slopeOk) {
+              if (HS.dangerHot.has(t)) dangerHit = !eqHi.fireWalk;         // :4502 fireWalk 豁免
+              else if (t === HS.thinIce) dangerHit = !eqHi.iceSkate;       // :4481 !iceSkate
+              else if (t === HS.cactus) dangerHit = !!world.seedFlags?.theConstant;   // :4492 仙人掌仅 The Constant（Main.dontStarveWorld）
+              else dangerHit = true;   // TouchDamage/明示族过坡面门即危险
+            }
+          } else if (!dangerHit && t === HS.pressurePlateTrack
+            && (st.frameX[i] === 20 || st.frameX[i] === 21)) {
+            dangerHit = true;   // 314 压板轨道帧（Minecart.cs:549-560 IsPressurePlate）
+          }
+          if (dangerHit) {
+            ctx.fillStyle = '#FF4040';
+            ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+          }
         } else if (biomeS && !!world.seedFlags?.remix && t === Renderer.HIGHLIGHT_SETS.lesion) {
           ctx.fillStyle = '#C864F0';   // (200,100,240) 腐蚀块 :22008
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+          this.biomeSightDust(x, y, ts, 200, 100, 240);
         } else if (biomeS && !!world.seedFlags?.remix && t === Renderer.HIGHLIGHT_SETS.flesh) {
           ctx.fillStyle = '#FF6464';   // (255,100,100) 血肉块 :22013
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
-        } else if (biomeS && Renderer.HIGHLIGHT_SETS.biome.has(t)) {
-          ctx.fillStyle = '#C060FF';
+          this.biomeSightDust(x, y, ts, 255, 100, 100);
+        } else if (biomeS && Renderer.HIGHLIGHT_SETS.biomeCorrupt.has(t)) {
+          // ★BJ739 B13：三色分道（Main.cs:22006-22024 IsTileBiomeSightable）
+          ctx.fillStyle = '#C864F0';   // (200,100,240) 腐化
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+          this.biomeSightDust(x, y, ts, 200, 100, 240);
+        } else if (biomeS && Renderer.HIGHLIGHT_SETS.biomeCrimson.has(t)) {
+          ctx.fillStyle = '#FF6464';   // (255,100,100) 猩红
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+          this.biomeSightDust(x, y, ts, 255, 100, 100);
+        } else if (biomeS && Renderer.HIGHLIGHT_SETS.biomeHallow.has(t)) {
+          ctx.fillStyle = '#FFA0F0';   // (255,160,240) 神圣
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+          this.biomeSightDust(x, y, ts, 255, 160, 240);
         }
       }
     }
     ctx.globalAlpha = 1;
-    // Hunter 药水（Player.cs:9719 detectCreature——屏内小动物+敌怪画红框,2026-08-13 接）
+    // Hunter 药水（Player.cs:9719 detectCreature）★BJ739 B12（2026-10-31）：双色分道
+    //  + lifeMax>1 门——原版 NPC.cs:92230-92258 GetNPCColorTintedByBuffs 尾段
+    //  `CanApplyHunterPotionEffects && lifeMax>1` 把 NPC 色逐通道钳底：
+    //  AppearsFriendlyToHunterPotion（:92126-92135）= friendly || catchItem>0 ||
+    //  (damage==0 && lifeMax==5)，友好族 (50,255,50)/其余 (255,50,50);
+    //  HunterPotionFriendlyOverride {689:false}（NPCID.cs:4462）强制敌对。真着色面
+    //  = 乘光后钳底（Enemy.ts debuffTintRGB 注 C 类登记——需光照收口后剪影 pass
+    //  新基建,维持登记）;本红框近似层升级为双色+lifeMax 门（issue#29 B12 核心
+    //  诉求=友好/敌对颜色区分）。仅 NPC 族吃框（敌怪/小动物/城镇——原版遍历
+    //  Main.npc;掉落物/弹幕不画）
     if (hunter) {
       const pulseH = 0.35 + 0.15 * Math.sin(performance.now() / 200);
       ctx.globalAlpha = pulseH;
-      ctx.strokeStyle = '#FF6060';
       ctx.lineWidth = 1.5;
       const camLeft = cam.x - viewW / 2 / z, camTop = cam.y - viewH / 2 / z;
       for (const ent of entities) {
         if ((ent as { dead?: boolean }).dead) continue;
-        const e = ent as { x: number; y: number; w: number; h: number };
+        const e = ent as { x: number; y: number; w: number; h: number; maxHp?: number;
+          vanillaId?: number; def?: { friendly?: boolean; damage?: number } };
+        if (typeof e.maxHp !== 'number' || e.maxHp <= 1) continue;   // :92230 lifeMax>1 门
+        const friendly = e.vanillaId !== 689                          // HunterPotionFriendlyOverride
+          && (!!e.def?.friendly
+            || ((CRITTER_CATCH_BY_NPC[e.vanillaId ?? -1] ?? 0) > 0)
+            || ((e.def?.damage ?? 1) === 0 && e.maxHp === 5));
+        ctx.strokeStyle = friendly ? '#32FF32' : '#FF3232';   // (50,255,50)/(255,50,50)
         ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);
       }
       ctx.globalAlpha = 1;
+    }
+  }
+
+  /** ★BJ742-A R23-⑪（2026-10-31）：群系视觉悬浮尘 267（TileDrawing.cs:963-971）——
+   *  IsTileBiomeSightable 命中格 1/480 掷 → Dust.NewDust((tileX*16,tileY*16),16,16,
+   *  267,0,0,150,newColor=sightColor,0.3f) + noGravity/fadeIn=1/velocity×0.1/
+   *  noLightEmittance（_isActiveAndNotPaused 门 → !this._worldPaused,晶塔尘同判例
+   *  :26529 先例）。色随群系三道 sightColor（腐化/腐蚀块 200,100,240;猩红/血肉块
+   *  255,100,100;神圣 255,160,240）。渲染端逐帧扫格=原版 DrawTiles 逐格同拍面。
+   *
+   *  ★B13 真着色面显式登记（BJ742-A,与 B12 同款——Hunter 面 :29164 注对偶）：
+   *  原版真着色 = tileLight 逐通道钳底 sightColor（TileDrawing.cs:951-962
+   *  `if (tileLight.R < sightColor.R) tileLight.R = sightColor.R;` ×RGB）——
+   *  本仓 tile 渲染为烘焙管线（tileLight 不逐格回写）,fillRect 脉动近似层
+   *  （globalAlpha pulse）承载视觉;真着色面【维持登记】：需 tile 光照值逐格
+   *  钳底进 bake 通道（ChunkCache 光照收口后新增 pass）。同族登记（本刀一并
+   *  备案）:findTreasure 探矿者尘 204 1/60（TileDrawing.cs:938-944）与
+   *  Dangersense 尘 60 1/60（:920-926）同缺——本方法只接 267（R23 点名面）,
+   *  204/60 另刀（D-BJ742-⑪）。 */
+  private biomeSightDust(x: number, y: number, ts: number, r: number, g: number, b: number): void {
+    if (!this.vanillaDust || this._worldPaused) return;
+    if (Math.random() >= 1 / 480) return;   // _rand.Next(480) == 0
+    const d = this.vanillaDust.spawn(x * ts, y * ts, 16, 16, 267, 0, 0, 150,
+      { r, g, b, a: 255 }, 0.3);
+    if (d) {
+      d.noGravity = true;
+      d.fadeIn = 1;
+      d.vx *= 0.1;
+      d.vy *= 0.1;
+      d.noLightEmittance = true;
     }
   }
 
@@ -29062,6 +29410,23 @@ export class Renderer {
         ctx.drawImage(spTex, spMX - icS / 2, spMY - icS / 2, icS, icS);
       }
     }
+    // ★G36-A D1（BJ738 登记债清偿,2026-10-31）：回归药水双门小地图图标——角框
+    //  小地图支（mapStyle 1,Main.cs:56524-56534 DrawMiscMapIcons;mapRect=
+    //  (miniMapX,miniMapY,miniMapWidth,miniMapHeight) → 中心点界检 :57333）。
+    //  drawScale=(zoom×0.5+1)/3 钳 1【无 UIScale——:56526-56531;56450 的 UIScale
+    //  乘只在 mapStyle 2 支,原版两支不对称】;变换与头像同式（:56531 mapTopLeft=
+    //  (num12,num13) 取景窗原点 ≙ sx/sy）。悬停文案=单槽 mouseTextString 语义,
+    //  头像链（DrawNPCMapIcons2 :56537 后写）优先 → 尾段 !mapNpcHeadHoverName 门。
+    const porMiniHover = this.drawPotionOfReturnMapIcons(ctx, player,
+      Math.min(1, (this.minimapZoom * 0.25 * 2 + 1) / 3),
+      (wx) => ox + (wx / TILE - sx) / viewTiles * size,
+      (wy) => oy + (wy / TILE - sy) / viewTiles * size,
+      { x: ox, y: oy, w: size, h: size },
+      (() => {
+        const mx = lmX(this._mouseX), my = lmY(this._mouseY);
+        return (mx > ox && mx < ox + size && my > oy && my < oy + size)
+          ? { x: mx, y: my } : null;
+      })());
     ctx.restore();
     ctx.globalAlpha = 1;   // 框前景/按钮/时间文字不随 α（MinimapFrame.cs:182-188 恒 White）
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
@@ -29255,7 +29620,10 @@ export class Renderer {
     // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,14px 用户拍板
     //  终值 2026-09-16 两轮拍板,墨高等值档 19px/折中 16px 链见 PixelText 注;原
     //  14px monospace 替身退役——同信息栏 Windows 重影根因）
-    if (this.mapNpcHeadHoverName) {
+    // ★G36-A D1：门图标悬停文案（mapStyle1 mouseTextString 单槽——原版序
+    //  MapIcons(:56531) → DrawNPCMapIcons2(:56537) 头像后写覆盖 → 头像名优先）
+    const mmHoverText = this.mapNpcHeadHoverName ?? porMiniHover;
+    if (mmHoverText) {
       ctx.font = CANVAS_MOUSETEXT_FONT;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
@@ -29265,10 +29633,10 @@ export class Renderer {
       const ty2 = lmY(this._mouseY) + 22;
       for (const [dx2, dy2] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
         ctx.fillStyle = '#000';
-        ctx.fillText(this.mapNpcHeadHoverName, tx2 + dx2, ty2 + dy2);
+        ctx.fillText(mmHoverText, tx2 + dx2, ty2 + dy2);
       }
       ctx.fillStyle = `rgb(${c3},${c3},${c3})`;
-      ctx.fillText(this.mapNpcHeadHoverName, tx2, ty2);
+      ctx.fillText(mmHoverText, tx2, ty2);
     }
     ctx.restore();
     ctx.restore(); // 移动端缩放变换（uiS=1 时为空 save/restore，恒等）
@@ -30025,6 +30393,7 @@ export class Renderer {
     this.mapWormholeHead = null;
     this.mapHeadHoverName = null;
     this.mapNpcHeadHoverName = null;   // ★SW-BJ1 防小地图帧值渗漏（双图同帧先后跑）
+    let porHoverText: string | null = null;   // ★BJ738 P01/G36-A：门图标悬停文案暂存（下方单槽链消费）
     if (p) {
       const headScale = Math.min(1, (fm.zoom * 0.2 * 2 + 1) / 3) * 1.1;
       const hi = wormholeHeadHit(mouseX, mouseY, cx0, cy0, fm.zoom, this.remotePlayers);
@@ -30041,6 +30410,14 @@ export class Renderer {
           }
         }
       }
+      // ★BJ738 P01 + ★G36-A D1/D5（2026-10-31）：回归药水双门地图图标（全图支
+      //  DrawMiscMapIcons :56754,drawScale=UIScale≈1.1 :56746-56752 终值——旧实现
+      //  漏 ×UIScale 且画在头像后;G36 统一进 drawPotionOfReturnMapIcons 共用体,
+      //  序=头像【前】（原版 :56754 icons → :56757 NPC 头 = 头像盖图标））
+      porHoverText = this.drawPotionOfReturnMapIcons(ctx, p, 1.1,
+        (wx) => cx0 + wx / TILE * fm.zoom,
+        (wy) => cy0 + wy / TILE * fm.zoom,
+        null, { x: mouseX, y: mouseY });
       this.drawMapHeads(ctx, p, headScale,
         (wx) => cx0 + wx / TILE * fm.zoom,
         (wy) => cy0 + wy / TILE * fm.zoom,
@@ -30077,6 +30454,11 @@ export class Renderer {
         }
       }
     }
+    // ★BJ738 P01：回归药水门悬停文案（原版 mouseTextString 单槽链序：地块名
+    //  :55227-55360 先写 → MapIcons :56753 后写【覆盖】→ NPC 头 :56757/玩家头像环
+    //  :56790+ 再覆盖 ⇒ 门文案优先级=地块名上/头像下。本链位：地块名块后、
+    //  头像链前,无条件覆盖）
+    if (porHoverText) this.fullMapHoverName = porHoverText;
     // 头像悬停文案（Main.cs:55407/:55420：头像环后写覆盖地块名——悬停名/传送文案；
     // 晶塔层仍后画，但本仓晶塔提示让位 fullMapHoverName（已有约定），头像与晶塔
     // 图标重叠的罕见例按头像优先处置，登记）
@@ -30196,6 +30578,17 @@ export class Renderer {
       ctx.drawImage(fog, num, num2, this.fogW * 2 * s, this.fogH * 2 * s);
     }
     ctx.imageSmoothingEnabled = false;
+    // ★G36-A D1（BJ738 登记债清偿,2026-10-31）：回归药水双门小地图图标——覆盖式
+    //  地图支（mapStyle 2,Main.cs:56443-56453 DrawMiscMapIcons;mapRect=null → 无
+    //  界裁剪 :57333 恒过）。drawScale=(zoom×0.4+1)/3 钳 1 ×UIScale（:56445-56450——
+    //  ×1.1=UIScale≈1.1 与本函数头像同档）;图标与头像同变换（vanilla mapStyle 2
+    //  num12=0/mapTopLeft=Zero,两式同形,:56451 与 :56486 逐项对齐）。序=头像前
+    //  （vanilla :56453 icons → :56497 头像 = 头像盖图标,与全图支一致）。
+    this.drawPotionOfReturnMapIcons(ctx, player,
+      Math.min(1, (s * 0.2 * 2 + 1) / 3) * 1.1,
+      (wx) => num + wx / TILE * s,
+      (wy) => num2 + wy / TILE * s,
+      null, null);
     this.drawMapHeads(ctx, player, Math.min(1, (s * 0.2 * 2 + 1) / 3) * 1.1,
       (wx) => num + wx / TILE * s,
       (wy) => num2 + wy / TILE * s,

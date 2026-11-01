@@ -200,7 +200,7 @@ describe('BJ486-②：Game.ts 退役载体死写全普查摘除（结构锁）',
     expect(/new PhoenixBolt\([\s\S]{0,400}?bolt\.armorPen = arpenTotal;/.test(codeOnly)).toBe(true);
     // 摘除后 PhoenixBolt 面=owner 装配掷（706 ranged 旗）
     const bolt = SRC('entities/PhoenixBowProj.ts');
-    expect(bolt).toContain('rollVanillaHitCrit(this.projId, game)');
+    expect(bolt).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0)');   // ★G37-A（D6,2026-10-31）改判史：706 敌臂 crit 段迁单源（TimerCrit :12928 收编）
     expect(/Math\.random\(\)\s*<\s*this\.critChance/.test(bolt)).toBe(false);
   });
 
@@ -275,16 +275,16 @@ describe('BJ486-③：弧子代弹掷率=rollVanillaHitCrit（owner 装配,含 :
     for (const id of [972, 973, 974, 976, 933, 321]) {
       expect(swing).toContain(`readonly projId = ${id};`);
     }
-    expect(swing).toContain('rollVanillaHitCrit(this.projId, game)');
+    expect(swing).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0)');   // ★G37-A（D6,2026-10-31）改判史：弧族敌臂 crit 段迁单源
     expect(/Math\.random\(\)\s*<\s*this\.critChance/.test(SRC('entities/FirstFractal.ts'))).toBe(false);
     expect(SRC('entities/FirstFractal.ts')).toContain('readonly projId = 857;');
     expect(/Math\.random\(\)\s*<\s*this\.critChance/.test(SRC('entities/TideSlash.ts'))).toBe(false);
     expect(SRC('entities/TideSlash.ts')).toContain('readonly projId = 451;');
     const solar = SRC('entities/SolarEruption.ts');
     expect(solar).toContain('readonly projId = 611;');
-    expect(solar.split('rollVanillaHitCrit(this.projId, game)').length - 1).toBe(2);   // 611 敌怪面+BJ729-A 城镇 settle 面（D1 B19,2026-10-27,1→2——锁语义=面存在性非清单冻结,BJ725-A 判例 3）;612 无类旗保持原样
+    expect(solar.split('rollVanillaHitCritConsumeTimer(this.projId, game,').length - 1).toBe(2);   // 611 敌怪面+城镇 settle 面（★G37-A 2026-10-31 改判史：crit 段迁 ConsumeTimer 单源[TimerCrit :12928 收编],D1 B19 1→2 沿承——锁语义=面存在性非清单冻结,BJ725-A 判例 3）;612 无类旗保持原样
     const missile = SRC('entities/MissileProj.ts');
-    expect(missile).toContain('rollVanillaHitCrit(this.projId, game)');               // StarfuryStar(9)
+    expect(missile).toContain('rollVanillaHitCrit(this.projId, game)');               // StarfuryStar(9)（主环接触面,G37-A 未触——ConsumeTimer 收编面=KILL_BURST 爆臂）
     expect(missile).toContain('readonly projId = 9;');
     const gameTs = SRC('core/Game.ts');
     // 974 出生拍 crit 掷单位修复（:49369 Main.rand.Next(100) < meleeCrit）+ TimerCrit
@@ -316,13 +316,17 @@ describe('BJ486-④：bonusCritChance num13 形参化（:12912-12914）', () => 
     const { e, calls } = mkEnemy(61, 70 * TILE, 70 * TILE, 90, 240);
     g.enemies = () => [e];
     const slam = new MonkSlam(70 * TILE + 20, 70 * TILE + 40, 1, 0, 50);
-    vi.spyOn(Math, 'random').mockReturnValue(0.6);       // 0.6 < 0.79 → crit
+    // ★BJ744 改判史：BJ741 G37① MonkSlam(698) DV 接入（:12970）——0.6 档 DV tier+3
+    //  → 52 必红;改 0.5 中性档（tier 0→基伤 50,且 0.5 < 0.79 crit 照真,判别面不变）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);       // 0.5 < 0.79 → crit;DV tier 0 中性
     slam.fixedUpdate(1 / 60, g);
     expect(calls.length).toBe(1);
     expect(calls[0].crit).toBe(true);
     expect(calls[0].dmg).toBe(50);                  // ★S02 改判:未翻倍基伤(旧 100=预倍形)
     const fury = SRC('entities/MonkStaffFury.ts');
-    expect(fury).toContain('rollVanillaHitCrit(this.projId, game, 25)');
+    // ★BJ744 改判史：BJ741 G37①（R19-1）698 掷面迁 ConsumeTimer 单源——bonus 25
+    //  形参保留（第 5 参位,proj1457 签名 bonusCritChance）。
+    expect(fury).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0, 25)');
     const gameTs = SRC('core/Game.ts');
     expect(/slam\.critChance\s*=\s*critTotal\s*\+\s*0\.25/.test(gameTs)).toBe(false);
   });

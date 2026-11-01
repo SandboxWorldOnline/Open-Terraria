@@ -146,7 +146,9 @@ interface RampageTarget {
   dead?: boolean; iframes?: number; dontTakeDamage?: boolean;
   def?: { friendly?: boolean; knockBackResist?: number };
   hurt(dmg: number, kbx: number, kby: number, g: GameHooks, armorPen?: number,
-    crit?: boolean, pierce?: number, fromPlayer?: boolean): boolean;
+    crit?: boolean, pierce?: number, fromPlayer?: boolean,
+    /* ★G39-A（bj745a D-④）:adtnOnHit 通道扩参（ApplyDamageToNPC 站豁免 hp>5 门） */
+    penPercent?: number, srcProjId?: number, nanoMul?: number, adtnOnHit?: boolean): boolean;
 }
 
 /** 撞怪/踩踏共用扫掠集：enemies ∪ critters（原版 Main.npc 单数组槽遍历的仓内拆分，
@@ -243,7 +245,9 @@ export function minecartNpcRampage(cart: {
     // ★F1（2026-08-31 蓝队三批）：原版矿车冲撞/踩踏/召唤冲撞三循环都走
     //   ApplyDamageToNPC——旗加伤（GetBannerBuffEffect DamageDealt）是 :20599
     //   内置段，凡该通道必吃一次；此前弹幕/坐骑各站全族缺位。
-    e.hurt(applyBannerDamageDealt(game, e, dmgOut), dir * kb, 0, game, playerArmorPenOf(game), crit, 0, true);
+    e.hurt(applyBannerDamageDealt(game, e, dmgOut), dir * kb, 0, game, playerArmorPenOf(game), crit, 0, true, 0, 0, 1, true);
+    // ★G39-A（bj745a D-④,2026-11-01）:矿车碾冲撞(:27807)走 ApplyDamageToNPC(2343)
+    //   ——OnHit 族【无】hp>5 门(:20599-20600),adtnOnHit=true 豁免(尾参 12)
     hits++;
     e.iframes = 30;                                               // :27819 immune[i]=30
     if (e.dead) {
@@ -338,7 +342,7 @@ function collisionAttackSweep(
     let dir = p.facing;
     if (p.vx < 0) dir = -1;
     else if (p.vx > 0) dir = 1;
-    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * cfg.knockback, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面（见文件头注）;★附带② AP 同源链;★F1 ApplyDamageToNPC :20599 旗乘区
+    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * cfg.knockback, 0, game, playerArmorPenOf(game), false, 0, true, 0, 0, 1, true);   // crit:false 字面（见文件头注）;★附带② AP 同源链;★F1 ApplyDamageToNPC :20599 旗乘区;★G39-A(bj745a D-④):踩踏三支(:20722/:20760/:20797)全 ApplyDamageToNPC=OnHit 无 hp 门,adtnOnHit 豁免
     e.iframes = cfg.npcImmune;                                     // nPC.immune[whoAmI]=N
     // ★GC1/D3 统一时钟桥写（NPC.immune[whoAmI] 的第二承载面）：nPC.immune[whoAmI]
     // 原文即 per-player 槽（本仓双轨制：实体级 iframes 弹幕域直用 + 共享表供近战门）
@@ -365,7 +369,9 @@ interface StompTarget2 {
   noTileCollide?: boolean;
   def?: { friendly?: boolean };
   hurt(dmg: number, kbx: number, kby: number, g: GameHooks, armorPen?: number,
-    crit?: boolean, pierce?: number, fromPlayer?: boolean): boolean;
+    crit?: boolean, pierce?: number, fromPlayer?: boolean,
+    /* ★G39-A（bj745a D-④）:adtnOnHit 通道扩参（ApplyDamageToNPC 站豁免 hp>5 门） */
+    penPercent?: number, srcProjId?: number, nanoMul?: number, adtnOnHit?: boolean): boolean;
 }
 
 /** GiveImmuneTimeForCollisionAttack（1457 Player.cs:20654-20667）建模：
@@ -638,7 +644,7 @@ export function chilletDashCharge(
     let dir = p.facing;
     if (p.vx < 0) dir = -1;
     else if (p.vx > 0) dir = 1;
-    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * kbx, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面(:21402);★F1 ApplyDamageToNPC :20599 旗乘区
+    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * kbx, 0, game, playerArmorPenOf(game), false, 0, true, 0, 0, 1, true);   // crit:false 字面(:21402);★F1 ApplyDamageToNPC :20599 旗乘区;★G39-A(bj745a D-④):dash6 冲撞(:21401)走 ApplyDamageToNPC(5665)=OnHit 无 hp 门,adtnOnHit 豁免
     e.iframes = 20;                                                // nPC.immune[whoAmI]=20（:21403）
     (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
       .noteNpcPlayerImmune?.((e as unknown as { id?: number }).id ?? -1, 20);

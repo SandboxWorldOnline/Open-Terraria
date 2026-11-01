@@ -121,7 +121,8 @@ export class ChatInput {
       vv.addEventListener('scroll', this.onVvShift);
     }
     this.winKey = (e: KeyboardEvent) => {
-      if (e.code === 'Enter' && !e.isComposing) {
+      // ★Issue#34：小键盘回车同权发送/关框（XNA Keys.Enter 双覆盖;见 Game.ts 开框门注）
+      if ((e.code === 'Enter' || e.code === 'NumpadEnter') && !e.isComposing) {
         e.preventDefault();
         e.stopPropagation();
         const text = input.value.trim();

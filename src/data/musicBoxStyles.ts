@@ -19,3 +19,12 @@ export const MUSIC_BOX_ITEM_BY_STYLE: readonly number[] = [
   5579, 5580, 5539, 5581, 5582, 5637, 5638, 5639, 6144, 6145,
   6146,
 ];
+
+/** ★G36-A D1（BJ740 登记债清偿,2026-10-31）：vid → style 逆表（ApplyMusicBox
+ *  Player.cs:16111-16360 的 item.type → musicBox 映射与 MUSIC_BOX_ITEM_BY_STYLE
+ *  互逆——表序即 style 号,0-100;576 空盒不在表=不播曲）。消费 = Game 音乐 tick
+ *  佩戴扫描（时装配饰槽 13-19,SceneMetrics.AddPlayerEffects :771 玩家值覆盖
+ *  地块扫描值）。 */
+export const MUSIC_BOX_STYLE_BY_VID: ReadonlyMap<number, number> = new Map(
+  MUSIC_BOX_ITEM_BY_STYLE.map((vid, style) => [vid, style] as const),
+);

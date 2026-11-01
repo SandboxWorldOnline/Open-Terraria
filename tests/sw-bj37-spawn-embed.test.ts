@@ -14,6 +14,9 @@
 //     （实心体内 1-2 格窄缝整只嵌入=用户实报根因）+ Bottom 传 (ay+1)*TILE 嵌地 16px
 //   ④骷髅商同款 +1 嵌地（NPC.cs:5009 落 spawnTileY*16 顶边）
 import { describe, it, expect } from 'vitest';
+// ★BJ743-A（R24 SEV-2）：src 读改 ESM import 形经 fs-guard-shim 守卫——字面
+//   require('fs') 走 vite 注入原生 require,alias 不达=并行变异窗读盘竞态旁路面。
+import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import {
   VanillaSpawner, spawnTileSolid, solidTilesCell, worldSolidTile,
@@ -236,8 +239,7 @@ describe('【SW-BJ37】旅行商/骷髅商 Bottom 落位几何（原版=地面�
   });
 
   it('结构锁：旅行商落位段按 SpawnTravelNPC 1:1（防回退到 ±(30..80) 单列链/+1 嵌地）', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const src = require('fs').readFileSync('src/core/Game.ts', 'utf8');
+    const src = readFileSync('src/core/Game.ts', 'utf8');   // ★BJ743-A:ESM 形经守卫
     expect(src).toContain("new TownNPC('travelling_merchant', sx * TILE, sy * TILE)");
     expect(src).toContain('anchor.home!.y + 1');                    // homeTileY 口径=脚下地面格
     expect(src).toContain('worldSolidTile(st, x, y) || VANILLA_TILE_SOLID_TOP.has(tp)');

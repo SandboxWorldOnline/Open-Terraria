@@ -20,7 +20,7 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll, noteVanillaProjImmune } from './projTargets';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）;★BJ741 R19-1（G37①）：TimerCrit :12928 消费并单源
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-C M02：251 魔法段 DV 首掷（:12970）
 
@@ -101,9 +101,10 @@ export class RainbowSegment extends Entity {
       //  identity,victim]=UpdateCount+cd）在【受理支】内——免疫门 :12635-12637 拒收
       //  （他源 iframes 残窗）发生在任何写尾之前,门拒敌不落静态标 → 残窗期满后本段
       //  照吃;旧档 set 前置=残窗敌被整段 10t 静态窗吞（set 移入下方 !vanillaGated 支）。
-      // ★BJ489 def-3：251 掷率=rollVanillaHitCrit（magic 旗,命中拍 owner 装配+:25712
-      //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      // ★BJ489 def-3：251 掷率=rollVanillaHitCritConsumeTimer（magic 旗,命中拍 owner
+      //  装配+:25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      //  ★BJ741 R19-1（G37① DV✓T✗ 残差族）：TimerCrit :12928 消费并单源（旧仅类掷）
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
       // ★BJ723-C M02（2026-10-26）：DamageVar 首掷（Projectile.cs:12970——251 魔法段
       //  每受理靶 ±15% 31 档离散+luck 重掷;BJ716-A Arrow 主环同式）——原序=
       //  crit 掷(:12915-27)→DV(:12970)→banner(:13388)→StrikeNPC 内 crit ×2。

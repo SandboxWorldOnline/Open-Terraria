@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Game } from '../src/core/Game';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
@@ -229,7 +230,13 @@ describe('④ 997 命中召南瓜弹 321（HorsemansBlade_SpawnPumpkin :42444-42
     const arc = new SwingArc(player, 997, 26, 90, 1, 1);
     arc.kb = 7.5;                                      // 1826 knockBack（Game 侧透传）
     arc.fixedUpdate(1, hooks);
-    expect(e.hits).toEqual([[90, 6.5]]);               // 弧本体命中（ai0×6.5）
+    // ★G37-A（D6,2026-10-31）改判史：弧族敌臂补 DV :12970 逐靶掷（BJ729-A 登记债
+    //  清偿;mock 0.999=tier+15 档）→ 旧平值钉 90 改 31 档 DV 域锁（bj735a 判例形）。
+    const dvDomain997 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain997.add(damageVarRoll(90, 0, () => i / 31));
+    expect(e.hits.length).toBe(1);
+    expect(e.hits[0][1]).toBe(6.5);                     // 弧本体命中（ai0×6.5）
+    expect(dvDomain997.has(e.hits[0][0])).toBe(true);
     const p = added.find((x) => x instanceof HorsemansPumpkin) as HorsemansPumpkin;
     expect(p).toBeInstanceOf(HorsemansPumpkin);
     expect(p.ai0).toBe(7);                             // ai[0]=目标 npcIndex
@@ -293,7 +300,13 @@ describe('④ 997 命中召南瓜弹 321（HorsemansBlade_SpawnPumpkin :42444-42
     const { hooks } = arcHooks(e, []);
     const p = new HorsemansPumpkin(e.cx - 20, e.cy, 8, 0, 50, 6.5, 7);
     p.fixedUpdate(1, hooks);
-    expect(e.hits).toEqual([[50, 6.5]]);               // sign(vx)×kb
+    // ★G37-A（D6,2026-10-31）改判史：321 敌臂补 DV :12970 逐靶掷（mock 0.999=
+    //  tier+15 档）→ 旧平值钉 50 改 31 档 DV 域锁（bj735a 判例形）。
+    const dvDomain321 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain321.add(damageVarRoll(50, 0, () => i / 31));
+    expect(e.hits.length).toBe(1);
+    expect(e.hits[0][1]).toBe(6.5);                     // sign(vx)×kb
+    expect(dvDomain321.has(e.hits[0][0])).toBe(true);
     expect(p.dead).toBe(true);
     // 暴击档：rand=0 → crit 强制（★S02:×2 移 Enemy.hurt 防后——spy 收未翻倍基伤）
     const e3 = mkEnemy(100 * TILE, 100 * TILE, 8);
@@ -302,7 +315,13 @@ describe('④ 997 命中召南瓜弹 321（HorsemansBlade_SpawnPumpkin :42444-42
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const q = new HorsemansPumpkin(e3.cx - 20, e3.cy, 8, 0, 50, 6.5, 8);
     q.fixedUpdate(1, h3);
-    expect(e3.hits).toEqual([[50, 6.5]]);            // ★S02(BJ723-B)改判:未翻倍基伤(旧 100=预倍形)
+    // ★S02(BJ723-B)改判:未翻倍基伤(旧 100=预倍形);★G37-A（D6）：mock 0=tier−15 档
+    //  （50×0.85=42.5→42）——域锁全域涵盖（含负 tier）。
+    const dvDomain321c = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain321c.add(damageVarRoll(50, 0, () => i / 31));
+    expect(e3.hits.length).toBe(1);
+    expect(e3.hits[0][1]).toBe(6.5);
+    expect(dvDomain321c.has(e3.hits[0][0])).toBe(true);
   });
 
   it('spawnHorsemansPumpkin 直调：入 projectiles 桶（NewProjectile :42462）', () => {

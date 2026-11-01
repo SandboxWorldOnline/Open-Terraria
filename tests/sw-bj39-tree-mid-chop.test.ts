@@ -24,6 +24,8 @@
 // evolution-tree-cascade.test 核心）;Game 'tree'/'treebase' kind 委托。
 // 变异证据：修复前同断言在探针 ②③ 组全红（F1/F2/F3 逐条）。
 import { describe, it, expect } from 'vitest';
+// ★BJ743-A（R24 SEV-2）：src 读改 ESM import 形经 fs-guard-shim 守卫（require 旁路收口）。
+import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../src/data/tiles';
 import { Game } from '../src/core/Game';
@@ -234,9 +236,8 @@ describe('SW-BJ39 ⑥ DECOR 派发面（邻域变化 → tree kind → tileFrame
 
 describe('SW-BJ39 ⑤变异对照：旧路径断言在新实现下的判别力（红→绿复核）', () => {
   it('行号锚：Game 砍伐面消费 killTileCascadeAt；演化域公共入口在位', () => {
-    // ★SW-RB9b：签名标注补 encoding 形参（原 (p:string)=>string 与 'utf8' 实参不符
-    //   =TS2554×2,tsc 基线噪声;仅类型面,运行时不变）
-    const { readFileSync } = require('node:fs') as { readFileSync: (p: string, enc?: string) => string };
+    // ★SW-RB9b→BJ743-A：原 require('node:fs') 内联签名已废——顶部 ESM import 形
+    //   经守卫（R24 SEV-2 require 旁路收口）,签名=原生 (p, enc?) => string。
     const game = readFileSync('src/core/Game.ts', 'utf8');
     expect(game).toContain('this.evolution.killTileCascadeAt(x, y);');
     expect(game).toContain("5: 'tree',");

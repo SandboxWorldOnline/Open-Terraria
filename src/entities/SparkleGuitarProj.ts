@@ -51,7 +51,10 @@ import { cutTilesBox } from './ProjCutTiles';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt, snapshotVanillaGate, vanillaGateRejected } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源（★清偿刀 T 门位快照单源;★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
 import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）;★BJ741 R19-1（G37①）：TimerCrit 并单源
+// ★BJ741 R19-1（2026-10-31）：DV 单源（:12970——856 直击/Kill 爆裂敌臂整缺=旧恒平值,
+// G37-A D6-R 登记债①同族「SparkleGuitar T✓DV✗」档）
+import { damageVarRoll } from '../stats/DamageVar';
 import { ParticleOrchestraType } from '../net/syncModules';
 
 /** ★三轮蓝队 F6：immune[owner] 读门（:12636-12641）。原版 flag3 单发族
@@ -130,11 +133,10 @@ function stellarStrike(
   //  （直击+Kill 爆裂两站共用本口=原版两轮 Damage() 各自掷）。critChance 形参=关断钉
   //  （≤0 掷门关死,类缺省 0.04=路由门;spectre-stellar 测试置 0 禁掷）。武僧 688-690 强制
   //  掷 :12929-43 形位=856 非 688 族恒假,不设。
-  const rollCrit = critChance > 0 && rollVanillaHitCrit(proj?.projId ?? 856, game);
-  const timerCrit = (game.player as unknown as
-    { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
-    | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
-  const critGuitar = rollCrit || timerCrit;
+  //  ★BJ741 R19-1（G37① T✓DV✗ 残差档）：掷面迁 rollVanillaHitCritConsumeTimer 单源
+  //  （类掷+TimerCrit 各自独立求值后 ||,G37-A 定谳形制——旧手写对偶同值,复用勿重造）
+  //  + DV :12970 首掷（旧恒平值）。
+  const critGuitar = rollVanillaHitCritConsumeTimer(proj?.projId ?? 856, game, e, critChance > 0);
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
@@ -142,12 +144,11 @@ function stellarStrike(
   //  :14297——门 :13991 照走,受理写 immune[owner]=0 ≡ :14175-14178 usesLocal 支）。
   //  旧 pierce=0 通用尾档写 10t=背靠背二奏 10t 内被头门整拒（写面偏差;节流本就
   //  由 hitOnce〔localNPCHitCooldown=-1 每敌终生一跳〕承载,10t 全局窗纯多余）。
-  // ★BJ494（2026-10-04）crit ×2 预倍补位（同站相邻面,定谳=Enemy.hurt 零内倍（:14665
-  //  「仓内调用侧预倍」习语）+原版 StrikeNPC crit ×2（:81990）——旧 stellar crit 掷中
-  //  仅翻 kb（:82179 ×1.4）伤值恒 ×1=真缺口,本刀随掷率收编一并落位;BJ492① MinionProj
-  //  预倍同形）。snap 加伤随暴击并入（既有）。
+  // ★BJ494（2026-10-04）crit ×2 预倍补位史（定谳=Enemy.hurt 零内倍期「仓内调用侧预倍」
+  //  习语落位——旧 stellar crit 掷中仅翻 kb（:82179 ×1.4）伤值恒 ×1=真缺口）。
   // ★S02(BJ723-B):crit ×2 摘除——Enemy.hurt 防后承载(NPC.cs:82067,旧预倍习语退役)
-  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
+  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damageVarRoll(damage,
+      ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)))   // ★BJ741 R19-1：DV :12970（旧恒平值）
     + (snapBonusGuitar ? snapBonusGuitar : 0),
     kx, 0, game, armorPen,
     critGuitar, -3, true);          // StrikeNPC 单点（Enemy.hurt 同构）

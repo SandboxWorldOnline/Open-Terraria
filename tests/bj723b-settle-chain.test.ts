@@ -132,7 +132,11 @@ describe('BJ723-B S02 Enemy.hurt crit ×2 防后（NPC.cs:82067 两步式）', (
   });
   it('S02-7 结构锁：Enemy.hurt 两步式（保底门+防后 ×2）与旧偏差登记销账注', () => {
     const t = src(ENEMY_TS);
-    expect(t).toContain('let calcNpc = dmg + penAdd - def * 0.5;');
+    // ★BJ739 B19（2026-10-31）：首行改 strikeBase 形——nanoMul（弹/鞭浸剂 ×1.05）
+    // 在 penAdd 并入后施加（Projectile.cs:13684-13690）;无 nanoMul 时 strikeBase =
+    // dmg+penAdd 与旧式恒等（挥砍链不传 nanoMul 保持 Nano-先/pen-后 原版反序）
+    expect(t).toContain('const strikeBase = nanoMul !== 1 ? Math.trunc((dmg + penAdd) * nanoMul) : dmg + penAdd;');
+    expect(t).toContain('let calcNpc = strikeBase - def * 0.5;');
     expect(t).toContain('if (calcNpc < 1) calcNpc = 1;');
     expect(t).toContain('dmg = Math.trunc(calcNpc * (crit ? 2 : 1));');
     expect(t).toContain('★S02 BJ723-B 2026-10-26 销账');
@@ -346,10 +350,13 @@ describe('BJ723-B R03 settleKillExplosion 逐靶掷（Kill 重跑 Damage()）', 
     expect(e.hits[0].d).toBe(150);
   });
   it('R03-4 结构锁：settleKillExplosion 逐靶 rollVanillaHitCrit+damageVarRoll;41 狱炎箭邻位债登记注', () => {
+    // ★G37-A（D5,2026-10-31）改判史：crit 段迁 rollVanillaHitCritConsumeTimer 单源
+    //  （类掷+TimerCrit :12928 消费——BJ729-A 登记债 D5 清偿;锁语义=面存在性,
+    //  BJ726-A 形制随刀迁移）。
     const t = src('src/core/Game.ts');
-    expect(t).toContain('const critX = rollVanillaHitCrit(projId, this);');
+    expect(t).toContain('const critX = rollVanillaHitCritConsumeTimer(projId, this, e);');
     expect(t).toContain('const dmgVX = damageVarRoll(dmg, this.player.luck ?? 0);');
-    expect(t).toContain('const critC = rollVanillaHitCrit(projId, this);');
+    expect(t).toContain('const critC = rollVanillaHitCritConsumeTimer(projId, this, c);');
     expect(t).toContain('★R03（BJ723-B 2026-10-26）');
   });
 });

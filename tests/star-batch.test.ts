@@ -4,6 +4,9 @@
 // ★坐标系:星坐标在 1920×1200 空间,px=s.x/1920×viewW（断言必须过同一映射）。
 // node 面纯计算（builder 不触 GL;GL 发射位=源锚）。Float32 存储面→精度 7 位。
 import { beforeAll, describe, expect, it } from 'vitest';
+// ★BJ743-A（R24 SEV-2）：下述结构锁 4 处 require('fs') 直读 src 改 ESM import 形
+//   经 fs-guard-shim 守卫（require 旁路收口;try/catch 兜底语义保持）。
+import { readFileSync } from 'node:fs';
 import { SkyRenderer } from '../src/render/SkyRenderer';
 
 beforeAll(() => {
@@ -127,7 +130,7 @@ describe('★C13 buildStarBatch 数学锁', () => {
 });
 
 describe('★C13 结构锁', () => {
-  const SKY = (() => { try { return require('fs').readFileSync('src/render/SkyRenderer.ts', 'utf8'); } catch { return ''; } })();
+  const SKY = (() => { try { return readFileSync('src/render/SkyRenderer.ts', 'utf8'); } catch { return ''; } })();
   it('发射位源锚:自然星 sstarn 原位 blit+恒等变换守卫;人工星 sstars;2D 回退保留', () => {
     expect(SKY).toContain("emitStarBatchGL(layer, batch, 'sstarn', viewW, viewH)");
     expect(SKY).toContain("emitStarBatchGL(layer, batch, 'sstars', viewW, viewH)");
@@ -136,7 +139,7 @@ describe('★C13 结构锁', () => {
     expect(SKY).toContain('this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt, shim, false, cotsFaded)');
     expect(SKY).toContain('this.drawStar(ctx, i, starDim, viewW, viewH, this._lastStarBgTopY, bt, shim, true, cotsFaded)');
   });
-  const GL = (() => { try { return require('fs').readFileSync('src/render/GLSpriteLayer.ts', 'utf8'); } catch { return ''; } })();
+  const GL = (() => { try { return readFileSync('src/render/GLSpriteLayer.ts', 'utf8'); } catch { return ''; } })();
   it('quadBatchRgba smooth 参数锁（缺省 false=既有调用零变化;星场=true 线性）', () => {
     expect(GL).toContain('quadBatchRgba(e: TexEntry, data: Float32Array, quads: number, smooth = false)');
     expect(GL).toContain('bindSampler(0, smooth');
@@ -165,10 +168,10 @@ describe('★K3 星批 idle 预热（2026-10-01 prewarmStarBatch）', () => {
   });
 
   it('结构锁:mainFlow rIC 挂点+GLSpriteLayer.prewarmPrecip 面', () => {
-    const MF = (() => { try { return require('fs').readFileSync('src/mainFlow.ts', 'utf8'); } catch { return ''; } })();
+    const MF = (() => { try { return readFileSync('src/mainFlow.ts', 'utf8'); } catch { return ''; } })();
     expect(MF).toContain('prewarmStarBatch()');
     expect(MF).toContain('requestIdleCallback');
-    const GL = (() => { try { return require('fs').readFileSync('src/render/GLSpriteLayer.ts', 'utf8'); } catch { return ''; } })();
+    const GL = (() => { try { return readFileSync('src/render/GLSpriteLayer.ts', 'utf8'); } catch { return ''; } })();
     expect(GL).toContain('prewarmPrecip(): boolean');
   });
 });

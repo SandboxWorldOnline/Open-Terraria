@@ -243,6 +243,11 @@ export function withMutation(
 const ORIG_READ: (...a: unknown[]) => unknown =
   createRequire(import.meta.url)('node:fs').readFileSync;
 
+/** ★BJ743-A（2026-10-31,R24 SEV-2）：异步守卫读捕获的原生 fs/promises readFile
+ *  （捕获面同上——createRequire 钉死补丁不可达,防自环）。 */
+const ORIG_READFILE: (...a: unknown[]) => Promise<unknown> =
+  createRequire(import.meta.url)('node:fs/promises').readFile;
+
 interface LockBody { pid: number; label: string; at: number; kind?: 'mutate' | 'read' }
 
 function readLockBody(lp: string): LockBody | null {
@@ -298,11 +303,76 @@ export function readFileSyncGuarded(file: string, ...args: unknown[]): unknown {
   return (ORIG_READ as (...a: unknown[]) => unknown)(file, ...args);
 }
 
-/** BJ725-F：全局安装 src 读守卫（setupFile 一次调用）。只拦 repo 内 src 树下的
- *  .ts 字符串路径读;其余(Buffer/URL/fd/非 src 路径/node_modules)原样透传。
- *  Node 内置模块 default 导出=CJS 单例对象（可写属性）,具名导入是活绑定——patch
- *  单例即拦到全部 import 形态（import { readFileSync } / import fs / require,
- *  活绑定已实证）。 */
+/** ★BJ743-A（2026-10-31,R24 SEV-2/R23-LOW-4 互证）：node:fs/promises readFile 的
+ *  异步守卫读——readFileSyncGuarded 五档语义的异步同构（fs/promises alias 旁路收口）。
+ *  备份写时序定谳（withMutation 写盘序亲读：持锁→【先】同步写 pristine 备份→【后】
+ *  写变异盘）：他人 mutate 窗内只有两态——「备份已写⇒盘面可能变异」「备份未写⇒盘面
+ *  仍纯净」，由 mtime 门槛【同步】可判 ⇒ 异步读无须 defer 到备份可读（无第三态）。
+ *  形制 = 同步探锁定靶、异步读靶：
+ *   ①锁空闲→取 read 档锁【跨 await 持有】再读（持锁期 withMutation 拿不到锁=盘面
+ *     不可能 pristine→mutated 迁移，直读是硬保证而非窗口假设）；
+ *   ②read 档持锁者/自身 pid/env 旗（恰红子进程）三档直读——env 旗同步判定，
+ *     子进程读变异盘语义与同步版逐字同源；
+ *   ③他人 mutate 窗→异步读新鲜备份，读后复核持锁未变才采信（变则重试；备份同轮
+ *     窗内只写一次=无撕裂读）。64 轮重试耗尽→直读+显式告警（禁静默，同步版同款）。 */
+export async function readFileGuarded(file: string, ...args: unknown[]): Promise<unknown> {
+  const lp = lockPathOf(file);
+  for (let spin = 0; spin < 64; spin++) {
+    if (tryAcquireOnce(file, 'BJ743-A guarded readFile')) {
+      try { return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args); }
+      finally { releaseLock(file); }
+    }
+    const holder = readLockBody(lp);
+    if (!holder) continue;                                   // 释放竞态——重试
+    try { if (Date.now() - statSync(lp).mtimeMs > STALE_MS) { unlinkSync(lp); continue; } } catch { /* 已释放 */ }
+    const kind = holder.kind ?? 'mutate';                    // 旧锁体保守档
+    if (kind === 'read') return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+    if (holder.pid === process.pid
+      || process.env.SW_MUT_GUARD_HOLDER === String(holder.pid)) {
+      return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+    }
+    const bp = backupPathOf(file);
+    try {
+      if (statSync(bp).mtimeMs >= holder.at - 50) {
+        const bak = await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(bp, ...args);
+        const holder2 = readLockBody(lp);
+        if (holder2 && holder2.pid === holder.pid) return bak;   // 复核持锁未变才采信
+      } else {
+        // 备份未写=变异未落盘=盘面仍纯净——直读（原参直返）
+        const holder2 = readLockBody(lp);
+        if (holder2 && holder2.pid === holder.pid) {
+          return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+        }
+      }
+    } catch { /* 备份缺失/读取失败——落到持锁复核重试 */ }
+  }
+  console.warn(`[mutation-guard] 异步守卫读重试上限(64)耗尽,直读: ${file}`);
+  return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+}
+
+/** ★BJ743-A（2026-10-31）：shim 路由共用单源——string / file://URL 归一为守卫目标
+ *  路径；非守卫域（Buffer/fd/非 src 路径/node_modules/非法 URL）返 null=原参透传
+ *  （透传面必须原参直传，归一仅用于守卫支——URL 非法形交还原生抛错语义）。 */
+export function guardedTargetOf(file: unknown): string | null {
+  let p: string | null = null;
+  if (typeof file === 'string') p = file;
+  else if (file instanceof URL) { try { p = fileURLToPath(file); } catch { return null; } }
+  else return null;
+  return isGuardedSrcPath(p) ? p : null;
+}
+
+/** BJ743-A 判注改写（R24 SEV-2）：原文（2026-10-26）描述「setupFile 一次调用全局
+ *  安装 src 读守卫…patch 单例即拦到全部 import 形态（含 require）」——该通道经
+ *  vite-node 快照语义探针【证伪】：具名/namespace 导入按 worker 模块图首个 ESM
+ *  import 时刻取快照，setupFile 补丁 fs 单例拦不到，require 亦是原生直通（判例群
+ *  见 tests/fs-guard-shim.ts 头注）。实况 = 【vitest.config.ts resolve.alias 装载
+ *  通道】：node:fs 与 node:fs/promises（BJ743-A 扩）双别名 → shim，customResolver
+ *  按 importer 分流（tests/ 与 tools/ 域 → shim；shim/guard 自身与 vitest 内部/
+ *  src/node_modules → 取消回落原生 fs）。路由面：repo 内 src 树 .ts 的 string 与
+ *  file://URL（BJ743-A 收口）路径读走守卫；Buffer/fd/非 src 路径原样透传。
+ *  在案旁路面：①createRequire(..."node:fs")（本模块 ORIG_READ 刻意用此面钉死
+ *  补丁不可达）②测试体内字面 require('node:fs')——vite 注入原生 require，alias
+ *  不达（R24 普查 8 处直读者已改 ESM import 形；tests/bj743a 结构锁看守回潮）。 */
 /** BJ725-F:src 树 .ts 路径判定（tests/fs-guard-shim.ts 路由消费的唯一单源） */
 const REPO_ROOT = realpathSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..'));   // 外层仓根——覆盖 game/src 与 server/src
 export function isGuardedSrcPath(p: string): boolean {

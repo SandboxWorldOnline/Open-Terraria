@@ -168,21 +168,48 @@ describe('宝石七弹运行时: CanBounce(597 琥珀,HandleMovement :18112-1815
     expect(a['pierce']).toBe(7);
   });
 
-  // ★产品 bug 备案(2026-08-21,只记录不修):反弹分支死代码——
-  //   Arrow.ts:1260 `if (this.hitHead || this.hitWall || this.onGround)` 三旗在 Arrow
-  //   上无任何写入点:Arrow 不走 moveAndCollide(src/physics/TileCollision.ts 唯一写入
-  //   点),自身位移是裸 `this.x += this.vx`(:1219)后查中心格;全仓对 Arrow 置这三旗的
-  //   代码为零(仅 DD2 boss 自身 AI 写自己的 hitWall)。→ 琥珀法珠/琥珀长袍臂(597/4256)
-  //   撞块直接走通用消亡口,无 ×0.8 法向反弹、无 penetrate--,1457 CanBounce 行为整段不可达。
-  it('撞实心块:法向 ×0.8 反弹 + penetrate--(不消亡)', () => {
+  // ★BJ746 A37（issue#35,2026-11-01）改判史：旧夹具把弹生成在墙内（center 出生即
+  //   实心格）——vanilla TileCollision 对嵌入盒零校正零旗（BJ606-R 判例）=无碰撞
+  //   事件,该几何本就非原版可达;旧主轴猜面在该退化夹具上恰给出 (-6.4,0) 假绿。
+  //   新夹具=干净进入（自由格起步、首步 leading edge 跨入实心）,并补 A37 三场景：
+  //   正撞反 X / 地板撞 (10,2)→(10,-1.6) / 角撞 (10,10)→(-8,-8)。
+  it('正撞竖壁:X 轴 ×(-0.8) 反弹 + penetrate--(不消亡)', () => {
     const st = new TileStore(200, 120);
-    for (let x = 40; x < 60; x++) st.setTile(x, 49, 1);   // 弹飞行线 y 行铺实心
+    for (let y = 45; y < 55; y++) st.setTile(50, y, 1);   // 竖壁列 50(rows 45-54)
     const g = makeHooks([], st);
-    const a = gemBolt(597, 40 * 16, 49 * 16 + 8, 8, 0, { canBounce: true }, { life: 100, pierce: 5 });
-    a.fixedUpdate(1 / 60, g);                             // 首步即入实心格
+    const a = gemBolt(597, 790, 46 * 16, 8, 0, { canBounce: true }, { life: 100, pierce: 5 });
+    a.fixedUpdate(1 / 60, g);                             // 右缘 799(自由)→807(列50 实心)
     expect(a.dead).toBe(false);                           // 反弹不消亡
     expect(a.vx).toBeCloseTo(-6.4, 5);                    // ×(-0.8)
+    expect(a.vy).toBe(0);                                 // Y 未跨入——不反
     expect(a['pierce']).toBe(6);                          // penetrate--
+  });
+
+  it('★BJ746 A37 地板撞 (10,2) → 仅反 Y (10,-1.6)（旧主轴猜面反 X 得 (-8,2)）', () => {
+    const st = new TileStore(200, 120);
+    for (let x = 40; x < 60; x++) st.setTile(x, 50, 1);   // 地板行 50(cols 40-59)
+    const g = makeHooks([], st);
+    // 弹 10×10 于 (720, 793)：心 (725,798) 行 49 自由;一步 (10,2) 后心 (735,800)
+    // 跨入行 50（col 45 地板）;X 带列 {45} 于移动前中心行 49 全自由 ⇒ 仅 Y 反射
+    const a = gemBolt(597, 720, 793, 10, 2, { canBounce: true }, { life: 100, pierce: 5 });
+    a.fixedUpdate(1 / 60, g);
+    expect(a.dead).toBe(false);
+    expect(a.vx).toBeCloseTo(10, 5);                      // X 保持（X 单轴带在上方自由行）
+    expect(a.vy).toBeCloseTo(-1.6, 5);                    // Y 反射 ×(-0.8)
+  });
+
+  it('★BJ746 A37 角撞 (10,10) → 双轴反 (-8,-8)（两轴各自独立跨入）', () => {
+    const st = new TileStore(200, 120);
+    for (let y = 45; y < 55; y++) st.setTile(50, y, 1);   // 竖壁列 50
+    for (let x = 50; x < 60; x++) st.setTile(x, 50, 1);   // 地板行 50（自列 50 起——角 tile (50,50)）
+    const g = makeHooks([], st);
+    // 弹 10×10 于 (786, 786)：一步 (10,10) 后右缘 805(列50)/底缘 805(行50) 双跨入;
+    // X 相采样带=移动前 Y(787-796,行49)——列 50 竖壁在行 49 亦实心 ⇒ X 跨入成立
+    const a = gemBolt(597, 786, 786, 10, 10, { canBounce: true }, { life: 100, pierce: 5 });
+    a.fixedUpdate(1 / 60, g);
+    expect(a.dead).toBe(false);
+    expect(a.vx).toBeCloseTo(-8, 5);
+    expect(a.vy).toBeCloseTo(-8, 5);
   });
 
 });

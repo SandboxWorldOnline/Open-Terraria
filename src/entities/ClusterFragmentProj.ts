@@ -45,7 +45,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ-C2/F6 掷率单源（proj1457 无反向依赖,无环）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ-C2/F6 掷率单源（proj1457 无反向依赖,无环）;★BJ741 R19-1（G37①）：TimerCrit :12928 消费并单源
 import { applyBannerDamageDealt } from './projTargets';
 import { damageVarRoll } from '../stats/DamageVar';   // ★BJ723-B D2 清偿（BJ725-A）
 
@@ -137,7 +137,8 @@ export class ClusterFragmentProj extends Entity {
           //  与 :25712-14 持械折入（Projectile.cs:12915-12927 ranged 臂,779/783/862/863
           //  SetDefaults ranged=true 数据面亲读）;spawn 位 0.04 路由门 → 命中拍动态掷。
           //  critChance≤0 关断钉保留（零 RNG）。
-          const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+          //  ★BJ741 R19-1（G37① DV✓T✗ 残差族）：TimerCrit :12928 消费并单源（旧仅类掷）
+          const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
           const snap = projectileSnapStrikeBonus(game, this, e.cx, e.cy,
             (e as unknown as { id?: number }).id ?? -1,
             { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy } });

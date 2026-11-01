@@ -64,11 +64,14 @@ describe('Clairvoyance(29)：蓝上限+20 之外补魔伤/魔暴/耗魔三项', 
     expect(p.critChance('melee')).toBe(0);
     expect(p.critChance('ranged')).toBe(0);
   });
-  it('耗魔 -2%（manaCost -= 0.02f :11485 → equipStats.manaCostMul ×0.98）', () => {
+  it('耗魔 -2%（manaCost -= 0.02f :11979 → manaCostOff 加算池 +0.02;★BJ739 B05 改判'
+    + '：旧折乘 manaCostMul ×0.98 = 合法配装每发多扣 1 蓝,已归位原版单加算池）', () => {
     const p = mkPlayer();
     expect(p.equipStats.manaCostMul).toBe(1);
+    expect(p.equipStats.manaCostOff).toBe(0);
     p.buffs.apply(BuffType.Clairvoyance, 60);
-    expect(p.equipStats.manaCostMul).toBeCloseTo(0.98, 5);
+    expect(p.equipStats.manaCostMul).toBe(1);                       // 乘区不再吃预见
+    expect(p.equipStats.manaCostOff).toBeCloseTo(0.02, 5);          // 加算池
   });
 });
 
@@ -369,10 +372,10 @@ describe('诡药 3001：随机回复 + 10/20/30% 档 240/120/60 i-帧', () => {
     expect(seen.size).toBe(51);             // 70..120 全域
     for (let v = 70; v <= 120; v++) expect(seen.has(v), `heal ${v}`).toBe(true);
   });
-  it('三条消费链全接：updateUse 主链 / quickDrinkPotion / quickConsume(QuickHeal)', () => {
+  it('两消费链全接：updateUse 主链 / quickConsume（★BJ738 P05 起 quickDrinkPotion 薄路由进 quickHeal→quickConsume,旧自备第三链退役）', () => {
     expect(gameSrc).toContain('fvid === 3001 ? this.strangeBrewRoll() : ff.healLife');
-    expect(gameSrc).toContain('qvid === 3001 ? this.strangeBrewRoll() : ff.healLife');
     expect(gameSrc).toContain('vid === 3001 ? this.strangeBrewRoll() : f.healLife');
+    expect(gameSrc).toContain("if (kind === 'heal') this.quickHeal();");   // BJ738 P05:移动键=QuickHeal 同链
     expect(itemFuncOfVid(3001)!.healLife).toBe(70);   // 表基值（运行时随机覆写）
   });
 });

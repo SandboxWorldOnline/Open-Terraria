@@ -156,7 +156,7 @@ describe('弹 356 SpectreSoulProj 绘制保真(AI_059 尘175 拖尾精确化)', 
 describe('HealProj 298/305 绘制保真(AI_052 尘拖尾精确化)', () => {
   it('298 鬼疗:d175×5/substep(每 tick 4 批=20)、α100、scale1.3、velocity*=0/noGravity', () => {
     const { recs, spawnDust } = dustHookSink();
-    const tgt = { x: 200, y: -5, w: 16, h: 16, hp: 40, maxHp: 100 };  // 弹心对齐 y=3
+    const tgt = { x: 200, y: -5, w: 16, h: 16, hp: 40, maxHp: 100 };  // ★BJ748 注：A25 起入参=中心,本面无位置断言不依赖对齐
     const p = new HealProj(298, 0, 0, 3.7, tgt);
     p.fixedUpdate(1 / 60, hooksWith(spawnDust));
     expect(recs.filter((d) => d.type === 175)).toHaveLength(20);      // EU=3 ⇒ 4 子步
@@ -171,14 +171,19 @@ describe('HealProj 298/305 绘制保真(AI_052 尘拖尾精确化)', () => {
   it('305 吸血:d183×3/substep(每 tick 11 批=33)、scale1.1、后移距 0.334 因子反向', () => {
     const { recs, spawnDust } = dustHookSink();
     const tgt = { x: 200, y: -5, w: 16, h: 16, hp: 40, maxHp: 100 };
-    const p = new HealProj(305, 0, 0, 7.7, tgt);
+    // ★BJ748（A25 尾迹收口）：BJ746 A25 起 HealProj 入参 (x,y)=出生【中心】
+    //  （NewProjectile :10878-79 position=中心−size/2）。旧夹具传 (0,0) 是左上口径
+    //  ——中心 (3,3) 恰与靶心 y=3 对齐;A25 后中心变为 (0,0),竖向偏 3px ⇒ vy'=0.0036
+    //  ⇒ handle.y 展开恰 0.0024（j=2）爆 5e-10 锚。重对齐=中心传 (0,3)（dy=0 ⇒ vy'≡0），
+    //  NewDust 盒参（左上）随之 (−3,0)，断言值域不变。
+    const p = new HealProj(305, 0, 3, 7.7, tgt);
     p.fixedUpdate(1 / 60, hooksWith(spawnDust));
     expect(recs.filter((d) => d.type === 183)).toHaveLength(33);   // EU=10 ⇒ 11 子步×3
     const first = recs.slice(0, 3);
     expect(first.map((d) => d.type)).toEqual([183, 183, 183]);
     expect(first[0].scale).toBe(1.1);
-    // 首子步混合后 vx=(0*15+4)/16=0.25 ⇒ handle.x = (0+3) − 0.25*0.334*j(:28968)
-    // (NewDust 盒参恒 (0,0);vy'≈0 ⇒ 纵向无展开)
+    // 首子步混合后 vx=(0*15+4)/16=0.25 ⇒ handle.x = (−3+3) − 0.25*0.334*j(:28968)
+    // (NewDust 盒参=左上 (−3,0);中心 y=3 与靶心同高 ⇒ vy'≡0 纵向无展开)
     expect(first[0].y).toBe(first[2].y);
     expect(first[2].handle.y).toBeCloseTo(first[0].handle.y, 9);
     expect(first[2].handle.x).toBeLessThan(first[0].handle.x);

@@ -271,7 +271,9 @@ describe('BJ-C2/F4+F5：Kill 伴生弹 92/90 掷率（类缺省门闭=永不暴�
 describe('BJ-C2/F6：集束裂片掷率收编（旧 ||0.04 平率直读丢聚合/折入必红）', () => {
   it('6a 消费位=rollVanillaHitCrit 单源+旧平率面零残留（变异:回写 || 面必红）', () => {
     const s = SRC('entities/ClusterFragmentProj.ts').replace(/^\s*\/\/[^\n]*/gm, '');
-    expect(s).toContain('this.critChance > 0 && rollVanillaHitCrit(this.projId, game)');
+    // ★BJ744 改判史：BJ741 G37①（R19-1）集束裂片接触面掷迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 并单源+DV）——旧 plain 形退役。
+    expect(s).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0)');
     expect(s).not.toContain('Math.random() < (this.critChance || 0.04)');
     expect(SRC('core/Game.ts')).toContain('frag.critChance = 0.04;');
   });
@@ -452,7 +454,7 @@ describe('BJ-C2/F11：冲撞掷面=meleeCrit 字段值（旧缺基 4/缺折入�
     expect(e.calls.length).toBe(1);
     expect(e.calls[0]!.d).toBe(30);                       // ★S02 改判:未翻倍基伤（旧→30 必红判据保持;crit 位=calls[0].crit）
   });
-  it('11c 日曜冲撞：裸装 rnd 0.03 照暴（:21328 同式）', () => {
+  it('11c 日曜冲撞：裸装 rnd 0.03 照暴（:21328 同式）;★BJ746 A22 起直击靶双吃（直击+608 爆闪）', () => {
     const e = mkEnemy(18, 975, 1450, 20, 20);
     const { hooks, player } = makeHooks([e]);
     vi.spyOn(player, 'critChance').mockReturnValue(0);
@@ -465,8 +467,14 @@ describe('BJ-C2/F11：冲撞掷面=meleeCrit 字段值（旧缺基 4/缺折入�
     player.vx = 21.9;                                     // dash3 触发速
     (player as unknown as { dashMovement: (g: GameHooks, eq: unknown, ix: number, spd: number, db: boolean, slow: number) => void })
       .dashMovement(hooks, { dash: 0, runSlowMul: 1, moveMult: 1 }, 0, 1, false, 1);
-    expect(e.calls.length).toBe(1);
+    // ★BJ746 A22（issue#35,2026-11-01）：原版每次碰撞 NewProjectile(608).Kill → 160 盒
+    // AoE（:21345-46）——直击靶 ApplyDamageToNPC→StrikeNPC 不写 immune（:82017-82400 亲读
+    // 无 immune 行）⇒ 爆闪照吃第二击（:21348 的 6 在爆闪后）。旧锁 calls=1 系爆闪缺面。
+    expect(e.calls.length).toBe(2);
     expect(e.calls[0]!.d).toBe(150);                      // ★S02 改判:未翻倍基伤 150(旧→150 必红判据经 crit 位保持)
+    expect(e.calls[0]!.crit).toBe(true);                  // 直击掷 0.03<4 照暴（本节主判据）
+    expect(e.calls[1]!.d).toBe(128);                      // AoE：DV −15% 档（150×0.85=127.5→ToEvenRound 128）
+    expect(e.calls[1]!.crit).toBe(false);                 // 608 无类旗=零类掷
   });
 });
 

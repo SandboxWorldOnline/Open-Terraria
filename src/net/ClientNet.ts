@@ -54,6 +54,12 @@ export interface RemotePlayerState {
   x: number; y: number; vx: number; vy: number;
   /** 控制位（原版 msg13 ctrlBits：Game 侧据此跑本地物理模拟） */
   up: boolean; down: boolean; left: boolean; right: boolean; jump: boolean; useItem: boolean;
+  /** ★BJ742-A R22-⑦：ctrlBits[7]（原版 bitsByte21[7] controlDash,NetMessage.cs:459）
+   *  ——Dash 键电平。旧端不发/不发 → false（改动前行为）。消费 =
+   *  Game.simulateRemotePlayers → proxy.inputDash（代理物理暂为移动子集,
+   *  DashMovement 状态机接入=登记债 D-BJ742-⑦）;主消费面=原版服直连对端
+   *  （服务端以同步控制位跑 DoCommonDashHandle :21740） */
+  dash: boolean;
   facing: number; selectedItem: number; dead: boolean;
   /** 新权威包到达标记（Game 消费注入 netOffset 后清零） */
   fresh: boolean;
@@ -92,6 +98,16 @@ export interface RemotePlayerState {
   pvpDefense: number | null;
   /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
   sleeping: boolean;
+  /** ★G36-A D3（BJ738 登记债清偿,2026-10-31）：msg13 bitsByte23[2]（原版
+   *  sitting.isSitting）——远端坐姿（Renderer 返程门层 BehindNPCs/AfterProjectiles
+   *  分组判据,Main.cs:22490 isLockedToATile）。旧端不发 → false（门恒走站立组=
+   *  改动前行为） */
+  sitting: boolean;
+  /** ★G36-A D3：msg13 bitsByte23[6]+尾段 f32×4（原版 PotionOfReturn{OriginalUse,
+   *  Home}Position,NetMessage.cs:478-504/501-505——两 Vector2 同门成对发）。
+   *  null=无门（双锚同拍置/同拍清,单 null 态不存在）。消费=Game.
+   *  simulateRemotePlayers → proxy.potionOfReturn*（Renderer 远端门 opacity 0.1） */
+  porAnchors: { exit: { x: number; y: number }; home: { x: number; y: number } } | null;
   /** ★X4 清偿刀D（2026-09-29）：msg13 flagBits[5]+尾段 f32×2（PROTO 注 k）——
    *  netCameraTarget 镜像（原版 Player.netCameraTarget,Player.cs:1607;接收位
    *  MessageBuffer.cs:1049）。null=无相机目标（原版 Vector2? 空）。远端相机目标
@@ -521,10 +537,11 @@ export class ClientNet {
             p = {
               slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
+              dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash 缺省
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
               deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
-              camTarget: null,
+              camTarget: null, sitting: false, porAnchors: null,   // ★G36-A D3
             };
             this.players.set(slot, p);
           } else if (!p.active) {
@@ -586,11 +603,12 @@ export class ClientNet {
             slot, name: `玩家${slot}`, appearance: '{}',
             x, y, vx: 0, vy: 0,
             up: false, down: false, left: false, right: false, jump: false, useItem: false,
+            dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash（旧端恒 0）
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
             deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
-            camTarget,
+            camTarget, sitting: false, porAnchors: null,   // ★G36-A D3
           };
           this.players.set(slot, p);
         }
@@ -599,6 +617,7 @@ export class ClientNet {
         p.up = !!(ctrl & 1); p.down = !!(ctrl & 2);
         p.left = !!(ctrl & 4); p.right = !!(ctrl & 8);
         p.jump = !!(ctrl & 16); p.useItem = !!(ctrl & 32);
+        p.dash = !!(ctrl & 128);          // ★BJ742-A R22-⑦：ctrlBits[7] = controlDash（原版 bitsByte21[7]）
         p.facing = ctrl & 64 ? 1 : -1;   // ctrlBits[6] = direction（原版）
         p.selectedItem = sel;
         p.sleeping = !!(flag & 1);   // flagBits[0]（原版 bitsByte26[0] sleeping.isSleeping）
@@ -1111,17 +1130,21 @@ export class ClientNet {
     // 远端据此跑本地物理 → 有移动过程；位置差由接收端 netOffset 平滑（瞬移消失）
     const p = this.game.player as unknown as {
       x: number; y: number; vx: number; vy: number; facing: number; dead: boolean;
-      inputX: number; inputJump: boolean; inputDown: boolean; inputUp: boolean;
+      inputX: number; inputJump: boolean; inputDown: boolean; inputUp: boolean; inputDash: boolean;
       inv: { heldItem(): { id: number } | null };
     };
     const inp = (this.game as { input?: { mouseDown: boolean; rightDown: boolean } }).input;
     // ctrlBits: [0]up [1]down [2]left [3]right [4]jump [5]useItem [6]direction（原版 case 13）
     // useItem = 左键按住（原版 controlUseItem；放置/右键交互不计）
+    // ★BJ742-A R22-⑦：[7]controlDash（NetMessage.cs:459 bitsByte21[7]）——对齐
+    //   原版首字节全 8 位;Player.inputDash 电平（BJ508 键面,TriggersSet.cs:825）。
+    //   旧端收包 ctrl&128 恒 0=零扰动;新端互见 Dash 键态。
     const ctrl = (p.inputUp ? 1 : 0) | (p.inputDown ? 2 : 0)
       | (p.inputX < 0 ? 4 : 0) | (p.inputX > 0 ? 8 : 0)
       | (p.inputJump ? 16 : 0)
       | (inp?.mouseDown && !inp.rightDown ? 32 : 0)
-      | (p.facing > 0 ? 64 : 0);
+      | (p.facing > 0 ? 64 : 0)
+      | (p.inputDash ? 128 : 0);
     // selectedItem = 快捷栏槽位索引 0-9（原版 NetMessage.cs:471 语义；v1 误发物品 id）
     const sel = (p.inv as unknown as { selected: number }).selected & 0xff;
     // 控制位变化即时发（原版 TrySyncingInput Player.cs:6484：任一 control/selectedItem
@@ -1144,6 +1167,12 @@ export class ClientNet {
     this.lastSentTeam = this.game.player.team;
     // flagBits: [0]sleeping(原版 bitsByte26[0]) [2]hasVelocity [5]hasCameraTarget(刀D,注k)
     // [6]ghost [7]hostile(v7)；尾部 u8 team(0-5) + [f32 camX,camY 若 flagBits[5]]
+    // ★BJ742-A R22（幽灵并集面定谳备案）：[6] 承载 dead∪ghost 并集——原版
+    //   bitsByte22[6]=player.ghost（NetMessage.cs:468,硬核幽灵独立位,普通死亡
+    //   dead=true/ghost=false）;本仓远端代理无独立 ghost 字段（ghost ⟹ dead 恒
+    //   成立,收端 p.dead=!flag&64 消费）,发端以 dead 电平占用该位 = 并集语义
+    //   （普通死亡/硬核幽灵两态远端均显 dead）。勿「修」成 vanilla 纯 ghost 位——
+    //   会令普通死亡远端 ghost=dead=false=消失帧（结构锁见 tests/bj742a-lock-gaps）。
     const gp = this.game.player as unknown as { hostile: boolean; team: number };
     this.lastSentSleep = (p as unknown as { sleeping: boolean }).sleeping;
     const cam = this.pendingCamTarget;
@@ -1543,7 +1572,7 @@ export class ClientNet {
 
   /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */
   sendStrike(netId: number, rawDmg: number, kbx: number, kby: number, crit?: boolean) {
-    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).u8(crit ? 1 : 0).finish());   // BJ723-B D5 清偿（BJ725-A）：尾部 u8 crit
+    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).finish()); /* BJ725B-M5 变异:crit 字节摘除 */   // BJ723-B D5 清偿（BJ725-A）：尾部 u8 crit
   }
 
   /** PvP 近战命中意向上报（v7 msg44，C→S→定向转发被击者；权威=被打方本地结算）。

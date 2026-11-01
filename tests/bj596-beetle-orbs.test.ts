@@ -200,29 +200,51 @@ describe('BJ596 面2：5 残影+本体参数面（beetleOrbDrawPlan）', () => {
 
 // ============ 充能档视觉差锁（orb 数=档位,两族各 3 上限） ============
 
+/** ★BJ748（A16 尾迹收口）：BJ745 A16 buff 单源重构——orbs 每拍由 UpdateBuffs 从
+ *  95-100 档 buff 重派生（族守卫读上拍族旗）,梯子只 AddBuff 不直写 orbs ⇒ 派生
+ *  滞后一拍;裸宿主（无 buffs）派生恒 0（aura-beetle-buff「裸宿主」面同判,旧
+ *  「180 tick 后 orbs=1」系持久字段直写模型）。本夹具补最小 buff 栏桩（在栏语义,
+ *  无时长衰减——壳族 :10432 每拍重钉 5t/猛攻族梯子每拍 AddBuff,时长面不入本锁）。 */
+function fakeBeetleBuffs() {
+  const live = new Set<number>();
+  return {
+    live,
+    has: (t: number) => live.has(t),
+    apply: (t: number) => { live.add(t); },
+    remove: (t: number) => { live.delete(t); },
+  };
+}
+
 describe('BJ596 充能档：beetleOrbs 1/2/3 驱动 orb 体数（B3 计数域消费面）', () => {
   it('防御族梯子：180t/球,封顶 3（buff 95/96/97 → 1/2/3 档）', () => {
     const meter = new BeetleMeter();
-    const host: { beetleOrbs?: number } = { beetleOrbs: 0 };
-    for (let i = 0; i < 180; i++) meter.tick(host, false, true);
+    const host = { beetleOrbs: 0, buffs: fakeBeetleBuffs() };
+    for (let i = 0; i < 180; i++) meter.tick(host, false, true);   // counter 0→180,AddBuff(95)
+    meter.tick(host, false, true);                                 // ★BJ748 派生拍：orbs=1（counter=1）
     expect(host.beetleOrbs).toBe(1);
-    for (let i = 0; i < 180; i++) meter.tick(host, false, true);
+    for (let i = 0; i < 179; i++) meter.tick(host, false, true);   // counter 1→180,AddBuff(96)
+    meter.tick(host, false, true);                                 // 派生拍：orbs=2
     expect(host.beetleOrbs).toBe(2);
-    for (let i = 0; i < 180; i++) meter.tick(host, false, true);
+    for (let i = 0; i < 179; i++) meter.tick(host, false, true);   // counter 1→180,AddBuff(97)
+    meter.tick(host, false, true);                                 // 派生拍：orbs=3
     expect(host.beetleOrbs).toBe(3);
-    for (let i = 0; i < 1800; i++) meter.tick(host, false, true);   // 长充不越 3
+    for (let i = 0; i < 1800; i++) meter.tick(host, false, true);   // 长充不越 3（满档钉 180）
     expect(host.beetleOrbs).toBe(3);
   });
 
   it('进攻族：高蓄能直达 3 球（buff 98/99/100 → 1/2/3 档）;球数=档位差', () => {
     const meter = new BeetleMeter();
-    const host: { beetleOrbs?: number } = { beetleOrbs: 0 };
+    const host = { beetleOrbs: 0, buffs: fakeBeetleBuffs() };
     meter.registerHit(6000, true);                    // counter=6000 > 400+1200+3600=5200
-    meter.tick(host, true, false);
+    meter.tick(host, true, false);                    // −3→5997>5200 档3,AddBuff(100);num>orbs +200→6197
+    expect(host.beetleOrbs).toBe(0);                  // ★BJ748：本拍只 AddBuff,orbs 下拍派生
+    meter.tick(host, true, false);                    // 派生拍：orbs=3（counter 6197−3=6194）
     expect(host.beetleOrbs).toBe(3);
     // 掉到 1 档线以下 → 1 球（视觉差=球数随档）
-    meter.registerHit(-4597, true);                   // counter=6197−4597=1600（测试注水面）
-    meter.tick(host, true, false);                    // −3 → 1597 ∈ (400,1600] → 档1
+    meter.registerHit(-4597, true);                   // counter=6194−4597=1597（测试注水面）
+    meter.tick(host, true, false);                    // −3 → 1594 ∈ (400,1600] → 档1,AddBuff(98)
+    expect(host.beetleOrbs).toBe(3);                  // 换档拍 orbs 仍旧值（派生滞后一拍）
+    meter.tick(host, true, false);                    // 派生拍：orbs=1
     expect(host.beetleOrbs).toBe(1);
   });
 

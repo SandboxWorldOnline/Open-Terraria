@@ -69,7 +69,8 @@ import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters, 
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
 import { ghostHealProc, ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源（★BJ424-T3 补 ghostHurt 漏斗面）
 import { nebulaBoosterOnHit } from './NebulaBooster';   // ★BJ424-T3 星云套装 on-hit 单源（自持命中环面收编）
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ489 def-3 掷率单源（函数声明环=运行时调用安全）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ489 def-3 掷率单源;★G37-A：crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
 import { TILE } from '../core/constants';
 import { runModModifyHitNpcByProj } from '../mods/hooks';   // ★D2:独立结算面补钩
 
@@ -223,10 +224,11 @@ export class BeamBoltProj extends Entity {
       //  penetrate 1 受理即 killBeam（:14189-196 递减归零 → Kill 铺束同相）。
       if (hitTownNpcs(this, game, Math.max(1, Math.trunc(this.damage)), 0,
         'playerProj', this.projId, undefined, undefined, undefined, undefined,
-        (tn) => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+        (tn255) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+          crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn255, this.critChance > 0),
           penPercent: this.armorPen,
-          kb: Math.sign((tn as unknown as { x: number; w: number }).x
-            + (tn as unknown as { w: number }).w / 2 - this.cx) * this.knockback || 1 }))) {
+          kb: Math.sign((tn255 as unknown as { x: number; w: number }).x
+            + (tn255 as unknown as { w: number }).w / 2 - this.cx) * this.knockback || 1 }))) {
         this.pveNumHits++;
         this.killBeam(game);
         break;
@@ -239,7 +241,7 @@ export class BeamBoltProj extends Entity {
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         // ★BJ489 def-3：掷率=rollVanillaHitCrit（255/260 magic 旗,命中拍 owner 装配+
         //  :25712 持械折入动态;critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
-        const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+        const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★G37-A（D6）：TimerCrit :12928 接单源
         // ★BJ395（2026-09-28,BJ393 同族债五处清偿④）：受理面谓词 vanillaGated。
         //   pierce=1 单发 flag3（:12635）免疫门豁免 → hurt 内 iframes 拒收不可达;
         //   dead 已 :206 前置 → 可达门拒仅 dontTakeDamage（:13978;原版外层
@@ -248,9 +250,11 @@ export class BeamBoltProj extends Entity {
         //   级联 :14369 族返假但伤害已实扣=原版受理 → 旧布尔闸下 ghostHeal/numHits
         //   对非致死命中整面不达（激光弹主导形态=under-fire）。
         const vanillaGated = e.dontTakeDamage === true;
-        // ★D2:独立结算面补钩(this.damage 值域→新变量承接)
+        // ★D2:独立结算面补钩;★G37-A（D6）：DV :12970 逐靶掷前置（WeaponProj dmgScale→
+        //  hook 同序;旧平值=census 外同形面 D6 残差随刀清偿）。
+        const dmg255 = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));
         const dmgHooked = runModModifyHitNpcByProj(game.player, game, (this as unknown as { projId?: number }).projId ?? -1,
-          (e as unknown as { vanillaId?: number }).vanillaId ?? -1, this.damage, false);
+          (e as unknown as { vanillaId?: number }).vanillaId ?? -1, dmg255, false);
                 e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(dmgHooked))),
           Math.sign(e.x + e.w / 2 - this.cx) * this.knockback, 0, game,
           this.armorPen, crit, 1, true);     // pierce=1 单发 flag3（:11904 语义）

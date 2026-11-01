@@ -83,8 +83,16 @@ export class SlimeGlob extends Entity {
       if (hitNpc) { this.killBurst(game); this.dead = true; return; }
 
       // 其它玩家侧(:29485-29499 flag25 支):排除射手外的其它玩家 ApplyBuffTo(137,180)
-      // +Kill(:29494);单人模式恒无目标(GlobProj 同位段先行例)。本仓 Player 域无
-      // Slimed 消费面(slimedT 火系 ×2 只挂 Enemy),跳过并在此登记为偏差
+      // +Kill(:29494);单人模式恒无目标(GlobProj 同位段先行例)。
+      // ★BJ739 B11 定谳（2026-10-31,issue#29）：玩家侧 Slimed(137) 消费面已全量建模
+      //  （BuffType.Slimed——drippingSlime 六火族 DoT 翻倍 UpdateLifeRegen :19102-19179
+      //  + Main.debuff[137] 归位）;产源仍缺 = 登记债 BJ739-A D-①：
+      //  ①victim-settles 架构下 shooter→远端玩家的 buff 传播无通道（msg50 SendPlayer
+      //    Buffs 未实现[VanillaClient default 分支静默记账]+remotePlayerProxies 无 buff
+      //    同步[Game.simulateRemotePlayers 注「proxy 无 buff 同步」]——对代理 apply
+      //    = 零观察面死码,不落）;②远端射手→本地玩家路径需弹幕傀儡 AI 玩家臂或
+      //    msg27 附载 buff 面（净协议面,另刀）。 mods/未来产源/测试经
+      //  buffs.apply(BuffType.Slimed) 即达消费面
 
       // 液体触杀(num452==137 支 :29531-29555):覆盖格任一液面线低于 Bottom 即 Kill
       // (:29553);水面偏移 num469=(256−liquid)/32 整除×2px——入液即爆

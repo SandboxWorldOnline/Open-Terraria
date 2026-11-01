@@ -1370,7 +1370,12 @@ export class TownNPC extends Entity {
    *   :6912-7040）的城镇靶受理面。gate 细节见函数体 face 2 块注。 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks,
     penPercent = 0, flatPen = 0, crit = false, force = false,
-    fromPlayer = false, srcProjId = 0): boolean {
+    fromPlayer = false, srcProjId = 0,
+    /** ★BJ739 B19（2026-10-31）：Nano ×1.05（melee||IsAWhip 弹/鞭）——原版位 =
+     *  Projectile.cs:13684-13690 checkArmorPenetration 加伤后 (int)(dmg×1.05)。
+     *  在 penAdd 并入后、防御减算前施加;缺省 1 = 既有调用面零扰动（Enemy.hurt
+     *  同参同序注） */
+    nanoMul = 1): boolean {
     if (this.dead) return false;
     // force=true = 内部直击通道(StrikeNPCNoInteraction owner=255 同形):不查
     // 无敌帧也不查 dontTakeDamage(原版 StrikeNPC 全链两者皆不读)
@@ -1461,7 +1466,9 @@ export class TownNPC extends Entity {
       dmg = Math.max(1, Math.trunc(runModNpcIncomingHit(this as never, dmg)));
     }
     const penAdd = npcCheckArmorPenetration(def, flatPen, penPercent, {});
-    let calc = dmg + penAdd - def * 0.5;
+    // ★BJ739 B19：Nano ×1.05 在 penAdd 之后（(int)((dmg+pen)×1.05),P.cs:13690）
+    const strikeBase = nanoMul !== 1 ? Math.trunc((dmg + penAdd) * nanoMul) : dmg + penAdd;
+    let calc = strikeBase - def * 0.5;
     if (calc < 1) calc = 1;
     dmg = Math.trunc(calc * (crit ? 2 : 1));
     this.hp -= dmg;
@@ -1763,7 +1770,8 @@ export class TownNPC extends Entity {
    *  :91484 lifeRegenCount 对全体 NPC 结算）。速率（HP/s）：onFire 4(:92616) /
    *  onFire3 15(:92632) / frostburn2 25(:92668) / poison 6(:92584) / venom 30(:92703) /
    *  cursed 24(:92684) / potentAcid 90(:92751 AddPoison(180,60)) / eelWhip 50(:92781
-   *  裸 Add 不可加速）。可加速池（398,SupportAcceleration :127-131 → :92840-92847）
+   *  裸 Add 不可加速）/ bleed 12(:92592-92601 AddBloodLoss,★BJ742-A R21-⑤)。
+   *  可加速池（398,SupportAcceleration :127-131 → :92840-92847）
    *  = AddPoison/AddBloodLoss/AddFlamable 三族 = 毒(20/70/395)+六火系(24/39/323/324);
    *  裸 Add（362）不吃。Slimed(137) 六火系翻倍（AddFlamable :113-115）。扣血面 =
    *  裸 hp 减（DoT 不过防御/iframes——原版 lifeRegen 独立管线）,致死经 force hurt
@@ -1781,13 +1789,17 @@ export class TownNPC extends Entity {
     if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * accelMul * dt; }
     if (this.potentAcidT > 0) { this.potentAcidT -= dt; this.potentAcidDoT += 90 * accelMul * dt; }
     if (this.eelWhipT > 0) { this.eelWhipT -= dt; this.eelWhipDoT += 50 * dt; }
+    // ★BJ742-A R21-⑤：bleed 30 = AddBloodLoss 可加速池（:127-131）12 HP/s（:92592-92601）;
+    //   stinky 120 纯倒数（染色/换目标消费面未建,字段注登记）
+    if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * accelMul * dt; }
+    if (this.stinkyT > 0) this.stinkyT -= dt;
     if (this.slimedT > 0) this.slimedT -= dt;
     if (this.acceleratePoisonsT > 0) this.acceleratePoisonsT -= dt;
     if (this.ichorT > 0) this.ichorT -= dt;
     if (this.midasT > 0) this.midasT -= dt;
     // 小数累计结算（⌊acc⌋ 扣血,DOTTally 家族同式）
     for (const dKey of ['onFireDoT', 'onFire3DoT', 'frostburn2DoT', 'poisonDoT',
-      'venomDoT', 'potentAcidDoT', 'cursedDoT', 'eelWhipDoT'] as const) {
+      'venomDoT', 'potentAcidDoT', 'cursedDoT', 'eelWhipDoT', 'bleedDoT'] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);
@@ -1890,6 +1902,17 @@ export class TownNPC extends Entity {
   slimedT = 0;             // 137 Slimed 纯倒数+六火系 ×2 消费位（:92623 等）
   eelWhipT = 0;            // 362 EelWhip 50 HP/s 平铺（:92781 Add(100,50),裸 Add 不可加速）
   acceleratePoisonsT = 0;  // 398 可加速族 DoT ×2（:92840-92847）
+  // ★BJ742-A R21-⑤（2026-10-31）：城镇挥砍站 StatusToNPC 块两载体补齐——
+  //  · bleedT 30 Bleeding（StatusToNPC :6543-6546 血腥砍刀 3352 → AddBuff(30,
+  //    60×Next(4,7))）：DoT 12 HP/s（:92592-92601）+ 可加速池（AddBloodLoss
+  //    :127-131 同毒族）——Enemy.bleedT 同式;
+  //  · stinkyT 120 Stinky（:6570-6573 苍蝇美食 5129 城镇命中 → AddBuff(120,300t)=5s,
+  //    FlyMeal 城镇域标志交互）：纯倒数。原版 NPC 侧消费 = 染色 R×0.7 B×0.55
+  //    （:92208-92213 GetNPCColor 全 NPC 共环）+ 敌怪 TargetClosest 换目标
+  //    （:53888/:53899）——染色/换目标两消费面 TownNPC 渲染/AI 域未建载体
+  //    （D-BJ742-⑤ 登记:与 Enemy 既有 stinky 染色同族,城镇渲染链无 debuff 染色位）。
+  bleedT = 0;              // 30 Bleeding 12 HP/s（:92592-92601）
+  stinkyT = 0;             // 120 Stinky 纯倒数（:92208 染色消费面未建,登记）
   // DoT 小数累计器（DOTTally 家族：tick 累入 dps×dt、⌊acc⌋ 扣血保小数,同 Enemy）
   private onFireDoT = 0;
   private onFire3DoT = 0;
@@ -1899,6 +1922,7 @@ export class TownNPC extends Entity {
   private potentAcidDoT = 0;
   private cursedDoT = 0;
   private eelWhipDoT = 0;
+  private bleedDoT = 0;
 
   /** ★X1 face 2 伴生：StrikeNPC 实扣值镜像（num41 等位,Enemy.lastStrikeDealt 同名
    *  同义）。入口清零/受理写实扣（防后）——ghostHealProc :13877 的 num41 消费端

@@ -19,6 +19,7 @@
 // 运行：cd game && npx vitest run tests/bj395-hurt-accept-plane.test.ts
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Arrow } from '../src/entities/Arrow';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ704-G10（G1 债②）：idStaticCheck GTW tick 钟钉拨
 import { FallingStar } from '../src/entities/FallingStar';
 import { ForbiddenSignProj } from '../src/entities/ForbiddenSignProj';
@@ -242,7 +243,13 @@ describe('BJ395 ④ MagnetSphere:211 受理面=!vanillaGated（pierce=1 flag3,�
     const { hooks, steal } = makeGame([e]);
     const bolt = new BeamBoltProj(2000, 2000, 6, 0, 48, 6);
     bolt.fixedUpdate(1 / 60, hooks);
-    expect(e.hits).toEqual([48]);                       // 实扣（返假形态自证）
+    // ★G37-A（D6,2026-10-31）改判史：255 敌臂补 DV :12970 逐靶掷（census 外同形面
+    //  随刀清偿）→ 旧平值钉 [48] 改 31 档 DV 域锁（bj735a 判例形,mock rnd 0.5=tier0
+    //  恒等档保持 48 断言域不变）。
+    const dvDomain395 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain395.add(damageVarRoll(48, 0, () => i / 31));
+    expect(e.hits.length).toBe(1);
+    expect(dvDomain395.has(e.hits[0])).toBe(true);      // 实扣（返假形态自证）
     expect(steal).toEqual([{ kind: 'ghost', numHits: 0 }]);   // :13877-79 proc
     expect((bolt as unknown as { pveNumHits: number }).pveNumHits).toBe(1);   // :14263
     expect(bolt.dead).toBe(true);                       // 单发照常回收（命中位铺束链不受判据影响）

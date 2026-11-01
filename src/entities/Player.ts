@@ -19,6 +19,7 @@ import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, playerProject
 // ★Forbidden 禁戒套引擎面（组C 终盘 2026-09-18）——656 弹实体 + 几何/预览尘助手
 import { ForbiddenSignProj, canSpawnSandstormFriendly, aimingLaserScan, spawnStormPreviewDust } from './ForbiddenSignProj';
 import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldownBuckets';
+import { BeetleMeter } from '../player/BeetleMeter';   // ★BJ745 A16：Hurt 掉球步 buff 栏维护（懒建——Game.tick 前的首拍命中）
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
@@ -891,7 +892,10 @@ const IMMUNE_ACC: Record<number, number[]> = {
   885: [30], 886: [36], 887: [20], 888: [22],
   889: [32], 890: [35], 891: [23], 892: [33], 893: [31],
   3781: [156],
-  901: [33, 36], 902: [30, 20], 903: [32, 31], 904: [35, 23, 22],
+  901: [33, 36], 902: [30, 20], 903: [32, 31],
+  // ★BJ740-A ACC14（issue #30）：904 反诅咒咒语只免疫沉默 35+诅咒 23（:15633-15637
+  //   两行,亲读）——旧多写 22 黑暗（5354 才是 22+156 族）,904 额外消除黑暗
+  904: [35, 23],
   5354: [22, 156], 1921: [46, 47],
   1612: [33, 36, 30, 20, 32, 31, 35, 23, 22, 156],
   1613: [46, 33, 36, 30, 20, 32, 31, 35, 23, 22, 156],
@@ -1264,6 +1268,14 @@ export class Player extends Entity {
    *  （回满兜住 DoT/溺水/摔落等直改 hp 的路径）。仅本地调试语义，不入存档 */
   debugGod = false;
   shieldRaised = false;      // 格挡盾举起(:31263)
+  /** ★G36-A D2（BJ740 登记债清偿）：ownedProjectileCounts[866]（中士联合盾 4760 的
+   *  盾击弹 Boomerang projId 866）在飞谓词——UpdateProjectileCaches :12271 每 tick
+   *  重算的等价快照,fixedUpdate 维护（damage() 无 game 参）;消费 = shouldGuard
+   *  4760 持有支（UpdateEquips :13174-13178 `HeldItem.type==4760 &&
+   *  ownedProjectileCounts[866] < 1` → hasRaisableShield——盾掷出期间无举盾资格）。
+   *  ★G39-A（g36a D-⑩）:公开化——Renderer 25_Shield 绘制消费点读同源快照
+   *  （4760 持盾视觉 shield=9/染料清 0,Player.cs:37090-37094）。 */
+  heldShield866InFlight = false;
   shieldParryTimeLeft = 0;  // 格挡窗口(:30981 >0 面敌免疫+反伤2×)
   shieldParryCd = 0;        // 降盾冷却(:31276 15t)
   /** ★R2-H2 桥（蓝队二轮，跨界最小补——接触反伤区由并行段已写入本旗，
@@ -1435,9 +1447,14 @@ export class Player extends Entity {
   deathsPve = 0;
   /** PvP 死亡计数（Player.numberOfDeathsPVP，KillMe :38228 按 pvpDeath 分道计数） */
   deathsPvp = 0;
-  /** 圣骑士盾转移冷却（hurtCooldowns[ImmunityCooldownID.PaladinsShield] 槽近似,
-   *  Player.cs:37756-37763——独立于常规无敌帧;Game.fixedUpdate 递减） */
-  paladinShieldCd = 0;
+  /** ★BJ740-A ACC11：defendedByPaladin 剩余 tick（buff 43 镜像——Player.cs:11970-11973
+   *  buffType==43 → defendedByPaladin=true;授予 = 队友圣骑士盾光环 ApplyEquipFunctional
+   *  :15474-15487（938/3997/3998+HP>25%+同队≠0,800px 内,每 10t 刷 20t）。圣骑士盾
+   *  转移【发起门】读此位（旧误读受害者自持盾 = 无盾队友永不可被保护,issue #30
+   *  ACC11）;Game.fixedUpdate 递减 + 光环维护。
+   *  ★同刀 ACC13：旧 paladinShieldCd 独立字段退役（转移冷却改走 hurtCooldowns[5]
+   *  桶,Player.damage 写回/桶表 tick 承载,字段全树零引用已删） */
+  defendedByPaladinT = 0;
   /** 钛金屏障 on-hit 冷却（Player.cs:6919 titaniumStormCooldown>0 门,10t） */
   titaniumStormCd = 0;
   /** 山铜花瓣/叶绿叶弹共享 on-hit 计时（Player.petalTimer :1165,OnHit :6963 花瓣=20/
@@ -1585,6 +1602,12 @@ export class Player extends Entity {
    *  旧注"十字盾族第 6 门未实装恒 0"系门源误标——该 timer 与十字盾无关,是
    *  Teleport 的环境免疫窗。仓内 Teleport 等价位=shimmerUnstuck(微光脱困传送) */
   environmentBuffImmunityTimer = 0;
+  /** ★G39-A（g36a D-⑨,2026-11-01）：传送头段 FUNKYTOWN/墓地成就检查冷却
+   *  （Player.cs:3029 `_funkytownAchievementCheckCooldown`;Teleport :37702 置 100,
+   *  每 tick 递减 :16868-16870;消费 :16880/:16884 ZoneGlowshroom/ZoneGraveyard
+   *  检查门——冷却内不触发 FUNKYTOWN(15)/FOUND_GRAVEYARD(18) 成就,防传送落点
+   *  即刻误触发）。仓内检查面=Game 群系到达块(15t 节流形,Game.ts 成就段)。 */
+  funkTownCd = 0;
   /** 原版 itemAnimation 等效（>0 = 挥舞动画中）：芦苇管换气门禁（:22920/:3698）
    *  用。Game.fixedUpdate 每帧注入（swing 在 postUpdate 递减，读到的是上一帧尾值，
    *  ≤1 tick 偏差，注释存档） */
@@ -1707,6 +1730,11 @@ export class Player extends Entity {
   /** 夜/日食相位（fixedUpdate 每帧从 world 灌入：!isDay || eclipse——月亮石 900
    *  :14871-14874 的天界石复合门）。equipStats 记忆化输入 → equipStatsKey 的 N/d 档 */
   nightPhase = false;
+  /** ★BJ740-A ACC07：Main.dayTime 镜像（fixedUpdate 每帧从 world 灌入 isDay——含
+   *  日食期仍为 true）。太阳石 899 天界石门 :15531 用裸 dayTime（非 900 的复合门）,
+   *  nightPhase 无法反推（nightPhase=true 可能是夜也可能是日食）。equipStats
+   *  记忆化输入 → equipStatsTailKey tag13 第二混入位 */
+  dayTime = true;
   /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费）
    *  ——兼作散飞体渐隐（GetImmuneAlpha :53253：(255−值)/255，>125 直接全透明） */
   immuneAlpha = 0;
@@ -1733,6 +1761,17 @@ export class Player extends Entity {
   private eyeTimeInState = 0;
   // 摔伤追踪
   fallStartY: number | null = null;   // 矿车骑乘同步清空（车上不计摔伤），公开给 Minecart
+  /** ★BJ738 P01（2026-10-31,issue #28）：回归药水 4870 双锚（Player.cs:2463/:2465）。
+   *  originalUsePosition = 饮用点 Bottom（DoPotionOfReturnTeleportationAndSetTheComebackPoint
+   *  :37785 【传送前】快照）;homePosition = 回家落点 Bottom（:37790 【Spawn 后】快照）。
+   *  消费端 = PotionOfReturnGateInteractionChecker.PerformInteraction →
+   *  DoPotionOfReturnReturnToOriginalUsePosition（:37796-37807：Teleport(newPos,8)
+   *  回饮用点 + 双锚清空——「回家门」一次性返程门）。世界像素,Bottom 语义
+   *  （脚底中心 = x+w/2, y+h）。runtime-only：原版不进 TagCompound 存档
+   *  （Save/Load 无该字段,仅 msg13 MP 同步 :478-:504）——本仓单机权威端不序列化,
+   *  存档重开=锚清空（与原版一致）。null = 无在途回程。 */
+  potionOfReturnOriginalUsePosition: { x: number; y: number } | null = null;
+  potionOfReturnHomePosition: { x: number; y: number } | null = null;
   /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */
   private stickyBreak = 0;
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
@@ -2065,11 +2104,16 @@ export class Player extends Entity {
     for (const s of signs) {                                                 // :57537-57545
       if (s.ai0 < 780) s.ai0 = 780 + (s.ai0 % 60);                           // 旧根前跳死亡相位
     }
-    const es = this.equipStats;
     // :57546 (int)(20×(1+magicDamage+minionDamage−2))——原版 magicDamage/minionDamage
-    // 为 1.0 基线全乘区,本仓 dmgMagic/minionDmg 为 0 基线加算累加器 ⇒ X+Y−1 =
-    // (1+X')+(1+Y')−1 = 1+X'+Y'（零加成 = 20 基伤,组C 终盘换算勘误 2026-09-18）
-    const damage = Math.trunc(20 * (1 + (es.dmgMagic ?? 0) + (es.minionDmg ?? 0)));        // :57546（★BJ175 桩面 ?? 防御,缺省 0）
+    // 为 1.0 基线【完整乘区】（buff/装备/坐骑/眩晕过热乘区全并——KeyDoubleTap 于
+    // Update :25214 早于 ResetEffects,读的是上拍末态全值）。
+    // ★BJ745 A28（issue#35,2026-11-01）：旧读 es.dmgMagic/es.minionDmg 装备面
+    // 0 基线累加器——漏 MagicPower/怒气/食物/星云/坐骑等非装备源（魔法强效 +20%
+    // 时禁戒套 25/25 实际 30,应 34）。damageMult('magic')/summonDamageMult =
+    // 同全池现算（manaSick/manaHeat/枯萎乘区在内=原版字段末态同构）。
+    // 换算：magicDamage+minionDamage−1 = (1+m)+(1+n)−1 = 1+m+n（零加成 20 基伤,
+    // 组C 终盘换算勘误 2026-09-18 保持）
+    const damage = Math.trunc(20 * (this.damageMult('magic') + this.summonDamageMult - 1));
     // C# float→int 截断同式（(int) 溢出 clamp 不建模——20×乘区量级无溢出面）
     const ent = game as unknown as {
       entities?: { add?: (e: unknown, bucket?: string) => void };
@@ -2151,7 +2195,7 @@ export class Player extends Entity {
   nebula = [0, 0, 0];
   private nebulaT = [0, 0, 0];
   private nebulaManaAccum = 0;
-  private nebulaLifeAccum = 0;
+  // ★BJ747 A18：nebulaLifeAccum 已随独立直写 hp 拆除（迁 Buffs.tick 公共 heal 账）
   /** NebulaLevelup（:56091-56121）：本族 +1 级 cap3，满 480t 重置（拾取驱动） */
   nebulaLevelup(family: 0 | 1 | 2): void {
     this.nebula[family] = Math.min(3, this.nebula[family] + 1);
@@ -2503,11 +2547,36 @@ export class Player extends Entity {
     if (this._equipStatsCache !== null && key === this._equipStatsKey) return this._equipStatsCache;
     this._equipStatsKey = key;
     const stats = this.computeEquipStats();
+    // ★BJ738 改判史（P04,2026-10-31 定谳=真回归）：贤者石穿卸当场调整【现役】
+    //  药水病（AdjustRemainingPotionSickness,Player.cs:29167-29181;调用位 :25839
+    //  `if (flag9 != pStone)`——flag9 于 :25672 在装备重聚合【前】快照,原版每帧
+    //  UpdateEquips 重算 pStone,翻转帧即调）。本仓 equipStats=内容键记忆化,重算
+    //  恰发生在「装备内容变更后的首次访问」=同一翻转拍 → 在重算位比对前后
+    //  pStone 即原版同拍语义。旧实现只影响新喝药分档与 UI 分母,现役剩余时长
+    //  不动（装石头 40s 不缩到 30s）。
+    if (this._equipStatsCache !== null && this._equipStatsCache.pStone !== stats.pStone) {
+      this.adjustRemainingPotionSickness(stats.pStone);
+    }
     Object.freeze(stats);
     Object.freeze(stats.jumpOpts);
     if (stats.wing) Object.freeze(stats.wing);
     this._equipStatsCache = stats;
     return stats;
+  }
+
+  /** AdjustRemainingPotionSickness（Player.cs:29167-29181）1:1：定位 buff 21（药水病）
+   *  剩余时长,按贤者石新态 ×0.75 / 卸下 ÷0.75,写回 (int) 截断。
+   *  入参 pStoneNow = 重算后的新 pStone（原版读翻转后字段）。本仓 Buffs.active
+   *  存秒 → tick 域换算 sec×60,截断后回写 /60。whoAmI==Main.myPlayer 门为 MP 面
+   *  （本仓权威端单机/房主恒真,不建模）。 */
+  private adjustRemainingPotionSickness(pStoneNow: boolean): void {
+    const cur = this.buffs.active.get(BuffType.Resistance);
+    if (cur === undefined) return;   // FindBuffIndex(21) == -1 早退（:29171-29173）
+    const ticks = cur * 60;          // buffTime（float num2 = buffTime[num]）
+    const adjusted = pStoneNow
+      ? Math.trunc(ticks * 0.75)     // (int)(num2 × PhilosopherStoneDurationMultiplier)
+      : Math.trunc(ticks / 0.75);    // (int)(num2 ÷ multiplier)——卸下反向放大
+    this.buffs.active.set(BuffType.Resistance, adjusted / 60);
   }
   private _equipStatsCache: PlayerEquipStats | null = null;
   private _equipStatsKey = 0;   // ★IIIII250:双 FNV 数值键(原字符串键退役,见 getter 注)
@@ -2652,7 +2721,9 @@ export class Player extends Entity {
     mix(12);
     mix(this.vampireBurningInSunlight ? (this.sunScorchCounter >= 120 ? 2 : 1) : 0);
     // 夜/日食相位（月亮石 900 天界石复合门 :14871-14874——昼夜翻转帧必须重算）
-    mix(13); mix(this.nightPhase ? 1 : 0);
+    // ★BJ740-A ACC07：tag13 增混 dayTime 位（899 门输入;nightPhase 无法反推 isDay
+    //   ——nightPhase=true 可能是夜也可能是日食,两位合取才完整覆盖 (isDay,eclipse)）
+    mix(13); mix(this.nightPhase ? 1 : 0); mix(this.dayTime ? 1 : 0);
     // ★清偿刀 U：expertOnly 效益门输入位（:13018/:14475 Main.expertMode——
     //   旅程滑杆改档翻转帧必须失效;gateExpert∨gateMaster ≙ World.isExpert≥EXPERT）
     mix(14);
@@ -2660,6 +2731,14 @@ export class Player extends Entity {
     mix(this.inv.gateMaster ? 1 : 0);
     mix(15);
     for (const bt of this.buffs.active.keys()) mix(bt);
+    // ★BJ742-A R20-①：日曜冲撞门输入位（computeEquipStats 的 sb.dashType 盾门读
+    //   solarShields/solarDashing/dashDelay<0——Player.cs:16549-16553）——盾耗
+    //   （冲撞命中 ConsumeSolarFlare）/回充（180t 一层）/滑行起止任一翻转拍必须
+    //   失效缓存,否则 0 盾拍拿着旧 dash=3 白送冲撞。
+    mix(18);
+    mix(this.solarShields);
+    mix(this.solarDashing ? 1 : 0);
+    mix(this.dashDelay < 0 ? 1 : 0);
     return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 2097151);
   }
 
@@ -2749,14 +2828,16 @@ export class Player extends Entity {
     let hasFloatingTubeVis = false;   // hasFloatingTube（4404 可见轮——功能槽 !hide 门 ∪ 社交槽无条件,注释见接口字段）
     let shimmerImmune = false;   // Player.shimmerImmune（5355 幻彩斗篷 :15643-46）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
-  let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
-  let dontHurtCrittersAcc = false;   // ★E（4767 善待小动物指南/5323 双件——RefreshMechanicalAccsFromItemType Player.cs:12922-12924）
-  const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
-  // ★F3 机械旗聚合器（GrantArmorBenefits 装备位 ∪ 背包 58 格 ∪ 虚空袋三路共用）
-  const mech: MechanicalAccFlags = {
-    mechShowWires: false, autoActuator: false, autoPaint: false, dontHurtCritters: false,
-    preventAllItemPickups: false, hasLucyTheAxe: false, oldStyleParkour: false,
-  };
+    let accFishingBobber = false;   // ★BJ740-A ACC03：Player.accFishingBobber（:1181,5139-5146 全族布尔——fishingSkill+10 单计 :13084）
+    // ★BJ743-A（R20 化妆品债,2026-10-31）：本块原 2 空格缩进归位 4 空格（纯排版零语义）。
+    let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
+    let dontHurtCrittersAcc = false;   // ★E（4767 善待小动物指南/5323 双件——RefreshMechanicalAccsFromItemType Player.cs:12922-12924）
+    const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
+    // ★F3 机械旗聚合器（GrantArmorBenefits 装备位 ∪ 背包 58 格 ∪ 虚空袋三路共用）
+    const mech: MechanicalAccFlags = {
+      mechShowWires: false, autoActuator: false, autoPaint: false, dontHurtCritters: false,
+      preventAllItemPickups: false, hasLucyTheAxe: false, oldStyleParkour: false,
+    };
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSaveHuntress = false, ammoSaveChloro = false, ammoSaveCost80 = false, ammoSaveCost75 = false;
     let kbGlove = false, yoyoString = false, autoReuseGlove = false;
@@ -2765,7 +2846,7 @@ export class Player extends Entity {
     //（Player.cs:36441-36449：5540/5541→29 在前、item.stringColor>0 在后，槽序 3-9→13-19）
     let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
-    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）
+    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）（★BJ743-A:原行粘贴重复已清）
     let crystalLeaf = false;     // 叶绿水晶叶套（台账 L3 清偿批 2026-08-31,:128-146 四头变体）
     let onHitRegen = false;      // 帕拉钯全套 onHitRegen（ArmorSetBonuses.cs:217-220,终零波批）
     let onHitPetal = false;      // 山铜全套 onHitPetal 花瓣弹 221（:222-226,终零波批）
@@ -2976,20 +3057,31 @@ export class Player extends Entity {
       if (accVid === 984) spikedBoots = 2;
       if (accVid === 5465) hasDeadCellsDownDash = true;   // 重锤符文下砸链（★BJ534 :14498-14501——下砸触发谓词装备源）
       if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
-      // 天界石复合门（1457 :15531-15535 / 1458 :15529-15533 双版同值）：太阳石 899
-      // `Main.dayTime`（日食中 dayTime 仍真 → 日食期关闭）、月亮石 900
-      // `(!Main.dayTime || Main.eclipse)`。本仓 nightPhase ≙ !isDay||eclipse（Game
-      // 每帧灌入 :4576）⇒ !nightPhase ≙ day&&!eclipse 精确等价；昼夜/日食翻转帧由
-      // equipStats 内容键 'N'/'d' 位失效缓存。
-      if (accVid === 899 && !this.nightPhase) skyStone = true;
+      // 天界石复合门（1457 :15527-15537）：太阳石 899 = `Main.dayTime`（裸白天门——
+      // 日食发生在白天,dayTime 仍真 ⇒ 899 日食中【保持生效】）;月亮石 900 =
+      // `(!Main.dayTime || Main.eclipse)`（夜晚 ∪ 日食）。
+      // ★BJ740-A ACC07（issue #30,2026-10-31 定谳=真回归）：旧两门共用 nightPhase
+      //   ≙ !isDay||eclipse ⇒ 899 被改写成 day&&!eclipse,日食期天界石复合（再生+2/
+      //   防+4/四系伤暴+攻速/镐速/召唤击退）整面误关。旧注释自称「!nightPhase ≙
+      //   day&&!eclipse 精确等价」系把 900 的复合门错套到 899 上（改判史:本刀翻案）。
+      //   修 = 899 走新增 dayTime 域（Game 每帧灌入,fixedUpdate :9374 段）;900 保持
+      //   nightPhase。昼夜/日食翻转帧由 equipStats 尾段键 tag13 双位（nightPhase+dayTime）
+      //   失效缓存。
+      if (accVid === 899 && this.dayTime) skyStone = true;
       if (accVid === 900 && this.nightPhase) skyStone = true;
       if (accVid === 267) killGuide = true;
       else if (accVid === 1307) killClothier = true;
-      // 浮漂饰品 5139-5146（Player.cs:14121-14124 accFishingBobber → fishingSkill+10
-      // :12552-12554；UpdateFishingBobber :36244-36272 → overrideFishingBobber=986+(vid-5139)）
+      // 浮漂饰品 5139-5146（Player.cs:14766-14772 八件 → accFishingBobber=true;消费
+      // :13084-13087 `if (accFishingBobber) fishingSkill += 10` 全族只加一次。弹型
+      // 覆写 UpdateFishingBobber :36956-36984 直赋 986+(vid-5139),两调用点 =
+      // ApplyEquipFunctional :14483-14493 !hideVisibleAccessory 门内 ∪ ApplyEquipVanity
+      // :14335-14340 无 hide 门（时装槽后写覆盖功能槽）;钓力旗不受 hide 门。
+      // ★BJ740-A ACC03/19（issue #30）：旧逐件 fish += 10（双浮漂 +20,应全族 +10）
+      //   与 Math.max 取大色档（低档后槽/隐藏/时装永不可达）均族叠/取大错——
+      //   改布尔族 + !hide 门内槽序直赋（下方时装环 13-19 另有直赋位）
       if (accVid >= 5139 && accVid <= 5146) {
-        fish += 10;
-        bobberOverride = Math.max(bobberOverride, 986 + (accVid - 5139));
+        accFishingBobber = true;
+        if (!this.hideVisibleAccessory[i]) bobberOverride = 986 + (accVid - 5139);
       }
       // 十字章免疫族（Player.cs:14911-15003 buffImmune 逐件赋值——vanilla buff id）
       const immune = IMMUNE_ACC[accVid];
@@ -3114,16 +3206,28 @@ export class Player extends Entity {
       //   狂战士手套/冰冻盾/英雄盾/6177/6183 防御不叠，仅 6188 由 BEHAVIOR_FX 硬补）
       const itemDef = statOfInternal(s.id)?.def ?? 0;
       if (grantArmorBenefits && itemDef) def += itemDef;
+      // ★BJ740-A ACC10（issue #30）：举盾资格 hasRaisableShield（GrantArmorBenefits
+      //   :13222-13225 `if (armorPiece.shieldSlot > 0) hasRaisableShield = true`——
+      //   效果非视觉,无 hide 门;受理门同 grantArmorBenefits=CanItemGrantBenefits
+      //   :12965-12987 case 3-9 item.accessory）。单源 = vanilla-acc-drawslots.json
+      //   shield 列（Item.shieldSlot 提取,11 盾族 156/397/938/1613/3097/3810/3997/
+      //   3998/6177/6183/6188）。旧消费 `if (fx.shield) shieldItem = true` 的
+      //   fx.shield 键全 json 零源 = 死旗（AccFx.shield 字段退役）,线上 156 钴盾
+      //   资格恒 false、3823/4760 举盾门打不开。4760 持有支在消费端 shouldGuard。
+      if (grantArmorBenefits && (accDrawSlotsOf(accVid)?.shield ?? 0) > 0) shieldItem = true;
       if (fx) {
         if (fx.def) def += fx.def;
         if (fx.mana) mana += fx.mana;
         if (fx.life) life += fx.life;
         if (fx.move) move += fx.move;
         if (fx.fish) fish += fx.fish;
-        if (fx.shield) shieldItem = true;   // 钓具族+渔夫甲 fishingSkill（:12549-12556/:14115-14140/:13022-13027）
         if (fx.meleeSpd) meleeSpeed += fx.meleeSpd;
         if (fx.runSpeed) {
-          runSpeed = Math.max(runSpeed, fx.runSpeed);
+          // ★BJ740-A ACC05（issue #30）：Math.max 取大 → 槽序直赋（1457 UpdateEquips
+          //   :13028-13035 m=3..9 ApplyEquipFunctional 顺扫直赋,后槽覆盖前槽：
+          //   :15122 54→6f / :15494 898→6.75f——898(槽3)+54(槽4) 应 6、反向应 6.75;
+          //   旧 max 两序恒 6.75 = 后槽慢靴赋值失效）。尘型/染料侧效随靴件照写不变
+          runSpeed = fx.runSpeed;
           // 跑靴奔跑尘型（SpawnFastRunParticles :36285-36320 switch——按装备 vid 授予；
           // 后装覆盖先装，原版 CancelAllBootRunVisualEffects 语义）
           const vidDef = ITEM_DEFS[s.id];
@@ -3148,7 +3252,10 @@ export class Player extends Entity {
         if (fx.extraFall) extraFall += fx.extraFall;
         if (fx.lavaMax) lavaMax += fx.lavaMax;       // 熔岩护身符族：叠加（lavaMax += 420）
         if (fx.armorPen) armorPen += fx.armorPen;
-        if (fx.rocketBoots) rocketBoots = Math.max(rocketBoots, fx.rocketBoots);
+        // ★BJ740-A ACC06（issue #30）：Math.max → 槽序直赋（:15137 128 →
+        //   rocketBoots=(vanityRocketBoots=1) / :15507 5000→4 直赋,后槽覆盖：
+        //   5000(槽3)+128(槽4) 应 1、反向应 4;旧 max 两序恒 4）
+        if (fx.rocketBoots) rocketBoots = fx.rocketBoots;
         if (fx.autoJump) autoJump = true;
         if (fx.fireWalk) fireWalk = true;
         if (fx.noKnockback) noKnockback = true;
@@ -3162,7 +3269,11 @@ export class Player extends Entity {
         if (fx.jumpBoost) jumpBoost = true;
         if (fx.panic) panic = true;
         if (fx.starCloak) starCloak = true;
-        if (fx.dashType) dash = Math.max(dash, fx.dashType);
+        // ★BJ740-A ACC04（issue #30）：Math.max → 槽序直赋（:15166 977→dashType=1 /
+        //   :15170 3097→2 / :15179 984→1 均直赋,后槽覆盖前槽：3097(槽3)+977(槽4)
+        //   应 dash=1、反向应 2;旧 max 两序恒 2 = 后槽足具不能覆盖克盾,改变冲刺
+        //   /冲撞类型。注：984 spikedBoots=2 赋值 quirk 在上方 vid 门,不经本支）
+        if (fx.dashType) dash = fx.dashType;
         if (fx.blackBelt) blackBelt = true;
         if (fx.bees) bees = true;
         if (fx.carpet) carpet = true;
@@ -3211,11 +3322,15 @@ export class Player extends Entity {
         if (fx.manaFlower) {
           manaFlower = true;
           // 1457: 法力花增强（ApplyEquipFunctional case 3991 :14511-14516）——
-          // 新增 magicCrit += 5 / magicDamage += 0.05（manaCost -0.08 迁至
+          // magicCrit += 5 / magicDamage += 0.05（manaCost -0.08 迁至
           // UpdateEquips if(manaFlower) :13058-13062，本仓 Game 侧 ×0.92 已等价）。
           // ★仅 3991 裸法力花有此两项：4000/4001(:14561-14569)与 555(:15706-15709)
-          // 只置 manaFlower 旗，不吃增强
-          if (accVid === 3991) { critMagic += 5; dmgMagic += 0.05; }
+          // 只置 manaFlower 旗，不吃增强。
+          // ★BJ740-A ACC01（issue #30）：两项数值已由 vanilla-accfx.json '3991'
+          //   {critMagic:5,dmgMagic:0.05} 表承载（上方 critMagic/dmgMagic 消费行）,
+          //   旧手写 `if (accVid === 3991) { critMagic += 5; dmgMagic += 0.05; }`
+          //   与表双计（线上实测 dmgMagic=0.1/critMagic=10 翻倍）——删手写支勿动表
+          //   （555/4000/4001 三键无此两字段,单计语义保持）
         }
         if (fx.manaRegenBonus) manaRegenBonus += fx.manaRegenBonus;           // 魔力斗篷 982（:14383）
         // 1458 已删 982/6188/6189 的 delayBonus++（:15044）,数据面 vanilla-accfx 三键已清——
@@ -3264,6 +3379,9 @@ export class Player extends Entity {
         else meleeSpeed += (p - 76) / 100;        // 77-80：+1..4% 近战速度
       }
     }
+    // ★BJ740-A ACC03：浮漂族钓力单计（UpdateEquips :13084-13087 `if (accFishingBobber)
+    //   fishingSkill += 10`——全族只加一次,5139-5146 多戴不叠）
+    if (accFishingBobber) fish += 10;
     // 时装配饰槽 13-19 的线色（Player.cs:36361-36372 UpdateVisibleAccessories 第二轮：
     // 社交槽无条件走 UpdateVisibleAccessory——时装线饰品同样染线；yoyoString 不在此轮，
     // ApplyEquipFunctional 只扫功能槽）。★per-slot 隐藏定谳（2026-08-23）：社交槽
@@ -3289,6 +3407,10 @@ export class Player extends Entity {
       // 无 !hide 门——时装槽同样改声,同原版）
       const vSlotVanity = voiceSlotOfItem(vid);
       if (vSlotVanity > 0) voiceOverrideAcc = vSlotVanity;
+      // ★BJ740-A ACC19：浮漂弹型·社交槽（ApplyEquipVanity :14335-14340 同函数内
+      //   UpdateFishingBobber(currentItem) 无 hide 门——时装浮漂后写覆盖功能槽,
+      //   槽序直赋 986+(vid-5139);钓力旗 accFishingBobber 只在功能轮（:14766））
+      if (vid >= 5139 && vid <= 5146) bobberOverride = 986 + (vid - 5139);
       // 社交槽身上贴图（UpdateVisibleAccessories :36353-36361 第二轮：
       // UpdateVisibleAccessory 无 !hide 门,时装配饰贴图无条件生效,后写覆盖功能槽）
       if (vid > 0) accDrawApply(s, i);
@@ -3360,7 +3482,13 @@ export class Player extends Entity {
     // （召唤师链 minionSlots/minionDmg/... 声明已上移至配饰循环前——6175 循环内直加）
     minionDmg += accDmgMinion;   // accfx dmgMinion 通道（935/1301/3015 :14900/:14431/:14105）
     // 1457 鞭 tag 栈族（Player.maxTagEffects/tagEffectDuration/accSnakeBand :1187-1199）
+    // ★BJ740-A ACC02（issue #30）：三族改布尔（accSilverBracer/accMobiusStrip/
+    //   accWickedArmlet——1457 字段 :1193/:1195/:1197,置位面 ApplyEquipFunctional
+    //   :14616-14629/:14690-14715）,消费侧循环后单计（UpdateEquips :13068-13083
+    //   post-loop 范式）——旧 SUMMON_GEAR 逐件 tagDur/maxTag/whipRange 叠加,
+    //   6156+6163 得 5/4（应 3/3）、6158+6162 鞭程 0.2（应 0.1）
     let maxTagEffects = 1, tagEffectDuration = 1, accSnakeBand = false, accWickedArmlet = false;
+    let accSilverBracer = false, accMobiusStrip = false;
     // 原版 ApplyEquipFunctional armor[0-9] 单遍 = 盔甲三件 + 配饰各扫（SummonFx 同表直查）
     const sumFx = (s: { id: number } | null): void => {
       if (!s) return;
@@ -3393,9 +3521,10 @@ export class Player extends Entity {
       if (fx.meleeSpeed) meleeSpeed += fx.meleeSpeed;
       if (fx.move) move += fx.move;
       if (fx.mana) mana += fx.mana;
-      // 1457 鞭 tag 栈族（:13068-13083 if-chain 数值段）
-      if (fx.tagDur) tagEffectDuration += fx.tagDur;
-      if (fx.maxTag) maxTagEffects += fx.maxTag;
+      // 1457 鞭 tag 栈族（置位面 :14616-14629 组合件并集 + :14690-14715 尾批;
+      // ★BJ740-A ACC02 数值消费迁循环后单计,此处只置布尔族）
+      if (fx.silverBracer) accSilverBracer = true;
+      if (fx.mobiusStrip) accMobiusStrip = true;
       if (fx.snakeBand) accSnakeBand = true;
       if (fx.wickedArmlet) accWickedArmlet = true;
     };
@@ -3479,6 +3608,14 @@ export class Player extends Entity {
       if (!this.inv.isItemSlotUnlockedAndUsable(i)) continue;   // ★清偿刀 P :13044 门
       sumFx(effArmor(i));   // R4-19
     }
+    // ★BJ740-A ACC02：鞭 tag 族单计（1457 UpdateEquips :13068-13083 post-loop 消费
+    //   1:1——SilverBracer: tagEffectDuration+=2/maxTagEffects++;MobiusStrip:
+    //   maxTagEffects++/whipRangeMultiplier+=0.1;WickedArmlet: maxTagEffects++。
+    //   `minionDamage += 0f`（:13071-13072）为原版死代码不抄。组合件族成员并集后
+    //   各族只计一次：6156+6163 → 3/3、6158+6162 → max 2/鞭程 0.1）
+    if (accSilverBracer) { tagEffectDuration += 2; maxTagEffects += 1; }
+    if (accMobiusStrip) { maxTagEffects += 1; whipRange += 0.1; }
+    if (accWickedArmlet) { maxTagEffects += 1; }
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     // DD2 盔甲散件主属性（DD2_PIECE_FX——GrantArmorBenefits case 3798-3882 :13236-13342
     //  胸/腿件逐件扫描;2026-08-13 建,2026-09-03 对账批补 dmgMelee/dmgRanged/lifeRegen/
@@ -3528,7 +3665,12 @@ export class Player extends Entity {
     //        真日曜 Solar Flare = 2763-2765（aggro+300/lifeRegen+2/melee 面——accfx 行
     //        2763-2765 值经核对 :13987-14000 无误,由本环消费,aggro 走 AGGRO_ARMOR_PIECE）。
     for (const v of [hVid, bVid, lVid]) {
-      if (v === 1546 || v === 1547 || v === 1548) continue;
+      // ★BJ745 A01（2026-11-01,issue#35）：巫师帽 238 整行跳过——同 1546-1548 蘑菇矿
+      //   头先例（单源承载件整行跳过防双计）。accfx json '238'={dmgMagic:.05} 与显式
+      //   IIIII224 臂（:3563 gVid(0)===238 → dmgMagic+=0.05 + 十周年随从）同源同值,
+      //   2026-09-04 armorStat 环接线后双计成 +10%（原版 Player.cs:13352-13359 单加
+      //   +5%）。行为旗（十周年 maxMinions+1）仍在显式臂=单源不变。
+      if (v === 1546 || v === 1547 || v === 1548 || v === 238) continue;
       const afx = accFxJsonOfVid(v);
       if (!afx) continue;
       const sg = SUMMON_GEAR[v];
@@ -3606,7 +3748,7 @@ export class Player extends Entity {
       if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
       if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
       if (sb.solar) solarSet = true;
-      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②
+      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②（★BJ743-A:原行粘贴重复已清）
       if (sb.crystalLeaf) crystalLeaf = true;       // 叶绿三件套四头变体（L3 清偿批）
       if (sb.onHitRegen) onHitRegen = true;         // 帕拉钯全套（ArmorSetBonuses.cs:217-220,终零波批）
       if (sb.onHitPetal) onHitPetal = true;         // 山铜全套花瓣弹 221（:222-226,终零波批）
@@ -3615,7 +3757,19 @@ export class Player extends Entity {
       //   （vanillaArmorSets 单表召唤字段族）+ SUMMON_GEAR 散件链——
       //   HallowedSummoner+2 已由单表条目 slot 承载,勿双记）
       if (sb.ashWood) ashWood = true;               // ★Notes④ Ash Wood 全套
-      if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
+      if (sb.dashType) {
+        // ★BJ742-A R20-①（2026-10-31）：日曜 dashType=3 补盾门（Player.cs:16549-16553
+        //   `bool flag = solarDashing && dashDelay < 0; if ((solarShields > 0) | flag)
+        //   dashType = 3;`）——0 盾不落 3：回落配饰档（977/984→1、3097→2,ACC04 槽序
+        //   直赋链）或 0=无冲刺（旧 Math.max 恒 3=0 盾裸日曜套白送 21.9 冲撞+耗盾
+        //   判定面）。滑行期 flag 保持 3;水晶刺客 5 无门照旧。门输入三态
+        //   （solarShields/solarDashing/dashDelay<0）已入 equipStatsTailKey tag18
+        //   ——盾耗/回充（180t 一层）/滑行起止翻转拍缓存即失效,与原版
+        //   UpdateArmorSets 逐拍重导出同拍。
+        const solarDashGateOk = !sb.solar
+          || this.solarShields > 0 || (this.solarDashing && this.dashDelay < 0);
+        if (solarDashGateOk) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
+      }
       if (sb.fireWalk) fireWalk = true;
       // Molten 套 buffImmune[24] 门（Player.cs:15883 UpdateArmorSetsOld：裸 Molten
       // 三件套免疫 On Fire!——★阳光炽灼中不免疫，:15882 vampireBurningInSunlight 反门）
@@ -3631,6 +3785,11 @@ export class Player extends Entity {
       if (sb.buffImmune) for (const b of sb.buffImmune) immuneBuffs.add(b);   // Snow 46/47
                                                           // （immuneDirty 已由 size>0 覆盖翻转失效）
       if (sb.pickSpeed) pickSpeedOff += sb.pickSpeed;     // Mining 套 pickSpeed−0.1（:299-303）
+      // ★BJ742-A R20-②：sb.manaCostMul 乘区面自此【模组专用】——原版套装零使用者
+      //   （Jungle 迁 manaCostOff 加算池,ArmorSetBonuses.cs:278-281 manaCost-=0.16f;
+      //   全树 manaCost 零乘区）。DD2 散件 setManaCostMul 同为 2026-08-13 乘区退役
+      //   残面（3798 等已改 manaCostOff,DD2_PIECE_FX 无 manaCostMul 行）——两消费
+      //   位保留给 mod 套装/散件定义,原版路径恒 1 无扰动。
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
@@ -3795,7 +3954,13 @@ export class Player extends Entity {
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0) + modAcc.fish,   // +软糖虫(:12451)
       fishingTackle, lavaFishing, fishingLine,   // 钓具箱族/防熔钓族/断线免疫（R14-E6）
       royalGel,                     // 皇家凝胶 23 类史莱姆不索敌（Enemy 索敌门消费）
-      manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc,   // 耗魔加算折扣（:14040+:14561）
+      // ★BJ739 B05（2026-10-31）：水晶球预见(29) 耗魔 -2% 归位加算池（1457
+      //  Player.cs:11979 manaCost -= 0.02f——原版 1f 起单加算浮点池,与恩赐/魔力花
+      //  同池;消费 (int)(item.mana×manaCost) 单点截断 :5875/:5878）。旧折乘 0.98
+      //  并入 manaCostMul = Inept 爬藤杖 44 蓝多扣 1（trunc(44×0.86×0.98)=37 应
+      //  trunc(44×0.84)=36,issue#29 B05）。buffs.active 在 equipStatsTailKey
+      //  缓存键内,失效面覆盖
+      manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc + this.buffs.clairvoyanceManaCostOff,   // 耗魔加算折扣（:14040+:14561+:11979）
       toolboxRange, mechShowWires, autoActuator, magiluminescence,
       iceBarrierAcc, lavaRose, ashWood,   // ★Notes④ Ash Wood 全套（lava 双档+完全豁免源）
       cordage,
@@ -3804,9 +3969,7 @@ export class Player extends Entity {
       enduranceEq: setEndurance, solarSet,
       shieldItem,
       setBonus: sb,
-      // 水晶球预见(29) 耗魔 -2%（manaCost -= 0.02f，Player.cs:11485——原版与饰品同池
-      // 加算,本仓饰品侧为乘法聚合,折乘 0.98 并入;buffs.active 已在 equipStatsKey 缓存键内）
-      manaCostMul: manaCostMul * this.buffs.clairvoyanceManaCostMult,
+      manaCostMul,   // ★BJ739 B05：预见 -2% 已移 manaCostOff 加算池（上方）;本乘区只余 DD2 散件
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       maxTagEffects, tagEffectDuration, accSnakeBand, accWickedArmlet,
       whipSpd: summonSet?.whipSpd ?? 1,
@@ -3867,17 +4030,20 @@ export class Player extends Entity {
   /** 海龟套装（vanillaArmorSets.ARMOR_SET_BONUSES_VID '1316|1317|1318'——Benefits.Turtle
    *  :159-164/注册 :447 turtleThorns → 反伤 ×2 覆写（Game :39102 turtleSet?2:thorns）。
    *  ★BJ147 组D 收编：原内联槽检（hs99/bs65/ls54）→ 单表 vid 键;等价性由闸门全三元组
-   *  碰撞普查证明。★通道注：读裸 armor[]（原实现同,与 R4-19 effArmor 聚合链的分叉
-   *  = loadout 共享边缘登记债,组B/C） */
+   *  碰撞普查证明。★BJ745 A07（issue#35,2026-11-01）：读裸 armor[] → GetEffectiveArmor
+   *  （BJ147 组B/C 登记债清偿）——原版 ArmorSetBonus.QueryContext :20-24 三槽全走
+   *  player.GetEffectiveArmor（loadout 收藏共享跨装配在身,裸槽读=共享配装下反伤
+   *  不触发）;endurance 0.15 另走槽键通道（vanillaArmorSets '99|65|54'）不双计 */
   get turtleSet(): boolean {
-    const a = this.inv.armor;
-    return matchArmorSetBonusVid(vidOfItemId(a[0]?.id ?? -1), vidOfItemId(a[1]?.id ?? -1), vidOfItemId(a[2]?.id ?? -1))?.turtleThorns === true;
+    const g = (i: number) => this.inv.getEffectiveArmor(i);
+    return matchArmorSetBonusVid(vidOfItemId(g(0)?.id ?? -1), vidOfItemId(g(1)?.id ?? -1), vidOfItemId(g(2)?.id ?? -1))?.turtleThorns === true;
   }
   /** 仙人掌套装（vanillaArmorSets vid '894|895|896'——Benefits.Cactus :154-157/注册 :446
-   *  cactusThorns → 独立定值反伤 Player.cs:30948-30958;收编注同 turtleSet） */
+   *  cactusThorns → 独立定值反伤 Player.cs:30948-30958;收编注同 turtleSet
+   *  （★BJ745 A07 同刀改读 GetEffectiveArmor——QueryContext :20-24 语义） */
   get cactusSet(): boolean {
-    const a = this.inv.armor;
-    return matchArmorSetBonusVid(vidOfItemId(a[0]?.id ?? -1), vidOfItemId(a[1]?.id ?? -1), vidOfItemId(a[2]?.id ?? -1))?.cactusThorns === true;
+    const g = (i: number) => this.inv.getEffectiveArmor(i);
+    return matchArmorSetBonusVid(vidOfItemId(g(0)?.id ?? -1), vidOfItemId(g(1)?.id ?? -1), vidOfItemId(g(2)?.id ?? -1))?.cactusThorns === true;
   }
   /** player.head 语义（Player.cs:25336 = armor[0].headSlot；:35315-35322 时装头
    *  armor[10].headSlot ≥ 0 时覆盖）——displayArmor()[0] 即"时装优先"同式。
@@ -3959,6 +4125,7 @@ export class Player extends Entity {
       // 来源（怒气/食物）+ 召唤装备链；MagicPower/Archery 等 class 来源不吃
       let m = 1 + (st.minionDmg ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
       if (this.buffs.has(BuffType.Rage)) m += 0.1;
+      if (this.buffs.has(BuffType.Rabies)) m += 0.2;   // ★BJ739 B07：minionDamage += 0.2（:11441）
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
       m += this.buffs.hungerDamage;      // 饥饿/极饿全系 -5/-10%（:11565+/:11588+，含召唤）
@@ -3987,6 +4154,10 @@ export class Player extends Entity {
     // arrowDamage）——本仓在 rangedDamageMult('arrow') 分道处乘（:1508 附近）
     // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
     if (this.buffs.has(BuffType.Rage)) m += 0.1;
+    // ★BJ739 B07（2026-10-31）：狂犬病(148) 四系伤害 +20%（1457 Player.cs:11438-41
+    //  meleeDamage/magicDamage/rangedDamage/minionDamage 各 += 0.2f——UpdateBuffs
+    //  加算段;manaSick/manaHeat 乘区与枯萎 ×0.5 在其后,本位=加算池 ✓）
+    if (this.buffs.has(BuffType.Rabies)) m += 0.2;
     if (kind === 'melee') {
       if (this.buffs.has(BuffType.Tipsy)) m += 0.1;
       if (this.buffs.has(BuffType.Werewolf)) m += 0.051;      // 狼人（:11488）
@@ -3994,6 +4165,11 @@ export class Player extends Entity {
       m += 0.1 * this.beetleMightOrbs;                         // 甲虫力量每档 +10%（:10518-10520 98-100 分支）
       if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
+    // ★BJ739 B15（2026-10-31）：醉酒(25)持啤酒投掷器 3821 → 远程伤 +10%
+    //  （1457 Player.cs:12013-12017 Tipsy 分支内 `if (HeldItem.type == 3821)
+    //  { rangedDamage += 0.1f; rangedCrit += 5; }`——门=醉酒在栏;暴击位在
+    //  critChance('ranged')）
+    if (kind === 'ranged' && this.buffs.has(BuffType.Tipsy) && this.heldAleTosser) m += 0.1;
     // ★BJ723-A R01 潜行加伤【加算】入远程池（1457 Player.cs:26015-26018/:26043：
     // shroomite `rangedDamage += (1−Remap(s,1,0.75,1,0))×0.5f`、vortex
     // `rangedDamage += (1−s)×0.8f`——Update 内直加远程池，随后 GetWeaponDamageMultiplier
@@ -4062,6 +4238,11 @@ export class Player extends Entity {
     const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     return vid === 3106;
   }
+  /** ★BJ739 B15：手持啤酒投掷器 3821（Ale Tosser——Tipsy 分支远程特例门） */
+  private get heldAleTosser(): boolean {
+    const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
+    return (d?.vid ?? -1) === 3821;
+  }
   /** 潜行 aggro（:25976 psycho / :26016 蘑菇矿 Remap 轴 / :26045 星璇：三源【互斥】
    *  if-else-if 链（UpdateStealth 单链），优先序 = 手持变态刀 3106 > shroomite >
    *  vortex——★⑨ 台账清偿（2026-08-31）：旧序 vortex 最先,变态刀+星璇同持时本仓
@@ -4076,9 +4257,12 @@ export class Player extends Entity {
     // GrantArmorBenefits 逐槽循环=多源 +=——★终零波批实装,旧注"甲件轴暂未建模"
     // 退役;AGGRO_ARMOR_PIECE 表见模块常量区）
     let a: number;
-    if (this.heldPsychoKnife) a = -Math.round(750 * s1);             // :25976 平铺 (1−s),首支
-    else if (eqA.shroomiteSet) a = -Math.round(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26016 Remap 轴
-    else if (eqA.vortexSet && this.vortexStealthActive) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
+    // ★BJ747 A05（2026-10-31,issue#35）：三支一律 (int) 截断（1457 Player.cs:25976/
+    //   :26016/:26045 `aggro -= (int)(…)`)——旧 Math.round 四舍五入，蘑菇矿
+    //   stealth=.9348 时 -196 应 -195（(1−Remap)×750=195.6 截 195）。
+    if (this.heldPsychoKnife) a = -Math.trunc(750 * s1);             // :25976 平铺 (1−s),首支
+    else if (eqA.shroomiteSet) a = -Math.trunc(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26016 Remap 轴
+    else if (eqA.vortexSet && this.vortexStealthActive) a = -Math.trunc(1200 * s1);  // :26045 平铺 (1−s),尾支
     // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
     else a = 0;
     a += (eqA.aggroAcc ?? 0) + (eqA.aggroPiece ?? 0);   // 配饰轴+甲件轴（多源 +=,终零波批;★BJ175 桩面 ?? 防御,缺省 0）
@@ -4298,13 +4482,25 @@ export class Player extends Entity {
     if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) c += 2;
     if (kind === 'melee' && this.buffs.has(BuffType.Werewolf)) c += 2; // 狼人（:11493）
     if (kind === 'magic') c += this.buffs.clairvoyanceMagicCrit; // 水晶球预见 +2（:11482）
-    if (kind === 'melee' && this.heldPsychoKnife) c = Math.min(100, c + Math.round((1 - this.stealth) * 30)); // 变态刀（:25489）
+    // ★BJ747 A05（2026-10-31,issue#35）：变态刀暴击 (int) 截断（1457 :25971
+    //   `meleeCrit += (int)((1f-stealth)*30f)`——旧 Math.round）。
+    if (kind === 'melee' && this.heldPsychoKnife) c = Math.min(100, c + Math.trunc((1 - this.stealth) * 30)); // 变态刀（:25971）
     if (kind === 'ranged') {
       if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
-      // 潜行暴击：星璇平铺 (1−s)×20（:26044）；蘑菇矿 Remap 轴 ×10（:26015/:26017）
-      if (st.vortexSet && this.vortexStealthActive) c += Math.round((1 - this.stealth) * 20);
-      // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
-      else if (st.shroomiteSet) c += Math.round((1 - shroomiteStealthRemap(this.stealth)) * 10);
+      // ★BJ739 B15：醉酒持 3821 → rangedCrit +5（:12016）
+      if (this.buffs.has(BuffType.Tipsy) && this.heldAleTosser) c += 5;
+      // ★BJ747 A06（2026-10-31,issue#35）：互斥门 !heldPsychoKnife——原版 UpdateStealth
+      //   :25929 if/else-if 链（3106 首支 > shroomite > vortex）持刀时远程潜行三加成
+      //   整体不生效；伤害支（damageMult :4159）与 aggro 链（:4238）已有同门，旧独
+      //   crit 支缺门 → 持变态刀时星璇满潜行远程暴击仍 +20（应 0）。
+      //   ★BJ747 A05：暴击一律 (int) 截断（:26044/:26015-17 `rangedCrit += (int)(…)`
+      //   ——旧 Math.round；星璇首拍 (1−0.96)×20=0.8 截 0,旧 round=1）。
+      if (!this.heldPsychoKnife) {
+        // 潜行暴击：星璇平铺 (1−s)×20（:26044）；蘑菇矿 Remap 轴 ×10（:26015/:26017）
+        if (st.vortexSet && this.vortexStealthActive) c += Math.trunc((1 - this.stealth) * 20);
+        // ★BJ725-A D2：vortexStealthActive 开关门（原版 :26027-26052 三加成全在块内,关开关即刻归零——移速位 :6274 既有门,三消费位本批补齐）
+        else if (st.shroomiteSet) c += Math.trunc((1 - shroomiteStealthRemap(this.stealth)) * 10);
+      }
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     c += this.buffs.hungerCrit;     // 饥饿/极饿全系暴击 -2/-4（:11562+/:11585+）
@@ -4565,10 +4761,17 @@ export class Player extends Entity {
         return true;
       }
     }
-    // ★五百五十五:负 mana 面(C# Player.cs:5878 statMana -= mana×manaCost
-    //  可产负值;ChaosStone statMana<0 门依赖此态——原两路径分离→本仓 checkMana
-    //  单路径=负值结构性不可达;修=扣量直落(可负)=C# :5878 直扣同相)
-    this.mana -= amount;                           // 可负=ChaosStone 检测面
+    // ★R24 翻案（2026-10-31 红蓝定谳,G38-A 落刀;三轮连环错判终结）:不足支
+    //  statMana = 0（本仓单尾两支对齐 :53243 魔力花支/:53251 末支——全 Player.cs
+    //  「statMana = 0」恰这两处,DebugOptions.ManaV2=true 默认下不足支【永不负值】）。
+    //  ★五百五十五刀（f2f38e02,2026-10-10）锚 Player.cs:5878 系错锚——该行是
+    //  QuickBuff_ShouldUseItem 的【有卫门】扣减（if (statMana >= cost) 才扣,永不负,
+    //  1456/1457 两版同相亲读）。负 mana 实害:无下界（0 蓝持续施法每拍全耗下潜）+
+    //  回魔 if (mana < max) 从负值逐点爬回=惩罚远重原版。ChaosStone（Calamity mod
+    //  负 mana 检测面,CalamityPlayerLifeRegen.cs:276）随翻案失效——原版生态该面
+    //  由 tML On_Player.CheckMana 装备门替换钩子承载（MechanicILChanges.cs:636-648,
+    //  含 -statManaMax2 地板）,本仓无此 mod 钩子面,登记债待建。
+    this.mana = 0;                                 // :53243/:53251（ManaV2 不足支）
     this.slowMagicUse = true;                      // DoRunOutOfManaEffect :53258-53261
     return true;                                   // ManaV2：照常施法
   }
@@ -4979,6 +5182,17 @@ export class Player extends Entity {
     // 感电移动惩罚开关先行写入（Player.cs:18900 controlLeft||controlRight）——inputX
     // 已由 Game.fixedUpdate 注入（Game.ts:2890 → :2931），此处读到的即本帧输入
     this.buffs.electrifiedMoving = this.inputX !== 0;
+    // ★G36-A D-⑦（BJ739 登记债）：闪亮石静止档门喂入（UpdateLifeRegen :19060-19064
+    //  flag 谓词与 Player.ts 自然回复段 shinyStill 同式——equipStats 记忆化,二次读零开销）
+    this.buffs.shinyStillGate = !!this.equipStats.shinyStone && Math.abs(this.vx) < 0.05
+      && Math.abs(this.vy) < 0.05 && this.itemAnimTicks <= 0;
+    // ★G36-A D-⑥（BJ739 登记债）：专家门喂入（狂卷之舌 DoT :19203 / -600 块 :19434）
+    this.buffs.expertMode = mainExpertMode(world);
+    // ★G36-A D2（BJ740 登记债）：ownedProjectileCounts[866] 等价快照（UpdateProjectileCaches
+    //  :12271 每 tick 重算;damage() 无 game 参 → fixedUpdate 维护、damage 消费
+    //  shouldGuard 4760 持有支 :13174-13178——盾击弹在飞时无举盾资格）
+    this.heldShield866InFlight = (game.projectiles?.() ?? []).some(
+      (q) => !(q as { dead?: boolean }).dead && (q as { projId?: number }).projId === 866);
     // ★BJ674 感电逐拍点光（Player.cs:10402-10405 buffType[144] 支——UpdateBuffs 循环
     //   内 `electrified = true; Lighting.AddLight((int)Center.X/16,(int)Center.Y/16,
     //   0.3f, 0.8f, 1.1f)`;本仓像素位近似（Forbidden 套同判例,Player.ts:4969））
@@ -4994,7 +5208,7 @@ export class Player extends Entity {
     this.buffs.remixHunger = !!(world.seedFlags?.theConstant && world.seedFlags?.remix);
     this.buffs.starvingMaxHp = this.maxHp;
     this.buffs.starvingZoneBoost = !!game.scene?.zoneDesert || !!game.scene?.zoneSnow;
-    this.buffs.nebulaLifeLevel = this.nebula[1];   // 星云生命层数（:19220 DoT 全免消费）
+    this.buffs.nebulaLifeLevel = this.nebula[1];   // 星云生命层数（:19220 负值钳 0 + ★BJ747 A18 正项 3HP/s/级——两消费面均在 Buffs.tick）
     if (!this.buffs.onHungerEvent) {
       this.buffs.onHungerEvent = (kind) => {
         // EmoteBubble.MakeLocalPlayerEmote（:11706/:11726——146 Peckish/147 Hungry/
@@ -5060,8 +5274,11 @@ export class Player extends Entity {
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
       this.hp = Math.max(0, this.hp + buffHeal);
-      // DoT 致死（:19142-19156 + :19186-19201）：suffocating→ByOther(7)；tongued 已在
-      // 自身路径；其余按 :19187 链——vampireBurningInSunlight 优先 VampireBurningInDaylight
+      // DoT 致死（:19142-19156 + :19186-19201）：suffocating→ByOther(7)；tongued→12
+      // （★G36-A D-⑥：舌 DoT 已迁共享账,致死文案链归位 -600 块序 :19440-19453
+      //  suffocating>tongued>burned——:19446 `else if (tongued)` 无专家门=经典舌+
+      //  灼烧同挂死亡也走 WasLicked,原版 quirk 照搬）；其余按 :19187 链——
+      //  vampireBurningInSunlight 优先 VampireBurningInDaylight
       // ByOther(22)（吸血鬼种子日光灼死文案），再 poisoned/venom→9、electrified→10、
       // 默认 Burned(8)（不区分火/毒/流血——含炽热狱石/陨石的灼烧与着火）
       if (this.hp <= 0) this.lastDamageCause = this.vampireBurningInSunlight
@@ -5069,7 +5286,10 @@ export class Player extends Entity {
         : this.buffs.has(BuffType.Starving)
           ? { kind: 'starved' }   // PlayerDeathReason.ByOther(18)（:19175，饥饿链 2026-08-20）
           : this.buffs.has(BuffType.Suffocation)
-            ? { kind: 'suffocated' } : { kind: 'burned' };
+            ? { kind: 'suffocated' }
+            : this.buffs.has(BuffType.TheTongue)
+              ? { kind: 'tongued' }   // ByOther(12) WasLicked（:19446-19448）
+              : { kind: 'burned' };
     }
     // ★BJ451 分块显示账结转（2026-10-03）：dotChunkOut 冲刷门 = 旧 `buffHeal < 0`
     //   （当拍流量符号门）之外加「DoT 活跃即冲刷」支（dotActiveTick = Buffs.tick
@@ -5106,7 +5326,21 @@ export class Player extends Entity {
     // 装备生命回复（再生手环族 lifeRegen：每半秒 N/2 HP → 每秒 N/2；战斗中也生效）。
     // ★刀5:具名修正槽『Player.UpdateLifeRegen』(装备回复通道量;空槽直通零分配;
     //  自然 9 档公式不在槽=登记 D 台账;值链=后钩吃前钩产物,消费侧 ≥0 钳)
-    const equipRegen = Math.max(0, runVanillaOverrideValue('Player.UpdateLifeRegen', eqM.hpPerSec, { player: this, game }));
+    // ★BJ739 B08（2026-10-31）：DoT/极饿/专家舌期装备回复清零——原版装备 lifeRegen
+    //  在 UpdateEquips(:25830 GrantArmorBenefits :13221 lifeRegen += armorPiece.
+    //  lifeRegen) 先入池、UpdateLifeRegen(:26177) 后跑 ⇒ 每个 DoT 段
+    //  `if (lifeRegen > 0) lifeRegen = 0`（:19067 等 12 段）+ 极饿 :19257-19260 +
+    //  专家舌 :19205-19208 把装备回复整池清零——再生手环在着火期不回血（issue#29
+    //  B08：旧 buffs.tick 后无门加 equipRegen,着火 4HP/s 被手环 1HP/s 部分抵消）。
+    //  dotActiveTick=本 tick ENV_DOTS 流量在账（ buffs.tick 先于本段）;蜂蜜 flat/
+    //  篝火/心灯按原版在清零段之后,不受此门（Buffs.tick 内已按原序）。
+    //  修正槽输入取清零后的 0（原版 mod 钩亦在清零后的 lifeRegen 上消费）
+    const dotClearsEquipRegen = this.buffs.dotActiveTick
+      || this.buffs.has(BuffType.Starving);
+    //   ★G36-A D-⑥：专家舌项退役——TheTongue 已入 ENV_DOTS（Buffs.ts,专家门内）,
+    //   dotActiveTick 单源承载（B08 语义不变:专家舌期装备回复清零,同拍等价）
+    const equipRegen = dotClearsEquipRegen ? 0
+      : Math.max(0, runVanillaOverrideValue('Player.UpdateLifeRegen', eqM.hpPerSec, { player: this, game }));
     if (equipRegen > 0 && this.hp > 0) {
       this.regenAccum += equipRegen * dt;
       if (this.regenAccum >= 1) {
@@ -5122,6 +5356,14 @@ export class Player extends Entity {
     this.sinceHurt++;
     // 幻影闪避重整冷却（Player.shadowDodgeTimer :25656-25659 每 tick 递减）
     if (this.shadowDodgeTimer > 0) this.shadowDodgeTimer--;
+    // ★BJ745 A09（issue#35,2026-11-01）：卸套清幻影闪避——1457 Player.cs:25902-25904
+    //   `if (shadowDodge && !onHitDodge) ClearBuff(59);`（UpdateArmorSets(:25882) 之后
+    //   的同拍清位）。shadowDodge=buff59 在栏旗标,onHitDodge=神圣/远古神圣套在身旗
+    //   （equipStats.onHitDodge）;卸套当拍残留 buff59 被清——否则换装后仍凭残留
+    //   buff 白吃一次闪避（Hurt 第四闪避支 :38516 消费）。
+    if (this.buffs.has(BuffType.ShadowDodge) && !eqM.onHitDodge) {
+      this.buffs.remove(BuffType.ShadowDodge);
+    }
     // 金花/叶绿共享 on-hit 计时（petalTimer :25652-25655）+ 叶绿锚体出手冷却
     // （crystalLeafCooldown :25664-25667——原版同段位次：petal 在 shadowDodge 之前、
     //  cd 在 boneGloveTimer 之后；★SW-FX1 boneGloveTimer 位已补=:25662-25664 原位）
@@ -5131,6 +5373,9 @@ export class Player extends Entity {
     // environmentBuffImmunityTimer 每 tick 递减（Player.cs:24778——Teleport :37701
     // 置 4 的环境 buff 免疫窗;消费位=专家雪原 Chilled 门 :28209）
     if (this.environmentBuffImmunityTimer > 0) this.environmentBuffImmunityTimer--;
+    // ★G39-A（g36a D-⑨）：_funkytownAchievementCheckCooldown 每 tick 递减
+    //  （Player.cs:16868-16870——Teleport :37702 置 100 的成就检查冷却）
+    if (this.funkTownCd > 0) this.funkTownCd--;
     // 日曜护盾回充（Player.cs ApplySetBonus_Solar :16222-16296 全链：
     //   回充 +1 层时 16×尘6(ArmorSetDye 染料) + AddBuff(170+shields,5)；
     //   盾球环绕轨道 :16258-16283——Y=半径 6 圆×相位(miscCounter/100·2π+l·2π/shields),
@@ -5277,8 +5522,14 @@ export class Player extends Entity {
     }
     if (buffHeal < 0 || this.buffs.dotActiveTick
       || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
-    if (this.hp > 0 && this.hp < this.maxHp
-      && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
+    // ★BJ745 A10（issue#35,2026-11-01）：门摘 !Bleeding/!obstructed——原版 bleed
+    //   （buff 30/163 headcovered → :10119/:11917 bleed 旗）只清 lifeRegenTime
+    //   （:19296-19299）,不清乘区外 flat 与消费环：palladiumRegen +4（:19385-87
+    //   `lifeRegenCount += 4` 无 bleed 门）/闪亮石静止 +4（:19241-49 增量后才轮到
+    //   :19296 清位）/丰盛大餐 +6/魂镰 num3 照常入账——流血/遮挡期帕拉钯快速再生
+    //   61 拍应回 2HP（旧整块门=0）。自然阶梯 num5 读清零后 rt=0 恒 0=天然阻断 ✓。
+    const bleedNow = this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed;
+    if (this.hp > 0 && this.hp < this.maxHp) {
       // 闪亮石静止档 flag（UpdateLifeRegen :19061-19064：shinyStone &&
       // IsConsideredStandingStill(:3307 |vx|<0.05&&|vy|<0.05) && itemAnimation==0）。
       // R5-F2：整段（跳档/加速/减伤半/连续加成/×1.1/0.75 档）曾全缺
@@ -5294,7 +5545,7 @@ export class Player extends Entity {
       if (shinyStill) {
         // :19241-19249：eRT∈(90,1800) 直接跳档 1800；eRT += 4/t；lifeRegen flat +4
         if (rt > 90 && rt < 1800) this.lifeRegenTime = 1800;
-        this.lifeRegenTime += 4;
+        if (!bleedNow) this.lifeRegenTime += 4;   // ★BJ745 A10：bleed 清位(:19296)在增量(:19244)后=增量被清,等价省略（免 bleed+闪亮石静止档 lifeRegenTime 终态 4≠原版 0）
         shinyFlatUnits += 4;
       } else if (rt >= 3600) {
         ert++;                       // :19346-19350 第 9 档（非闪亮石静止档）
@@ -5321,6 +5572,10 @@ export class Player extends Entity {
       const diff = scaleStatsWorld().difficulty;
       const fed = this.buffs.has(BuffType.WellFed) || this.buffs.has(BuffType.WellFed2) || this.buffs.has(BuffType.WellFed3);
       if (diff >= GDL.EXPERT && !fed) num5 = eqS.shinyStone ? num5 * 0.75 : num5 / 2;
+      // ★BJ739 B07（2026-10-31）：狂犬病自然回复惩罚（1457 Player.cs:19377-19380——
+      //  紧随专家档同式：`if (rabid) num5 = (!shinyStone) ? num5/2 : num5*0.75`。
+      //  与专家档可叠乘（两 if 并列非 else））
+      if (this.buffs.has(BuffType.Rabies)) num5 = eqS.shinyStone ? num5 * 0.75 : num5 / 2;
       // mHP 系数（:19381-19382:statLifeMax2/400×0.85+0.15）→ lifeRegen 单位=半HP/s
       num5 *= this.maxHp / 400 * 0.85 + 0.15;
       // R5-F6：逐 tick (int)Math.Round 取整（:19383）——旧 (num5/2)*dt 连续积分
@@ -6277,7 +6532,7 @@ export class Player extends Entity {
     // 绿叶色）/靴支尘+脚步声在蜜中误触发=「蜂蜜中跑动绿叶尘」全案根因
     // （真机探针 2026-10-03:用户存档+角色实录 1826/1826 全 inHoney 侧,干地零发）。
     // 判别测试 tests/bj474-liquid-run-dust-third.test.ts
-    const speedMult = this.buffs.moveSpeedMult * eqM.moveMult
+    const speedMult = this.moveSpeedPool   // ★BJ739 B03：加算池合成（buffs×sunflower+装备,见 getter 注）
       * (this.vortexStealthActive ? 0.3 : 1)   // 星璇潜行移速 ×0.3（1457 Player.cs:26046-26047
                                               // vortexStealthActive 全程生效,无 stealth 门——
                                               // 旧 `&& stealth>0` 系 0/1 语义反写期产物,满潜行
@@ -6508,13 +6763,15 @@ export class Player extends Entity {
     // ---- pulley 绳索悬挂（Player.cs:26320 调用点 `!pulley && !CCed && !controlJump
     //      && gravDir==1 && ropeCount==0 && grappling[0]==-1 && !tongued &&
     //      !mount.Active` + :26328+ 状态机的可达子集）。★⑩ 台账清偿（2026-08-31）：
-    //      !controlJump 门补齐——本仓 inputJump = Space ∪ Up（Game.ts 输入合成），
-    //      controlJump 的仓内等价谓词 = inputJump 且非 Up（inputUp 独立读 ↓ 与 ↑），
-    //      按住 Space 不再吸附进绳态、按住 W/↑ 进态不受影响；tongued=狂卷之舌 buff 38 ----
+    //      !controlJump 门补齐——★BJ737-A issue#31 件1（2026-10-31）起 inputJump =
+    //      Space 单键面（Game.ts:10636 根部并键面退役）,jumpOnlyHeld 即 controlJump
+    //      精确等价（旧 `inputJump && !inputUp` 键面分离近似随之退役——该近似在
+    //      「持 W 按空格」时误判 controlJump=false = 用户实报跳不起来的病灶②）；
+    //      按住 Space 不吸附进绳态、按住 W/↑ 进态不受影响;tongued=狂卷之舌 buff 38 ----
     if (this.ropeCount > 0) this.ropeCount--;                            // :26314-26317
     const ccPulley = this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned)
       || this.buffs.has(BuffType.Webbed);
-    const jumpOnlyHeld = this.inputJump && !this.inputUp;   // ≙ controlJump（键面分离近似）
+    const jumpOnlyHeld = this.inputJump;   // ≙ controlJump（BJ737-A 起 Space 单键面=精确定义）
     if (!this.pulley && !ccPulley && !jumpOnlyHeld && this.gravDir === 1 && this.ropeCount === 0
       && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue) && !this.mount.active) {
       this.findPulley(world.store);                                      // :26320
@@ -6595,6 +6852,26 @@ export class Player extends Entity {
       if (!this.isRopeAt(world.store, num29, num30)) this.pulley = false; // :26465-26468 头格脱绳
       if (this.gravDir !== 1) this.pulley = false;                       // :26469-26472
       if (ccPulley) this.pulley = false;                                 // :26473-26476
+      // ★BJ737-A issue#31 件1（2026-10-31）：绳上按跳键 = 跳离绳（:26481-26486 逐字
+      //   `if (controlJump) { pulley=false; jump=jumpHeight; velocity.Y=-jumpSpeed }`）
+      //   ——原版空格在绳上【不攀爬】（攀爬臂 :26531 读 controlUp）而是原地弹跳离绳,
+      //   无音效无起跳尘（裸字段写,不进 JumpMovement 起跳腿）。旧仓缺本臂 + 攀爬臂读
+      //   inputJump（Space∪Up 并键面）= 台账⑥登记的「空格攀爬」键面差异,随本刀退役。
+      //   跳参=jumpHeight/jumpSpeed 玩家字段当拍值（原版序：UpdateJumpHeight :26211
+      //   先于 pulley 块 :26320）——本仓 pulley 块先于 :7368 参数链,就地 jumpBaseSnapshot
+      //   （FX47 单源）+蜜地/眩晕尾（UpdateJumpHeight :19343-19353 的字段尾段,与
+      //   :6674 快照同款）取当拍基;绳上恒干态（branch1 !inWater）无液体档覆写面。
+      //   下一拍起移动相主链接管（pulley 已假→主移动支;sustainPin 读当帧 lJSpd 同源
+      //   基值=离绳跳与地面跳同弹道）。
+      if (this.inputJump) {
+        this.pulley = false;
+        const jbRope = this.jumpBaseSnapshot(this.vx);
+        let jsRope = jbRope.spd;
+        if (this.floorTileT === HONEY_FLOOR_ID) { jbRope.ticks = Math.floor(jbRope.ticks / 10); jsRope /= 5; }   // :19343-19346
+        if (this.buffs.has(BuffType.Dazed)) { jbRope.ticks = Math.floor(jbRope.ticks / 5); jsRope /= 2; }         // :19350-19353
+        this.jumpHold = jbRope.ticks;   // jump = jumpHeight（:26484）
+        this.vy = -jsRope;              // velocity.Y = -jumpSpeed（:26485）
+      }
       if (this.grappling[0]) this.pulley = false;                        // :26488-26491 抓钩优先
       if (this.pulley) {
         // X 钉绳列（:26653-26661）：pulleyDir 1=列中心、2=中心+6·direction——
@@ -6682,7 +6959,7 @@ export class Player extends Entity {
     let accRun = eqM.accRunSpeed || 3;
     let runSlow = RUN_SLOWDOWN * eqM.runSlowMul;
     let runAcc = RUN_ACCELERATION * (duneBoost ? 1.75 : 1)
-      * this.buffs.moveSpeedMult * eqM.moveMult * strongestSlow;
+      * this.moveSpeedPool * strongestSlow;   // ★BJ739 B03：加算池（原版 :26201-26202 runAcceleration *= moveSpeed——strongest 已先乘入 moveSpeed,本式 strongestSlow 并列同构）
     if (this.pulley) {
       // ★BJ-C8（R7-F1）：pulley 期朝向翻转整支迁 flag12 状态机（:26356-26365 转身支+
       //   :26369-26392 侧挂回中支,移动相 pulley 块内）——旧 pulleyDir==1 inputX 翻面
@@ -6851,7 +7128,7 @@ export class Player extends Entity {
       //  ——加法作用于装备/减速链合成的基底之上；赋值支保持原覆写语义）
       runAcc = mnt && !mnt.movementStatsAdditive ? mnt.acceleration
         : RUN_ACCELERATION * (duneBoost ? 1.75 : 1)
-          * this.buffs.moveSpeedMult * eqM.moveMult * strongestSlow;
+          * this.moveSpeedPool * strongestSlow;   // ★BJ739 B03：加算池（构成注见 moveSpeedPool getter）
       if (mnt && mnt.movementStatsAdditive) runAcc += mnt.acceleration;
       // 翼飞行加速倍率（WingAirLogicTweaks :29546/:29555,乘区在 moveSpeed 链之后）
       // ★BJ705-G23:门=cap 实触发（≙:26696 CanUseWings——未骑乘/滚轴鞋放行）;旧
@@ -7192,7 +7469,8 @@ export class Player extends Entity {
     // 门 :3036 读 pulley 恒不画=用户复报「静止不显、按上下键吸附后才显」BJ570）,
     // 整支退役落主移动支（重力/跳跃/冲刺照常,MV1② dashDelay 主路径照推进）。
     // 中心格脱绳但 pulley 未离（绳端/孤立绳格——头格仍绳）走 :26503-26649 绳端支
-    // =branch2 不变；空格攀爬键面差异（pulley 态内 inputJump 攀爬,台账⑥ 登记）不变）
+    // =branch2 不变；★BJ737-A（2026-10-31）：「空格攀爬」键面差异（台账⑥）退役——
+    // 攀爬臂改读 inputUp（:26531 controlUp）,空格走 pulley 块 :26481 跳离臂=原版同相）
     // 坐骑飞行 vy 独占标记（本 tick 悬停/飞行接管时置 true）——下方"松键截断上升"
     // 手感段须让位：原版 Player 无此截断，且 Hover 接受 controlUp 单独爬升
     //（Mount.cs:3396-3424），截断会把不按跳的爬升当场掐死
@@ -9346,6 +9624,7 @@ export class Player extends Entity {
     }
     // 夜/日食相位（月亮石 900 天界石复合门 :14871-14874；equipStatsKey 的 N/d 档输入）
     this.nightPhase = !(game.world.clock?.isDay ?? true) || game.world.clock?.eclipse === true;
+    this.dayTime = game.world.clock?.isDay ?? true;   // ★BJ740-A ACC07：Main.dayTime 镜像（899 太阳石门 :15531 裸白天,日食仍真）
     // 冰冻护盾族（冰龟壳 1253/冰冻盾 3997 :14348-14351）：半血以下每帧 AddBuff(62,5)；
     // buff 侧 :10148-10152 超半血 DelBuff——同构为 else 移除（回复跨过半血的当帧即掉）
     if (eqM.iceBarrierAcc && this.hp <= this.maxHp / 2) {
@@ -9456,6 +9735,12 @@ export class Player extends Entity {
       // 关潜行后 stealth 恒 0：渲染 settled=s'≈0.03 近似永久隐身 + (1−s)×0.8 伤/
       // ×20 暴恒满（:26043-26044）。2026-08-23 潜行语义统一批补）
       else this.stealth = Math.min(1, this.stealth + 0.04);
+      // ★BJ745 A19（issue#35,2026-11-01）：潜行中上坐骑当拍关开关——1457
+      //   Player.cs:26045-26047 `if (mount.Active) vortexStealthActive = false;`
+      //   （衰减/三加成之后=当拍照掷尘,下拍起走回升支）。旧缺=骑乘后远程增益
+      //   （(1−s)×0.8 伤/×20 暴）与移速 ×0.3 惩罚继续生效;双击门的 !mount.active
+      //   只拦「骑乘中开」,不拦「开了再上鞍」。
+      if (this.vortexStealthActive && this.mount.active) this.vortexStealthActive = false;
       if (vortexFadeDust) {
         emitVortexStealthFadeDust(game.vanillaDust, this.cx, this.cy);
       }
@@ -9474,15 +9759,23 @@ export class Player extends Entity {
     // tick 经套装 Effect 走，只在套装在身时递减；卸装冻结。★BJ424：旧态在 Game
     // updateNebulaBoosters 无门递减=偏差，随 booster 迁移落原版语义位）
     if (this.nebulaCD > 0 && this.equipStats.nebulaSet) this.nebulaCD--;
-    // 星云生命 173-175（:10111-10115 lifeRegen+6/级 = 3HP/s/级）
-    if (this.nebula[1] > 0 && this.hp > 0) {
-      this.nebulaLifeAccum += 3 * this.nebula[1] * dt;
-      if (this.nebulaLifeAccum >= 1) { const n = Math.floor(this.nebulaLifeAccum); this.nebulaLifeAccum -= n; this.hp = Math.min(this.maxHp, this.hp + n); }
-    }
-    // 星云魔力 176-178（:19214-19226 counter+level/t，>=6 → mana++）
+    // ★BJ747 A18（2026-10-31,issue#35）：星云生命 173-175 正项迁公共再生账——原版
+    //   UpdateBuffs（1457 Player.cs:10538-10539）`lifeRegen += 6 * nebulaLevelLife`
+    //   （=3 HP/s/级）先于 UpdateLifeRegen 的 DoT 清零段 ⇒ 中毒期 if(lifeRegen>0)
+    //   lifeRegen=0 把星云正项一并清掉，星云只钳负值 0（:19220）。旧实现 =
+    //   nebulaLifeAccum 独立直写 hp（绕过 DoT 清零）→ 中毒期间仍 +3HP/s/级
+    //   （issue#35 A18），已拆除；正项现由 Buffs.tick UpdateBuffs 正项段消费
+    //   （Buffs.ts nebulaLifeLevel，喂入点 fixedUpdateBody 先于 buffs.tick）。
+    // 星云魔力 176-178（1457 Player.cs:19691-19712 ApplyNebulaBuffMana，UpdateManaRegen
+    //   :19544 头每拍调）：counter 每拍 += level（int tick 域，无 dt 缩放），≥6 →
+    //   counter−6 且 mana+1（单 if 非 while=每拍至多回 1）；零层 else 清 counter。
+    //   ★BJ747 A17（2026-10-31,issue#35）：旧 `+= level*dt` 慢 60 倍（60 拍 1/2/3 层
+    //   实得 0/0/0，应 10/20/30）且零层不清账（旧累计悬空），已按原式钉 tick 域。
     if (this.nebula[2] > 0) {
-      this.nebulaManaAccum += this.nebula[2] * dt;
+      this.nebulaManaAccum += this.nebula[2];
       if (this.nebulaManaAccum >= 6) { this.nebulaManaAccum -= 6; this.mana = Math.min(this.maxMana, this.mana + 1); }
+    } else {
+      this.nebulaManaAccum = 0;
     }
     // 甲虫球蓄能已迁 BeetleMeter（Game.tick 驱动）——旧 lastMeleeTick/beetleCharge
     // 时间蓄能近似拆除（2026-08-31）
@@ -9788,7 +10081,9 @@ export class Player extends Entity {
         const bhw = this.w + 8, bhh = this.h + 8;
         for (const e of game.enemies()) {
           const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
-            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
+            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number,
+              /* ★G39-A（bj745a D-④）:adtnOnHit 通道扩参 */
+              srcProjId?: number, nanoMul?: number, adtnOnHit?: boolean) => boolean };
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
           // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
           if (!playerCanHitEnemy(e, game)) continue;
@@ -9813,7 +10108,9 @@ export class Player extends Entity {
           //  crit,3097) 单布尔,×2 在 StrikeNPC_Inner 防后 NPC.cs:82067=Enemy.hurt 承载）
           //  ——旧「预倍 dmg+crit=false 字面」=暴击飘字色双缺,随刀归位。
           const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
-          en.hurt(dmg, dir * kb, -4, game, 0, crit, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
+          // ★G39-A（bj745a D-④,2026-11-01）:克盾冲撞(:21268)走 ApplyDamageToNPC(3097)
+          //   ——OnHit 族【无】hp>5 门(:20599-20600),adtnOnHit=true 豁免（尾参 12）
+          en.hurt(dmg, dir * kb, -4, game, playerArmorPenOf(game), crit, 0, true, 0, 0, 1, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族);★G39-A(bj746a D1):ApplyDamageToNPC :20597 `damage+=checkArmorPenetration(GetArmorPenetration(melee:false))`——克盾直击吃玩家通用穿甲池(旧 pen 0)
           // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（受击音+飘值同点，
           // 见 Enemy.hurt 内 :82006-82015 收口注）；免疫早返 false 时本行曾仍弹
           // 「幻影伤害」（2026-08-31 二轮红队同案复核）。色走单源敌方族表
@@ -10083,7 +10380,9 @@ export class Player extends Entity {
       const bhw3 = this.w + 8, bhh3 = this.h + 8;
       for (const e of game.enemies()) {
         const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
-          dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+          dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number,
+            /* ★G39-A（bj745a D-④）:adtnOnHit 通道扩参（ApplyDamageToNPC 站豁免 hp>5 门） */
+            srcProjId?: number, nanoMul?: number, adtnOnHit?: boolean) => boolean;
           iframes?: number };
         if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
         // friendly 门（原版 :21299 !nPC2.friendly continue——同克盾冲撞）+
@@ -10108,12 +10407,49 @@ export class Player extends Entity {
         //  meleeCrit` 含基 4+:25712-14 持械折入,补 4+heldItemCritBonus（F11 同式）。
         const crit3 = Math.random() * 100 < 4 + this.critChance('melee')
           + heldItemCritBonus(this.inv.heldItem());
-        const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')));  // :21317
+        // ★BJ746 A22①（issue#35,2026-11-01）：(int) 截断非 round——原版 :21317/21344
+        //  `float num5 = 150f × meleeDamage` 直传 ApplyDamageToNPC/NewProjectile 双面
+        //  均 (int)（1.25 档 187.5 → 187,旧 round 188）。hurt 内 max(1,) 保底承担。
+        const dmg3 = Math.max(1, Math.trunc(150 * this.damageMult('melee')));  // :21317
         // ★S02(BJ723-B):crit3 直传（原版 :21317-21327 ApplyDamageToNPC 形,×2 在
         //  StrikeNPC_Inner 防后=Enemy.hurt 承载）——旧「预倍+false 字面」色缺随刀归位
         const kb3 = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);        // :21318-21327
-        en.hurt(dmg3, dir3 * kb3, -4, game, 0, crit3, 0, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317)
-        if (en.iframes !== undefined) en.iframes = 6;   // :21348 immune[whoAmI]=6
+        // ★G39-A（bj745a D-④,2026-11-01）:日曜冲撞直击(:21344)走 ApplyDamageToNPC(608)
+        //   ——OnHit 族【无】hp>5 门,adtnOnHit=true 豁免（尾参 12）;下方 608 爆闪环
+        //   =弹面语义(Damage_PVE :13642 有 hp>5 门)保持缺省 false,两面上锁分立
+        en.hurt(dmg3, dir3 * kb3, -4, game, playerArmorPenOf(game), crit3, 0, true, 0, 0, 1, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317);★G39-A(bj746a D1):直击面 ApplyDamageToNPC :20597 穿甲池(旧 pen 0)
+        // ★BJ746 A22②（issue#35）：每次碰撞生成范围爆闪（:21345-46 NewProjectile
+        //  (608, (int)num5, kb15) + 立即 Kill → Projectile.Kill :73438-608 支：
+        //  maxPenetrate=penetrate=-1 + Damage() 一次性 AoE——命中盒 160×160 居中
+        //  玩家 Center（SetDefaults :6556-64）+ 音 Item14 + 尘 31×4/6×30。等价口径
+        //  =Game.ts 日曜反击块同款一次结算（settleSolarFlareRetaliation 语义）。
+        //  门序（Damage_PVE）：608 无类旗 → 类掷零 RNG+TimerCrit 消费;免疫门照走
+        //  （Kill 置 penetrate=-1 ⇒ flag3 假）——直击靶【本拍免疫=0】（原版
+        //  ApplyDamageToNPC→StrikeNPC 不写 immune,:21348 的 6 在爆闪后）照吃第二击
+        //  （SW hurt pierce=0 侧写 10t 为仓内形态差,直击靶特例跳过读门=原版同相）;
+        //  邻靶 iframes>0 拒收。DV(:12970)+banner(:13388) 逐靶;kb15 背离玩家心。
+        {
+          for (const entF of game.enemies()) {
+            const eF = entF as { x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
+              dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number,
+                crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; iframes?: number };
+            if (eF.dead || !eF.hurt || eF.cx === undefined || eF.cy === undefined) continue;
+            if (entF !== e && !playerCanHitEnemy(entF, game)) continue;
+            const fx = eF.x ?? eF.cx - 8, fy = eF.y ?? eF.cy - 8, fw = eF.w ?? 16, fh = eF.h ?? 16;
+            // 160×160 盒（半宽 80）居中玩家 Center
+            if (!(this.cx - 80 < fx + fw && this.cx + 80 > fx && this.cy - 80 < fy + fh && this.cy + 80 > fy)) continue;
+            if ((eF.iframes ?? 0) > 0) continue;   // ★BJ748 定谳修正:统一免疫门——原版 608 AoE 无直击靶豁免(独立弹 Damage_PVE 统一门);旧 entF!==e 豁免=自造面致第二轮爆闪多打直击靶 1 发
+            const critF = ((game.player as unknown as
+              { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean })
+              .tryConsumingTimerCrit?.(game, fx, fy, fw, fh)) ?? false;   // 608 无类旗=零类掷
+            eF.hurt(applyBannerDamageDealt(game, entF, damageVarRoll(dmg3, this.luck ?? 0)),
+              Math.sign(eF.cx - this.cx) * 15, -3, game, playerArmorPenOf(game), critF, -1, true);   // pierce=-1=608 写 10t 档;★G39-A(bj746a D1):608 爆闪=弹面 Damage_PVE :12852 `num6=GetArmorPenetration(melee:false)+armorPenetration`(608 型号份 0)→玩家通用池(旧 pen 0)
+          }
+          game.spawnParticles(this.cx, this.cy, '#FFD060', 30, 3.7, { life: 24 });
+          game.spawnParticles(this.cx, this.cy, '#FF9040', 4, 1.5, { life: 20 });
+          game.playSfxFiles(['Item_14'], 1, this.cx, this.cy);   // SoundID.Item14（608 Kill :73446）
+        }
+        if (en.iframes !== undefined) en.iframes = 6;   // :21348 immune[whoAmI]=6（爆闪后——原版序）
         // ★GC1/D3 统一时钟双写：NPC 面 → 共享表（近战三重门消费）；
         // 玩家面 GiveImmuneTimeForCollisionAttack(4)（:21349——原旧注"仍走各自旧近似，
         // 不并入"备案就此清偿，汇入 MountCombat.grantCollisionAttackImmunity 统一时钟）
@@ -10212,8 +10548,11 @@ export class Player extends Entity {
    *  （:29006——本仓本地玩家即 this,远端代理不走 fixedUpdate 同BJ508口径）。
    *  蓄力档 = 32×downDashTime>300（:29014 ⇔ downDashTime≥10t）：半径 128→176、
    *  kb 10→20、crit false→true。伤害 30 平值（无 DamageVar 掷、无 minionDamage 乘区）
-   *  ——crit 走本仓惯例【调用侧预倍 ×2】（Enemy.hurt 不内部翻倍,MountCombat 矿车/
-   *  踩踏同款偏差登记）。命中门 = active∧!friendly∧!dontTakeDamage∧
+   *  ——★BJ741 R19-8（2026-10-31）：旧注「crit 走本仓惯例调用侧预倍 ×2（Enemy.hurt
+   *  不内部翻倍）」系陈旧语+实害——S02(BJ723-B) 起 ×2 统一 Enemy.hurt 防后
+   *  （NPC.cs:82067）,旧 `charged ? 60 : 30` 预倍+crit 同传=蓄力下砸 ×4（应 60）;
+   *  本刀归位 :29011 字面（damage=30 恒定,crit 旗单布尔承载 ×2）。命中门 =
+   *  active∧!friendly∧!dontTakeDamage∧
    *  CanNPCBeHitByPlayerOrPlayerProjectile（:29030——enemy∪critter 双桶并扫,
    *  CountsAsCritter∧dontHurtCritters 统一出口;无 LOS 门=原版设计）;半径判据 =
    *  中心距 ≤num（:29033 字面 >num continue）;击退方向 = 目标在玩家哪侧（:29035）。
@@ -10226,7 +10565,7 @@ export class Player extends Entity {
   deadCellsGroundPound(game: GameHooks): void {
     const charged = 32 * this.downDashTime > 300;          // :29014
     const radius = charged ? 176 : 128;                    // :29010/:29018
-    const damage = charged ? 60 : 30;                      // :29011 平值 30;蓄力 crit 本仓预倍 ×2
+    const damage = 30;                                     // :29011 平值 30 恒定（蓄力=crit 旗 ×2=Enemy.hurt 防后,★BJ741 R19-8 旧预倍 ×4 摘除）
     const knockback = charged ? 20 : 10;                   // :29012/:29019
     const crit = charged;                                  // :29013/:29017
     const gd = this.gravDir === -1 ? -1 : 1;
@@ -10243,7 +10582,9 @@ export class Player extends Entity {
       for (const ent of bucket) {
         const e = ent as { x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
           dead?: boolean; dontTakeDamage?: boolean; hurt?: (d: number, kx: number, ky: number,
-            g: GameHooks, ap?: number, crit?: boolean, pierce?: number, fp?: boolean) => boolean };
+            g: GameHooks, ap?: number, crit?: boolean, pierce?: number, fp?: boolean,
+            /* ★G39-A（bj745a D-④）:adtnOnHit 通道扩参（ApplyDamageToNPC 站豁免 hp>5 门） */
+            pp?: number, spi?: number, nm?: number, adtn?: boolean) => boolean };
         if (!e || e.dead || e.dontTakeDamage || !e.hurt) continue;              // :29030 active/dontTakeDamage
         if (!playerCanHitEnemy(ent, game)) continue;                            // :29030 !friendly 同式
         if (!playerProjectileCanHitNpcGate(game, ent, fromCritter)) continue;   // CanNPCBeHitByPlayerOrPlayerProjectile
@@ -10252,8 +10593,10 @@ export class Player extends Entity {
         const dx = ex - this.cx, dy = ey - this.cy;                             // :29032 nPC.Center - base.Center
         if (Math.hypot(dx, dy) > radius) continue;                              // :29033 vector.Length() > num
         const dir = dx > 0 ? 1 : -1;                                            // :29035
+        // ★G39-A（bj745a D-④,2026-11-01）:DeadCells 下砸(:29036)走
+        //   ApplyDamageToNPC(5465)——OnHit 族【无】hp>5 门,adtnOnHit=true 豁免
         e.hurt(applyBannerDamageDealt(game, ent as never, damage), dir * knockback, 0,
-          game, playerArmorPenOf(game), crit, 0, true);                         // :29036 ApplyDamageToNPC
+          game, playerArmorPenOf(game), crit, 0, true, 0, 0, 1, true);          // :29036 ApplyDamageToNPC
       }
     }
   }
@@ -10721,13 +11064,14 @@ export class Player extends Entity {
     // ★BJ714-A（R16-P1 面1）:骑矿车随迁（Teleport style10 :22937→:37698-37780
     //  零 Dismount 同门——不随迁=下一拍被车「玩家坐骑位回写段」锁回=道具废）
     game.migrateMinecartOnTeleport?.();
+    // ★G36-A D4：Teleport 头段 :37708-37715（全 style 无差别——style10 免的只是
+    //  :37706 摘钩;女王钩瞬移前若坐姿/睡眠/抚摸/微光滞留,原版同拍全清）
+    this.teleportHeadReset();               // ★G39-A（g36a D-⑨）：Teleport :37702-37703 头段双字段
+    this.stopVanityActions();
+    this.teleportClearShimmer();
     game.startCameraTransitionForPlayerTeleport?.(tpOldX, tpOldY);   // ★BJ108 债①（Teleport(vector,10)→:37747,delay=0）
     game.spawnBurst?.(this.cx, this.cy, '#58B8E8', 14, 3, -Math.PI / 2, Math.PI, { life: 24 });
   }
-
-  /** 狂卷之舌 DoT 分块累加器（专家 50 HP/s，:18905-18910 lifeRegen-100；
-   *  :19136-19148 -600 阈值 → 每 6t 弹 HurtLifeRegen(5)） */
-  private tongueDotAcc = 0;
 
   /** Player.WOFTongue（Player.cs:21993-22056）1:1：
    *  gross=惊恐 37（见到墙）、tongued=狂卷之舌 38（高于地狱层/绕到墙后）。
@@ -10806,20 +11150,14 @@ export class Player extends Entity {
     //  ① controlUseItem/controlHook=false——道具门禁由 Game.updateUse 读本 buff（钩爪
     //    系统未实装，aiStyle 7 弹 Kill 段 :22036-22041 登记不适用）
     if (!tongued) return;
-    //  ② 专家 DoT（:18905-18910 lifeRegen-100 = 50 HP/s，正回复清零 + 爬坡计时清零；
-    //     :19136-19148 -600 阈值分块 HurtLifeRegen(5) → 每 0.1s 弹 5，无视无敌帧/防御）
-    if (mainExpertMode(world)) {
-      this.lifeRegenTime = 0;
-      this.tongueDotAcc += 50 * dt;
-      let chunk = 0;
-      while (this.tongueDotAcc >= 5) { this.tongueDotAcc -= 5; chunk += 5; }
-      if (chunk > 0) {
-        this.hp = Math.max(0, this.hp - chunk);
-        game.addDamageNumber(this.cx, this.y, chunk, false, '#FF3C46', true);
-        // :19144-19149 statLife<=0 → KillMe(ByOther(12)) WasLicked
-        if (this.hp <= 0) this.lastDamageCause = { kind: 'tongued' };
-      }
-    }
+    //  ② 专家 DoT（:18905-18910 lifeRegen-100 = 50 HP/s）——★G36-A D-⑥（BJ739 登记
+    //     债清偿,2026-10-31）：独立账 tongueDotAcc 整支退役,迁入 Buffs ENV_DOTS 单账
+    //     （TheTongue -50 HP/s,专家门;共享 dotLifeRegenCount -600 块 = 每 6t 弹
+    //     HurtLifeRegen(5) 与原节拍逐位同,且并入灼烧/窒息合并块/蜂蜜对冲/星云免/
+    //     闪亮石减半/极饿覆写全乘区——原独立账六面皆不入账的偏差随迁闭合）。
+    //     消费链 = buffs.tick → buffHeal<0 直扣 hp + dotChunkOut 飘字（Player.ts
+    //     :5208/:5244）;致死文案 tongued 在 DoT 死因链（-600 块序 :19446）。
+    //     lifeRegenTime=0（:19209）由 dotActiveTick 复位门承载（Player.ts :5292）。
     //  ③ 舌距 >3000px（:22044-22048）/ 墙抵世界两侧（:22049-22052）→ KillMe(1000)
     if (Math.hypot(wall.cx - this.cx, wall.cy - this.cy) > 3000
       || wall.x < 608 || wall.x > (world.w - 38) * TILE) {
@@ -10886,12 +11224,23 @@ export class Player extends Entity {
    *  OwnerRef 经此读原键面。 spectator 冻结段同归零（Game 侧） */
   inputLeft = false;
   inputRight = false;
+  /** ★BJ739 B03（2026-10-31）：moveSpeed 加算池合成——(1+Σbuff 加算)×[向日葵 ×1.1]
+   *  + Σ装备加算。原版 Update 序 ResetEffects(:25688 清 1f)→UpdateBuffs(:25763 逐
+   *  buff +=;向日葵两步 +=0.1(:11089)/×=1.1(:11090))→UpdateEquips(:25830 装备 +=)
+   *  ⇒ 终值 = (1+B)×1.1+E（无向日葵 = 1+B+E）。旧 buffs.moveSpeedMult×equipStats.
+   *  moveMult 双乘区 = 迅捷+10% 配饰 1.375 应 1.35（issue#29 B03）。后续乘区
+   *  （strongestSlow/星璇/沙丘/mod 钩）按原版 Update 尾序仍乘在本池之上 */
+  get moveSpeedPool(): number {
+    const eq = this.equipStats;
+    return this.buffs.moveSpeedMult * this.buffs.sunflowerMoveMult + ((eq.moveMult ?? 1) - 1);
+  }
+
   /** Player.maxRunSpeed（常规跑速上限 stat，:25695 base 3 × moveSpeed 乘区；
    *  水中/蜂蜜等场景折扣不在此列——矿车撞击速比等按 stat 口径消费）。
    *  1457: moveSpeed 乘区含 strongestMoveSpeedDebuff（Update :26205 maxRunSpeed *=
    *  moveSpeed，debuff 已折入） */
   get maxRunSpeed(): number {
-    return PLAYER_WALK_MAX * this.buffs.moveSpeedMult * this.equipStats.moveMult
+    return PLAYER_WALK_MAX * this.moveSpeedPool
       * Math.min(this.buffs.strongestMoveSpeedDebuff, this.shieldRaised ? 1 / 3 : 1);
   }
 
@@ -11238,7 +11587,10 @@ export class Player extends Entity {
         game.playSfxAt?.('rocketJet', this.x, this.y);
         this.rocketDelay2 = 60;
       }
-      const num = this.inputUp ? 4 : 2;         // TryingToHoverUp 档（:29037）
+      // ★BJ742-A R22-⑨：TryingToHoverUp 并集取值（Player.cs:29713-29717 `int num = 2;
+      //   if (TryingToHoverUp) num = 4;`——:3908-3915 = controlUp ∨ tryKeepingHoveringUp）。
+      //   旧读裸 inputUp=Click 悬停档松↑后锁存悬停期尘量减半（4→2,悬停喷射稀疏）。
+      const num = this.tryingToHoverUp ? 4 : 2;
       for (let i = 0; i < num; i++) {
         let x = cx + (dir > 0 ? -26 : 16);      // :29046-29052
         let y = top + this.h - 18;
@@ -11818,10 +12170,11 @@ export class Player extends Entity {
    *  连续绳=原位），gfxOffY 记录 y 跳变的视觉补偿，stepSpeed=2.5、vx=0。
    *  调用门（:25805）：!pulley && !frozen && !webbed && !stoned && gravDir==1 &&
    *  ropeCount==0 && 无钩爪 && !tongued && !mount.Active。★终零波批注订正
-   *  （2026-09-01）：旧注"!controlJump 门省略"退役——台账⑥已以 jumpOnlyHeld=
-   *  inputJump&&!inputUp ≙ controlJump 等价谓词落位（fixedUpdate findPulley 调用点,
-   *  Space 不再吸附进绳态;Space+↑ 组合语义钉死可抓=合并键面登记差异）。原版另调
-   *  Main.cameraX 平滑（:19417/:19433/:19450）——本仓相机无对应载体，略 */
+   *  （2026-09-01）：旧注"!controlJump 门省略"退役——台账⑥已以 jumpOnlyHeld ≙
+   *  controlJump 等价谓词落位（fixedUpdate findPulley 调用点,Space 不再吸附进绳态）;
+   *  ★BJ737-A（2026-10-31）起 inputJump=Space 单键面 → 谓词即精确定义（原
+   *  inputJump&&!inputUp 近似及其「Space+↑ 组合不可抓」合并键面登记差异一并退役）。
+   *  原版另调 Main.cameraX 平滑（:19417/:19433/:19450）——本仓相机无对应载体，略 */
   findPulley(st: TileStore): void {
     if (this.stoolInUse || (!this.inputUp && !this.inputDown)) return;   // :19357
     const num = Math.floor((this.x + this.w / 2) / TILE);                // :19361 头心列
@@ -11877,13 +12230,16 @@ export class Player extends Entity {
     if (this.gfxOffY < -32) this.gfxOffY = -32;
   }
 
-  /** 绳上攀爬速度链（Player.cs:26016-26125）：上爬（W/Space 皆入攀爬键位模型）
+  /** 绳上攀爬速度链（Player.cs:26016-26125）：上爬键面 = ↑（W/方向键上）
    *  vy>0 阻尼×0.7 后 −0.2（>−3 档）/−0.02（≤−3 档），下限 −8；下滑镜像
    *  +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7 且 |vy|<0.1 归 0（:26120-26124）。
    *  ★BJ-C8（R7-F2）flag15 形参（:26531 `controlUp & flag15`）：(y−16) 行非绳时
-   *  攀爬臂不可达——原版该态落 idle 臂（:26633-26641 ×0.7 阻尼），非「无操作」 */
+   *  攀爬臂不可达——原版该态落 idle 臂（:26633-26641 ×0.7 阻尼），非「无操作」。
+   *  ★BJ737-A issue#31 件1（2026-10-31）：攀爬臂读 inputUp（≙:26531 controlUp）——
+   *  旧读 inputJump（Space∪Up 并键面）=「空格攀绳」自创语义（台账⑥登记差异,退役）;
+   *  原版空格在绳上 = pulley 块 :26481 跳离臂（本刀已补）,不进攀爬。 */
   ropeClimbVy(flag15 = true): void {
-    if (this.inputJump && flag15) {
+    if (this.inputUp && flag15) {
       if (this.vy > 0) this.vy *= 0.7;
       this.vy -= this.vy > -3 ? 0.2 : 0.02;
       if (this.vy < -8) this.vy = -8;
@@ -12188,7 +12544,8 @@ export class Player extends Entity {
    *  ≙ 原版 releaseUp（UpdateControlHolds :29319-29327 移动段后刷新）——次拍
    *  Mount.tryStartHover :26939 读 = ↑ 键上升沿（W 独立键面,Space 只入 controlJump
    *  不入 controlUp——PlayerInput.cs:2072/2076 + TriggersSet CopyInto :786/:790）。
-   *  与 jumpEdgePrev（Space∪Up 合成键）分立:持 Space 中按 W 的 vanilla 触发面。 */
+   *  与 jumpEdgePrev 分立（★BJ737-A 起后者=Space 单键面,两通道=controlUp/controlJump
+   *  两轴原生分立）:持 Space 中按 W 的 vanilla 触发面。 */
   upEdgePrev = false;
   /** 鼠标世界坐标（Game 每帧注入；钻头坐骑瞄准 AimAbility / Scutlix 索敌回退用） */
   aimWX = 0;
@@ -12910,15 +13267,35 @@ export class Player extends Entity {
    *  CalculateDamagePlayersTakeInPVP（dmg−def×0.5 下限 1,吸血/甲虫蓄能消费,
    *  :37953）——需要该口径的消费方自行计算,勿改本返回 */
   damage(dmg: number, srcX: number, srcY: number, knockback = true, pvp = false,
-    cooldownCounter = -1): number {
+    cooldownCounter = -1, dodgeable = true): number {
+    // ★BJ740-A ACC13（issue #30）：dodgeable 参（Hurt :38499 `(whoAmI==Main.myPlayer)
+    //   & dodgeable` 闪避族四掷门）——圣骑士盾转移包 dodgeable:false（:38649 实参,
+    //   转移伤害不可被黑带/腰布/混乱脑/幻影闪避吞）;其余调用面缺省 true 不变
     // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 0=未受伤）
     if (this.debugGod) return 0;
     // 旅程上帝模式（Player.cs:37595-37598 Hurt 首段 creativeGodMode → return 0
     // ——同样免伤不进无敌帧；NPC 接触碰撞侧 Player.cs:30863 整段跳过由本早退覆盖）
     if (journeyGodmodeActive()) return 0;
-    // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
-    // 本仓 damage 以 false 表示完全免伤——Boss 专属弹幕 371 等不可闪避源未移植）
-    if (this.shimmering) return 0;
+    // 微光化免伤（Player.cs:38484 `shimmering && AllowShimmerDodge(...)` → return 0；
+    //   ★BJ742-A R20-③：补 AllowShimmerDodge 参数门（:39049-39058）——!dodgeable
+    //   （圣骑士盾转移包 :38649 实参 false）或 cooldownCounter==1（BossNoCheese 桶
+    //   =月总族接触 Update_NPCCollision :31571-31587/敌弹族 Damage_EVP 分槽;本仓经
+    //   cooldownCounter 参或 __swNextHitBucket 瞬态通道注入,两道在此并流）返 false
+    //   =照常受伤（旧无条件早退=转移包/月总族伤害全被微光吞）。
+    //   ★G39-A（bj742a D-③,2026-11-01 清偿）：源实体三查门（:39059-39072）补齐
+    //   ——boss NPC/入侵族 GetNPCInvasionGroup≠0/CanHitPastShimmer 双表（NPCID 48
+    //   型+ProjectileID 44 型）的源 ⇒ 不闪避。源信息经瞬态通道 __swShimmerNoDodge
+    //   注入（Game.damagePlayer 统一计算:NPC 接触=attacker+contactOnly 查 def.boss/
+    //   INVASION_GROUP/CAN_HIT_PAST_SHIMMER_NPCS;弹面=opts.projVid 查
+    //   CAN_HIT_PAST_SHIMMER_PROJS;环境/玩家源面通道未置=可闪避,=原版
+    //   TryGetCausingEntity 失败分支同相）。通道生命周期=damagePlayer 的
+    //   p.damage 调用窗（finally 即清）;直调 p.damage 面=旧行为零扰动。
+    {
+      const shmChan = (this as unknown as { __swNextHitBucket?: { id: number } }).__swNextHitBucket;
+      const shmEffCc = shmChan && shmChan.id !== -1 ? shmChan.id : cooldownCounter;
+      const shmSrcNoDodge = (this as unknown as { __swShimmerNoDodge?: boolean }).__swShimmerNoDodge === true;
+      if (this.shimmering && dodgeable && shmEffCc !== ImmunityCooldownID.BossNoCheese && !shmSrcNoDodge) return 0;
+    }
     if (this.dead) return 0;
     // ★R2-02（蓝队二轮）免疫分桶门（Player.Hurt 入口 :38493）：
     //   `bool flag = ((cooldownCounter == ImmunityCooldownID.General) ? (!immune)
@@ -12947,7 +13324,14 @@ export class Player extends Entity {
       }
       if (!effBucketTable) {
         if (this.iframes > 0) return 0;                 // General：immune 位门（原语义）
-      } else if (effBucketTable.blocksHit(effBucketId)) {
+      } else if (effBucketTable.blocksHit(effBucketId)
+        // ★BJ740-A ACC13（issue #30）：ImmunityCooldownID.Sets.
+        //   ImmuneTimerOnlyLimitsEffects = {PaladinsShield}（ImmunityCooldownID.cs:33）
+        //   ——该桶冷却【只限效果不限伤害】（Hurt 入口 :38493-38499
+        //   `!flag && !ImmuneTimerOnlyLimitsEffects[cc] && !flag2` 恒不早退）:
+        //   圣骑士盾转移在 hurtCooldowns[5] 窗口内后续包照扣 HP,仅 Retaliate
+        //   反击族被关（Game.damagePlayer retaliateOk flag 位）;其余桶维持早退
+        && effBucketId !== ImmunityCooldownID.PaladinsShield) {
         return 0;                                       // 非 General：hurtCooldowns[id] 门
       }
     }
@@ -12971,19 +13355,21 @@ export class Player extends Entity {
     // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）。
     // ★F13（2026-08-31 蓝队三批）：setAll 全桶满填（原版 :38298-38306 无条件循环写
     // hurtCooldowns[i]，含 WrongBugNet/Lava 特殊桶）走全局登记表。
-    if (eq.mysticSashDodge && Math.random() < 0.1) {
+    // ★BJ740-A ACC13：五掷各带 dodgeable 门（:38499 `(whoAmI==myPlayer)
+    //   & dodgeable`——转移包 dodgeable:false 全跳过,不耗 RNG 掷流）
+    if (dodgeable && eq.mysticSashDodge && Math.random() < 0.1) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :38506-38510 → NinjaDodge :38404
     // SetImmuneTimeForAllTypes 同上——旧漏无敌帧,补；★F13 同步桶表满填）
-    if (eq.blackBelt && Math.random() < 0.1) {
+    if (dodgeable && eq.blackBelt && Math.random() < 0.1) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
     // ★593:mod 闪避掷门(灾厄 DodgeEffects 消费品闪避族——C# 消费品冷却=受伤量
     //  缩放 lerp 面=登记,本仓 mod 侧自管窗;fn=true=已闪避[效果+冷却自管])
-    if (runModDodgeRoll(this, (globalThis as { __swGame?: unknown }).__swGame, dmg)) {
+    if (dodgeable && runModDodgeRoll(this, (globalThis as { __swGame?: unknown }).__swGame, dmg)) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
@@ -12993,7 +13379,7 @@ export class Player extends Entity {
     // R5-F25：旧"受扣血后置 bocPulse"= 伤害照扣 + 无 buff321 禁再触发门,已修——
     // bocPulse 消费端（fixedUpdate）只负责挂 321,困惑反伤走 Game.damagePlayer 命中侧；
     // ★F13 同步桶表满填）
-    if (eq.boc && Math.random() < 1 / 6 && !this.buffs.has(BuffType.BrainOfConfusionBuff)) {
+    if (dodgeable && eq.boc && Math.random() < 1 / 6 && !this.buffs.has(BuffType.BrainOfConfusionBuff)) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       this.bocPulse = 1;
       return 0;
@@ -13009,7 +13395,7 @@ export class Player extends Entity {
     // ShadowDodge()（:38306-38324）：SetImmuneTimeForAllTypes(longInvince?120:80) +
     // DelBuff(59) + PutHallowedArmorSetBonusOnCooldown(:38326 timer=1800)——免疫
     // 面走 dodgeFullFill 全桶满填（F13 同款），timer 由 shadowDodgeTimer 承载。
-    if (this.hasVanillaBuff(59)) {
+    if (dodgeable && this.hasVanillaBuff(59)) {
       this.dodgeFullFill(eq.longInvince ? 120 : 80);
       this.removeVanillaBuff(59);                       // 消费即剥离（:38314-38322）
       this.shadowDodgeTimer = 1800;                     // :38326 重整窗 30s
@@ -13021,8 +13407,8 @@ export class Player extends Entity {
     //  ——原版 Hurt 无 Damage<=0 门（:38482-38500 早退族仅上帝/微光/免疫/闪避四族,
     //  亲读）,CalculateDamagePlayersTake 对 0 伤输入钳 1（Main.cs:67146-67157 `if
     //  (num < 1.0) num = 1.0`）;零 mod 时 identity 闸透传 dmg=0 合成输入落此早退=
-    //  原版偏离（orphan-b3 工单3「dmg>0 门已删」存量红根因——B3 波删的 vanilla 面
-    //  门被 619 mod 面门在 dmg=0 输入档复活）。
+    //  原版偏离（orphan-b3 工单3 门复活根因同上 R-B-P1 注,不赘——★BJ743-A:原此处
+    //  与 preHurt 门注重复展开同一根因,收口为交叉引用）。
     const dmgGateIn = dmg;
     dmg = runModDamageGate(this, dmg);
     if (dmg <= 0 && dmgGateIn > 0) { this.dodgeFullFill(eq.longInvince ? 120 : 80); return 0; }
@@ -13068,8 +13454,18 @@ export class Player extends Entity {
       const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
       return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     })();
+    // ★BJ740-A ACC10（issue #30）：hasRaisableShield 双源——①装备盾 shieldSlot>0
+    //   （GrantArmorBenefits :13222,eq.shieldItem）∪ ②手持 4760 中士联合盾自带资格
+    //   （UpdateEquips :13175-13178 `HeldItem.type==4760 && ownedProjectileCounts[866]<1`）。
+    //   ★G36-A D2（2026-10-31）：计数门补齐——866 弹种已实装（Boomerang 族,盾击弹
+    //   aiStyle3 目标转向）,在飞期间（fixedUpdate 维护 heldShield866InFlight 快照）
+    //   无举盾资格 = 原版 <1 门同相。
+    //   3823 地狱之剑持有者不自带资格,仍须装备盾（:31954 门 = hasRaisableShield &&
+    //   手持∈{3823,4760}）。旧面只认 eq.shieldItem（死旗恒 false）= 举盾门整面不开
+    const raisableShield = !!eq.shieldItem
+      || (heldShieldVid === 4760 && !this.heldShield866InFlight);
     const shouldGuard = this.inputUseTile && !this.mount.active
-      && !!eq.shieldItem && (heldShieldVid === 3823 || heldShieldVid === 4760);
+      && raisableShield && (heldShieldVid === 3823 || heldShieldVid === 4760);
     if (shouldGuard !== this.shieldRaised) {
       this.shieldRaised = shouldGuard;
       if (shouldGuard) {
@@ -13122,8 +13518,13 @@ export class Player extends Entity {
     if (solarConsumed) num2 = Math.floor(num2 * 0.8);        // :38601 (int)（num5=0.2f→×0.8）
     if (eq.beetleDef && this.beetleOrbs > 0) {               // :38605-38613 甲虫步
       num2 = Math.floor(num2 * (1 - 0.15 * this.beetleOrbs)); // :38612 (int)（orbs=消耗前值）
-      this.beetleOrbs--;                                     // :38613 步内即减（原位次）
-      (this as unknown as { __swBeetle?: { resetCounter(): void } }).__swBeetle?.resetCounter();
+      // ★BJ745 A16：orbs--/DelBuff 95-97/AddBuff(95+orbs-1)/counter=0 全链迁
+      //   BeetleMeter.onHurtConsumeOrb（buff 单源——旧裸 orbs-- 不动 buff 栏,
+      //   下拍 meter Phase1 从陈旧档派生回涨）。懒建 = Game.tick 驱动前的首拍
+      //   命中/裸测试宿主同旧语义（字段面直减）
+      const bmSelf = this as unknown as { __swBeetle?: BeetleMeter };
+      if (!bmSelf.__swBeetle) bmSelf.__swBeetle = new BeetleMeter();
+      bmSelf.__swBeetle.onHurtConsumeOrb(this);
     }
     const reduction = Math.max(1, num2);                     // :38661 下限 1 + :38672 (int)
     this.hp -= reduction;
@@ -13223,7 +13624,7 @@ export class Player extends Entity {
       return;
     }
     const p = shimmerTeleportPos(spot, this.w, this.h);
-    this.environmentBuffImmunityTimer = 4;        // Teleport :37701（环境 buff 免疫窗）
+    this.teleportHeadReset();                     // ★G39-A（g36a D-⑨）：Teleport :37702-37703 头段双字段（旧单写 envTimer=4 扩为双字段）
     // ★BJ108 登记债①清偿（2026-09-17）：Teleport(pos,12) :37747 全 style 汇聚 →
     // StartCameraTransitionForPlayerTeleport(oldPos,0.1,0)（style12 无 delay 特支,
     // 仅 Style==1 delay=10 :37744-37746）——近距滑行/远距黑幕由 BJ103-A1b 单源分道。
@@ -13238,9 +13639,11 @@ export class Player extends Entity {
     //  :29095 零 Dismount 同门——不随迁=脱困被拖回+timeShimmering 归零重累,
     //  每 3600t 空转一次）。镜像取速度终值 (0,0.0001),故列于 vy 写后。
     game.migrateMinecartOnTeleport?.();
+    this.teleportHeadReset();               // ★G39-A（g36a D-⑨）：Teleport :37702-37703 头段双字段（替换原 envTimer 单写行）
+    this.stopVanityActions();               // ★G36-A D4：Teleport :37708（style12 同头段）
     this.shimmering = false;
     this.inShimmer = false;
-    this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化
+    this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化（Teleport :37709-37715 同拍再清=幂等）
     this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
     // ShimmerTownNPC 到场音 = SoundID.Item29（Spawn_ShimmerTownNPC 处理器尾
@@ -13894,6 +14297,47 @@ export class Player extends Entity {
     this.petting.isPetting = false;
     this.petting.mount = false;
     this.petting.validTarget = null;
+  }
+
+  /** ★G36-A D4（BJ738 登记债清偿,2026-10-31）Teleport/Spawn 共有头段——
+   *  StopVanityActions（:33722-33728 = StopPettingAnimal + SitUp + StopSleeping;
+   *  Teleport :37708 / Spawn :37840 两入口同调）。SitUp 经 sitUpHook 反转
+   *  （Game.standUp = PlayerSittingHelper.SitUp :122-140 四字段清除,幂等）;钩未接线
+   *  （裸测/远端代理）时直清四字段兜底（standUp 本体即该四字段,无重入面）。
+   *  StopSleeping（PlayerSleepingHelper.cs :98-131）= isSleeping/timeSleeping 清零。 */
+  stopVanityActions(): void {
+    this.stopPettingAnimal();                        // :33728
+    this.sitUpHook?.();                             // :33726 SitUp
+    if (this.sitting) {                             // 钩未接线兜底
+      this.sitting = false;
+      this.seatOffsetX = 0; this.seatOffsetY = 0;
+      this.seatIsToilet = false; this.sitTicks = 0;
+    }
+    if (this.sleeping) {                            // :33727 StopSleeping
+      this.sleeping = false;
+      this.timeSleeping = 0;
+    }
+  }
+
+  /** ★G36-A D4：Teleport 专属 shimmer 清面（:37709-37715 `shimmering || shimmerWet →
+   *  三态清 + ClearBuff(353)`——Spawn 无此段,只有 Teleport）。`wet = false` 写位由
+   *  本仓派生 wet getter（inWater∪inLava∪inHoney∪inShimmer,每拍碰撞重算）自承载
+   *  =同拍等价;shimmerWet 镜像位 = inShimmer。 */
+  teleportClearShimmer(): void {
+    if (this.shimmering || this.inShimmer) {
+      this.shimmering = false;
+      this.inShimmer = false;
+      this.buffs.remove(BuffType.Shimmered);   // ClearBuff(353)
+    }
+  }
+
+  /** ★G39-A（g36a D-⑨,2026-11-01）：Teleport 头段双字段（Player.cs:37702-37703
+   *  `_funkytownAchievementCheckCooldown = 100; environmentBuffImmunityTimer = 4;`
+   *  ——try 块头无条件,全 style 通用）。九传送面统一接线（Game×5 混乱杖/虫洞/
+   *  recall 尾/style8/晶塔 + Player×3 HoD 钩/微光脱困/女王钩 + Portal×1）。 */
+  teleportHeadReset(): void {
+    this.funkTownCd = 100;                 // :37702
+    this.environmentBuffImmunityTimer = 4; // :37703
   }
 
   /** CanSnapToPosition（:32945-32983）：!SolidCollision(pos+offset) + CanHit 直线，

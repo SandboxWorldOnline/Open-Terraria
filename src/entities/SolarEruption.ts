@@ -16,9 +16,9 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B19）：城镇 voodoo 靶
+import { playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCrittersAll } from './projTargets';   // ★BJ729-A（D1 B19）：城镇 voodoo 靶;★G37-A（D7）：critter 臂
 import { damageVarRoll } from '../stats/DamageVar';
-import { rollVanillaHitCrit } from './proj1457';
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyBuffTicks } from './projStatus';
 
@@ -180,7 +180,8 @@ export class SolarEruptionWhip extends Entity {
       if (e.dead || this.hitCd.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // ★BJ486③ 掷率=owner 装配（rollVanillaHitCrit:12915-12927,611 melee 旗）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
+      //  ★G37-A（D6）：TimerCrit :12928 接单源（612 爆焰既有,611 鞭本体补齐）。
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
       // ★W03 同 SolarFlare 面（上注）——611 melee 旗=crit 掷+DV+旗,crit ×2 防后（S02）
       const dmg = damageVarRoll(this.damage,
         ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
@@ -209,9 +210,13 @@ export class SolarEruptionWhip extends Entity {
     //  由 TownNPC.hurt iframes 承载（D3 族口径）。hitTownNpcs 单源。
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', this.projId,
       undefined, undefined, undefined, undefined,
-      () => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
-        crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
+      (tn611) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
+        crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn611, this.critChance > 0),   // ★G37-A（D6）：TimerCrit 接单源
         penPercent: this.armorPen }));
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
+    //  动物同链（611 非 minion/sentry → CanNPCBeHit :20675 放行）;AABB 自盒;穿透鞭
+    //  → hitCrittersAll 多靶（4t 节流窗对一击致死 critter=死面,iframes 近似同族口径）。
+    hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game);
     }
   }
 

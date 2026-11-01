@@ -7,6 +7,7 @@
 //   5 摔伤系数（fallDamage）与 extraFall 豁免、海龟免淹（:22953）
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import {
@@ -1508,7 +1509,12 @@ describe('Scutlix 眼激光 606 实体化（MountShot：直线/子步/命中消�
     const s2 = new MountShot(0, 0, 14, 0, 150, 0, 606);
     s2.fixedUpdate(1 / 60, hooks2);
     expect(s2.dead).toBe(true);
-    expect(hit).toEqual([150]);
+    // ★G37-A（D6,2026-10-31）改判史：MountShot 606 敌臂补 DV :12970 逐靶掷+TimerCrit
+    //  :12928 消费（BJ729-A 登记债清偿;606 flagless=零类掷）→ 旧平值钉 [150] 改
+    //  31 档 DV 域锁（bj735a 判例形,luck=0 单掷域）。
+    const dvDomain606 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain606.add(damageVarRoll(150, 0, () => i / 31));
+    expect(dvDomain606.has(hit[0])).toBe(true);
   });
 
   it('Santank 炮击 930 重力抛物线（noGravity: false → vy 累加 0.3/tick，1 子步）', () => {

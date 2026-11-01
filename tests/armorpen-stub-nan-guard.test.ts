@@ -50,6 +50,16 @@
 //   equipStats 源 1 次）。逐站亲读复核=合法 armorPen 读位（各喂 hurt armorPen 参/
 //   flatPen 通道,非误报）;守卫面（unguarded/unparened 断言）零改动。
 //   总站数 102→105（97+2+1+5+0）。
+// ★BJ748（2026-11-01,终验尾迹收口）站数 105→107——两新站均 G39-A（bj745a D1/D6
+//   清偿,台账 /tmp/recon/g39a-ledger.md ⑦）亲读合法读位：
+//   Game.ts 98→99：日曜反击块 608 爆闪环 hurt 第 5 参 `(p.equipStats.armorPen ?? 0)`
+//     （:13684-86 ownedBySomeone&&!hostile 门玩家通用池——D1 四处之一,另三处
+//     Player.ts 走 playerArmorPenOf 不入本闸）。括号习语闸扩第三形 p 别名（全形
+//     锚不松陷阱形,见 scan 注）。
+//   MinionProj 4→5：ownerArmorPenOf 单源 helper（:120,D6 十处 spawn 注入读面）。
+//     落盘形 `((cast)?.equipStats?.armorPen) ?? 0` 多包一层括号 ⇒ rest 以 ) 开头
+//     触 unguarded 假红——src 侧对齐 playerArmorPenOf（MountCombat:659）守卫形
+//     `…armorPen ?? 0)`（语义等价纯习语对齐）,闸不放宽。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
@@ -68,10 +78,10 @@ import { npcCheckArmorPenetration } from '../src/entities/projStatus';
  *      （2026-10-21）946 城镇臂 flatPen 同改两源——5−2+1=4,逐站亲读合法读位
  *      （身份锁=tests/bj491-critroll-tail2-three.test.ts ③3b）。 */
 const FILES: Array<[string, number]> = [
-  ['src/core/Game.ts', 98],      // 88 eq 形 + 10 this.player.equipStats 直读形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2;★BJ703-F 97→98=D2 runModModifyHitNpc mod 钩参站）
+  ['src/core/Game.ts', 99],      // 88 eq 形 + 10 this.player.equipStats 直读形 + 1 p 别名形（★Z 刀 92→97,BJ282×2/BJ286×1/BJ345×2;★BJ703-F 97→98=D2 runModModifyHitNpc mod 钩参站;★BJ748 98→99=G39-A ⑦D1 日曜反击块 608 爆闪环 hurt 参 `(p.equipStats.armorPen ?? 0)`,:13684-86 ownedBySomeone 门玩家池——括号习语闸已认 p 别名第三形）
   ['src/entities/WhipProj.ts', 2],   // ★BJ491③ 1→2：:756 Y2 城镇 settle flatPen（:13686 num6 玩家通用 armorPen 透传）+ :851 敌怪环 hurt 参（原 :626 三元臂,行漂）
   ['src/entities/MountCombat.ts', 1], // :646 playerArmorPenOf 唯一桶
-  ['src/entities/MinionProj.ts', 4],  // ★BJ491③ 3→5→★BJ703-F 5→4（BJ684 ai156Strike 收编+BJ703-D4 946 两源,见上注）：946 城镇/ai156Strike/contactTown 三两源站+contact 敌怪环单源站
+  ['src/entities/MinionProj.ts', 5],  // ★BJ491③ 3→5→★BJ703-F 5→4→★BJ748 4→5（G39-A ⑦D6 ownerArmorPenOf 单源 helper :120——10 处 spawn 注入的读面;旧形 `) ?? 0` 触 unguarded 假红,已对齐 playerArmorPenOf 守卫形）：946 城镇/ai156Strike/contactTown 三两源站+contact 敌怪环单源站+helper 1
   ['src/entities/Arrow.ts', 0],       // 仅注释提及；读面=弹幕自身字段（缺省 0）
 ];
 
@@ -105,11 +115,14 @@ function scan(): ScanResult {
         continue;
       }
       if (file === 'src/core/Game.ts') {
-        // 括号习语：该读所在行必须含 (eq.armorPen ?? 0) 或 (this.player.equipStats.armorPen ?? 0)
+        // 括号习语：该读所在行必须含 (eq.armorPen ?? 0) / (this.player.equipStats.armorPen
+        // ?? 0) / (p.equipStats.armorPen ?? 0)（★BJ748 第三形=G39-A ⑦D1 反击块 p 局部
+        // 别名站;全形锚 `(alias.armorPen ?? 0)`——`(a + alias.armorPen) ?? 0` 陷阱形
+        // 因 ) 插在 armorPen 与 ?? 之间天然不匹配,防 NaN 闸不松动）
         const lineStart = src.lastIndexOf('\n', m.index ?? 0) + 1;
         const lineEnd = src.indexOf('\n', m.index ?? 0);
         const line = src.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
-        if (!/\((?:eq|this\.player\.equipStats)\.armorPen\s*\?\?\s*0\)/.test(line)) {
+        if (!/\((?:eq|p\.equipStats|this\.player\.equipStats)\.armorPen\s*\?\?\s*0\)/.test(line)) {
           res.unparened.push(`${file}#${n}: ${line.trim().slice(0, 90)}`);
         }
       }
@@ -120,7 +133,7 @@ function scan(): ScanResult {
 }
 
 describe('BJ184 armorPen 桩面 NaN 防御判别网', () => {
-  it('①静态站闸：105 站全防御（?? 紧随）、Game.ts 98 刀站全括号习语、站数钉死', () => {
+  it('①静态站闸：107 站全防御（?? 紧随）、Game.ts 99 刀站全括号习语、站数钉死', () => {
     const res = scan();
     expect(res.unguarded).toEqual([]);
     expect(res.unparened).toEqual([]);

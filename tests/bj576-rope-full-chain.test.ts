@@ -207,7 +207,7 @@ describe('BJ576 C1-C3 flag15 越顶收口（(y−16) 行门+vy<0 钳）', () => 
   it('C1 branch1 攀至柱顶：vy 钳 0+头格止于顶绳格 pulley 恒真静悬（M5 变异位）', () => {
     const w = ropeWorld();
     const p = hangHead24(w);
-    p.inputUp = true; p.inputJump = true;          // 攀爬键位（W/↑ 合面,BJ559 T8 同款）
+    p.inputUp = true;                              // ★BJ737-A：攀爬键=W（inputUp,:26531 controlUp）——Space 并设即 findPulley 拒抓+绳上跳离
     tick(p, w);                                    // 抓绳拍（pulley 当拍置位）
     expect(p.pulley).toBe(true);
     let pulleyFalseTicks = 0;
@@ -221,7 +221,7 @@ describe('BJ576 C1-C3 flag15 越顶收口（(y−16) 行门+vy<0 钳）', () => 
     expect(p.y).toBeGreaterThanOrEqual(14 * TILE); // 头格不出顶绳格（head row=14 ⟺ y∈[224+8,240)）
     expect(p.y).toBeLessThan(15 * TILE);
     const yTop = p.y;
-    p.inputUp = false; p.inputJump = false;
+    p.inputUp = false;
     for (let i = 0; i < 12; i++) tick(p, w);       // 松键静悬 12 拍
     expect(p.pulley).toBe(true);
     expect(p.vy).toBe(0);
@@ -238,7 +238,7 @@ describe('BJ576 C1-C3 flag15 越顶收口（(y−16) 行门+vy<0 钳）', () => 
     tick(p, w);
     expect(p.pulley).toBe(true);
     expect(p.y).toBe(333);                         // 非孤立格→y 不钉（FindPulley num3=y）
-    p.inputJump = true;                            // 持攀爬键
+    // ★BJ737-A：持攀爬键=W（inputUp 持续按住——原 inputJump 并设即触发 :26481 跳离臂）
     for (let i = 0; i < 30; i++) tick(p, w);
     expect(p.pulley).toBe(true);
     expect(p.vy).toBe(0);
@@ -251,7 +251,7 @@ describe('BJ576 C1-C3 flag15 越顶收口（(y−16) 行门+vy<0 钳）', () => 
     // 身体中心行 23（空中）→ branch2
     const p = new Player(ROPE_COL * TILE + 8 - 10, 349, new Inventory());
     p.hp = 500;
-    p.inputUp = true; p.inputJump = true;
+    p.inputUp = true;                              // ★BJ737-A：攀爬键=W 单键面（同 C1 注）
     tick(p, w);
     expect(p.pulley).toBe(true);
     for (let i = 0; i < 60; i++) tick(p, w);

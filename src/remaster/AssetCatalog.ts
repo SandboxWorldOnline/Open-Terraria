@@ -5,11 +5,12 @@
 //   npc       → vanilla-npcs.json frames(纵条 frameH=⌊H/frames⌋);
 //               2D 网格族 NPC_GRIDS;594 横条/690 拼装等特殊路径 excluded
 //   projectile→ vanilla-projframes.json(纵条同 npc)
-//   item      → vanilla.json ix/iy/iw/ih 子矩形 + ITEM_ANIMATION 竖切
+//   item      → vanilla.json ix/iy/iw/ih 子矩形 + ITEM_ANIMATION 竖切;
+//               无矩形独立 PNG 条目(3861/3862,★BJ743-A)整图收录=vicon 回退同构
 //   ui        → vanilla-ui.json files(整图;纸娃娃族前缀 excluded)
 //   gore/glow/buff/misc → remaster-index.json 清单(整图;液体/树冠/背景 excluded)
 import type { VanillaData } from '../assets/SpriteAtlas';
-import type { AssetEntry, FrameRect, RemasterCategory } from './types';
+import type { AssetEntry, EntryLayout, FrameRect, RemasterCategory } from './types';
 import { NPC_GRIDS, npcGridFrames, type NpcGridDef } from './NpcGridLayouts';
 
 /** 一期排除的 vanilla 文件前缀(整图族;条目仍入目录,灰显给理由) */
@@ -176,23 +177,38 @@ export function buildCatalog(inp: CatalogInput): Catalog {
   for (const id of projIds) {
     entries.push({ key: `proj:${id}`, category: 'projectile', name: `Projectile ${id}`, sheet: `vanilla/Projectile_${id}.png`, layout: 'whole', frames: [], meta: { excluded: '缺 sheet 尺寸(remaster-index 未收录)' } });
   }
-  // ---- item(全部 shelf-pack 进 Item_Atlas;动画物品竖切) ----
+  // ---- item(shelf-pack 进 Item_Atlas 子矩形;动画物品竖切;无矩形独立 PNG 整图) ----
   for (const [id, m] of Object.entries(inp.vanilla.items)) {
-    if (m.ix === undefined || m.iw === undefined || m.ih === undefined) continue; // 防御:无矩形旧条目(实测 0 条)
-    const x = m.ix, y = m.iy ?? 0, w = m.iw, h = m.ih;
     const anim = inp.itemAnim?.[Number(id)];
     let frames: FrameRect[];
-    if (anim && anim.n > 1) {
-      // 竖条动画物品:整条被打包进 atlas,按 n 竖切(sliceItemAnimFrame 同式)
-      const fh = Math.floor(h / anim.n);
-      frames = Array.from({ length: anim.n }, (_, i) => ({ x, y: y + i * fh, w, h: fh, frameIdx: i }));
+    let layout: EntryLayout = 'subrect';
+    let excl: string | undefined;
+    if (m.ix === undefined || m.iw === undefined || m.ih === undefined) {
+      // ★BJ743-A（2026-10-31,R24 SEV-3 棘轮实红;BJ731 让位「atlas-append 自愈」
+      //   销案定谳）：3861/3862（Ogre/DarkMage 宝藏袋）经 atlas-append-1457 追加通道
+      //   以独立 PNG 落盘——icon 指 vanilla/Item_<id>.png 且【无】ix/iy/iw/ih 子矩形
+      //   （4722 First Fractal 同形但有显式矩形）。SpriteAtlas.vicon 对无矩形条目
+      //   回退【整图】语义（sx0/sy0/整宽高）,本目录同构收录,否则 item 计数对拍
+      //   6174≠6176 + 帧枚举 byKey 缺键爆红。尺寸取 remaster-index（IHDR 真值）;
+      //   缺尺寸=防御档 excluded 条目（类别计数仍保全量）。
+      const sz = sizeOf(m.icon);
+      layout = 'whole';
+      frames = sz ? [{ x: 0, y: 0, w: sz[0], h: sz[1], frameIdx: 0 }] : [];
+      excl = sz ? undefined : '缺 sheet 尺寸(remaster-index 未收录)';
     } else {
-      frames = [{ x, y, w, h, frameIdx: 0 }];
+      const x = m.ix, y = m.iy ?? 0, w = m.iw, h = m.ih;
+      if (anim && anim.n > 1) {
+        // 竖条动画物品:整条被打包进 atlas,按 n 竖切(sliceItemAnimFrame 同式)
+        const fh = Math.floor(h / anim.n);
+        frames = Array.from({ length: anim.n }, (_, i) => ({ x, y: y + i * fh, w, h: fh, frameIdx: i }));
+      } else {
+        frames = [{ x, y, w, h, frameIdx: 0 }];
+      }
     }
     entries.push({
       key: `item:${id}`, category: 'item', name: m.name, sheet: m.icon,
-      layout: 'subrect', frames,
-      meta: { animFrames: anim && anim.n > 1 ? anim.n : undefined },
+      layout, frames,
+      meta: { animFrames: anim && anim.n > 1 ? anim.n : undefined, excluded: excl },
     });
   }
   // ---- ui(整图;纸娃娃族排除;尺寸来自 remaster-index) ----

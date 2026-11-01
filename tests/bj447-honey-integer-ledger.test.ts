@@ -166,34 +166,40 @@ describe('BJ447 ③ DoT 场景飘字/真值双面整数', () => {
 // ---- ④ 原版 +4/tick 计提节奏对拍 ----
 
 describe('BJ447 ④ 原版算式锚对拍（+4 单位/t 计提、120 单位兑 1HP 的延迟弹出节奏）', () => {
-  it('Burning(块5)+Honey：分块 5,5,4,5,5,4…（每 30t 兑 1HP）；真值同拍 -5,-5,-4…', () => {
+  // ★BJ739 B09 改判史（2026-10-31,issue #29）：蜂蜜对冲自 BJ447 的「块兑付账
+  //  （honeyOffsetUnits,块 5 在兑付拍被抵减为 4）」改为【流量域】原版形态——
+  //  :19212-19219 `if (honey && lifeRegen < 0) { lifeRegen += 4; 钳 ≤0 }` 作用在
+  //  每tick流量上（Burning+Honey = -56 单位/t 而非 -60）,分块弹出恒原额 5、
+  //  节拍放缓（-600 门槛每 ~10.7t 一块）;净流率两模型逐单位一致（② 的守恒锁
+  //  继续承重）。旧 5,5,4 节拍断言随刀退役,换 5,5,5… 流量域节拍
+  it('Burning(块5)+Honey：分块恒 5、每 ~10.7t 一块（流量域 -56/t）;净流率精确', () => {
     const b = new BuffState();
     b.apply(BuffType.Burning, 30);
     b.apply(BuffType.Honey, 30);
     // 跑到绝对第 t tick,返回该 tick 的 [真值 heal, 分块]（绝对拍计数,可乱序调）
     let ran = 0;
+    let pops = 0;
     const at = (t: number): [number, number] => {
       let heal = 0;
       let chunk = 0;
       while (ran < t) {
         heal = b.tick(DT);
         chunk = b.consumeDotChunk();
+        if (chunk > 0) pops += chunk;
         ran++;
       }
       return [heal, chunk];
     };
-    // 账面 = 4×t 单位（:19214）;兑付门槛 120（:19478）→ 首兑 t30,周期 30t
-    expect(at(9)).toEqual([0, 0]);     // 36 单位 < 120,未到块未到门槛
-    expect(at(10)).toEqual([-5, 5]);   // 40 < 120 —— 块全额弹出
-    expect(at(20)).toEqual([-5, 5]);   // 80 < 120
-    expect(at(30)).toEqual([-4, 4]);   // 120 → 兑 1HP（cancel=1）
-    expect(at(40)).toEqual([-5, 5]);   // 兑后余 0,+40 < 120
-    expect(at(50)).toEqual([-5, 5]);   // 80 < 120
-    // t60 兑 1HP（120 → cancel=1）;该拍 flat（60×1/60 累积）可能同拍 +1 弹出
-    // （浮点漂移 ±1t）→ heal 断言放宽为 {-4,-3},chunk（整数面）恒 4
-    const [h60, c60] = at(60);
-    expect(c60).toBe(4);
-    expect([-4, -3]).toContain(h60);
+    // 流量 -56 单位/t（:19175 -60 + :19214 +4）→ -600 门槛首块在 t11（-616）
+    expect(at(10)).toEqual([0, 0]);     // -560 未到门槛
+    expect(at(11)).toEqual([-5, 5]);    // -616 → 弹 5（余 -16）
+    expect(at(21)).toEqual([0, 0]);     // -16-56×10=-576 < 600——t21 无块
+    expect(at(22)).toEqual([-5, 5]);    // -632 → 弹 5（余 -32）
+    // t60：本拍无 DoT 块（块序 11/22/33/43/54/64…）恰逢 flat +1HP 兑付拍 → heal +1
+    const [h60] = at(60);
+    expect(h60).toBe(1);
+    expect(pops % 5).toBe(0);           // 全部块=5（旧模型的 4 块型已退役）
+    expect(pops).toBeGreaterThanOrEqual(25);   // 60t ≥ 5 块（~10.7t/块）
   });
 
   it('Poisoned(块1)+Honey：每 30t 的 DoT 块被 1:1 兑付（2HP/s 对冲 2HP/s）,净流=flat+1HP/s', () => {

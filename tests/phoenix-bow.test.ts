@@ -20,6 +20,7 @@ import {
   type PhoenixOwnerLike, type PhoenixVolleyResult,
 } from '../src/entities/PhoenixBowProj';
 import { soundTrackFiles } from '../src/data/vanillaNpcs';
+import { damageVarRoll } from '../src/stats/DamageVar';   // ★G37-A：DV 域锁（bj735a 判例形）
 
 interface FireEvent {
   tick: number;
@@ -287,7 +288,13 @@ describe('幻影凤凰 ③：706 凤凰弹', () => {
     list.push(enemy);
     bolt.fixedUpdate(1, game);                       // 第 1 tick 即入盒命中
     expect(hurts.length).toBe(1);
-    expect(hurts[0].dmg).toBe(100);
+    // ★G37-A（D6,2026-10-31）改判史：706 敌臂补 DV :12970 逐靶掷（BJ729-A 登记债
+    //  清偿）→ 旧平值钉 100/95 改 31 档 DV 域锁（bj735a 判例形,damageVarRoll 枚举
+    //  自证;luck=0 单掷域）。衰减链照旧：首击 DV(100)、次击 DV(95)（×0.95 截断
+    //  作用在 damage 字段=掷基,:14275-278 原序）。
+    const dvDomain100 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain100.add(damageVarRoll(100, 0, () => i / 31));
+    expect(dvDomain100.has(hurts[0].dmg)).toBe(true);
     expect((enemy as unknown as { onFire3T?: number }).onFire3T).toBe(8);   // 480t/60
     // 冷却窗内不再结算（localNPCHitCooldown=10 :7472）
     for (let t = 0; t < 9 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
@@ -295,6 +302,8 @@ describe('幻影凤凰 ③：706 凤凰弹', () => {
     // 第 10t 冷却完再中：伤害已按上一击终值截断衰减 100→95（×0.95 :14275-14278）
     if (!bolt.dead) bolt.fixedUpdate(1, game);
     expect(hurts.length).toBe(2);
-    expect(hurts[1].dmg).toBe(95);
+    const dvDomain95 = new Set<number>();
+    for (let i = 0; i < 31; i++) dvDomain95.add(damageVarRoll(95, 0, () => i / 31));
+    expect(dvDomain95.has(hurts[1].dmg)).toBe(true);
   });
 });

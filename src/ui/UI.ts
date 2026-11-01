@@ -678,6 +678,66 @@ export function getDimSlotForMouseItem(inp: DimSlotInput): number {
   }
 }
 
+// ---- ★BJ737-A issue#31 件2（2026-10-31）ShouldHighlightSlotForMouseItem 持物高亮面 1:1 ----
+// 原版 ItemSlot.cs:1274-1334：光标持物（Main.mouseItem;IsAir 早退=装配侧 heldStack
+//   判空承载）拖过装备页时,【可放进的对应槽】高亮——Draw 消费 :2360-2382 叠画
+//   InventoryBack22（52×52 纯白边框帧,中心全透明）于槽底之上/幽灵图·图标之下,
+//   色 = 槽底贴图对应 tint ×2 钳 255（Back13→loadout 行色 / Back3→(50,106,46) /
+//   Back12→(45,85,105);α=color2.A×2→脉冲下界 180×2=255 恒不透明）。
+//   与 getDimSlotForMouseItem（不可入槽 ×0.5 变暗）同谓词正反面=互斥不同拍。
+//   用户实报（issue#31）：点取幽灵头/幽灵衣时装后对应槽无高亮——H② 清偿刀（2026-09-29）
+//   只落了变暗面,高亮面整缺,本刀补齐。
+//   语境域：8/9/10/11（装备/时装列 armor）、12（染料）、16-20（misc 逐槽）、33（miscDye）;
+//   展示娃娃 23/24/25/38/帽架 26/27/矿车 39 本仓无槽面（边界声明,同 H②）。
+export interface HighlightSlotInput {
+  /** ItemSlot.Context（slotContext 装配;misc 逐槽 19/20/18/17/16 见 MISC_SLOT_CONTEXTS） */
+  context: number;
+  /** 目标槽号（case 8-11 读 slot>=10 分时装页,:1286） */
+  slot: number;
+  /** checkItem.vanity（Item.vanity=true——vanilla-itemstats van:1,390 件纯时装旗） */
+  heldVanity: boolean;
+  /** checkItem.type（vid;与槽内件比 type 防「原位换同款」假高亮,:1287 第三项） */
+  heldTypeId: number;
+  /** armor[slot].type（vid;空槽=0） */
+  slotItemTypeId: number;
+  /** Player.IsItemSlotUnlockedAndUsable(slot)（case 8-12 解锁臂） */
+  slotUnlocked: boolean;
+  /** CanEquipInArmorSlot 正面值（仓内 armorAcceptsDrag——Z/P/X 刀 1:1 面,含组臂） */
+  canEquip: boolean;
+  /** checkItem.dye > 0（case 12 染料白名单） */
+  heldIsDye: boolean;
+  /** misc 族逐槽分类正面值（case 16-20/33;仓内 miscAccepts/dyeAccepts 单源） */
+  miscFits: boolean;
+}
+
+/** ShouldHighlightSlotForMouseItem 1:1（ItemSlot.cs:1274-1334 switch 逐支） */
+export function shouldHighlightSlotForMouseItem(inp: HighlightSlotInput): boolean {
+  switch (inp.context) {
+    case 8:    // EquipArmor（:1281-1288）
+    case 9:    // EquipArmorVanity
+    case 10:   // EquipAccessory
+    case 11:   // EquipAccessoryVanity
+    {
+      const vanityPage = inp.slot >= 10;                 // :1286
+      return inp.heldVanity === vanityPage               // :1287 四连谓词
+        && inp.slotItemTypeId !== inp.heldTypeId
+        && inp.slotUnlocked
+        && inp.canEquip;
+    }
+    case 12:   // EquipDye（:1296-1297——同带解锁臂,无逐槽 type 比）
+      return inp.slotUnlocked && inp.heldIsDye;
+    case 16:   // EquipGrapple（:1304-1305）
+    case 17:   // EquipMount（:1307-1308）
+    case 18:   // EquipMinecart（:1316-1318）
+    case 19:   // EquipPet（:1313-1314）
+    case 20:   // EquipLight（:1319-1320）
+    case 33:   // EquipMiscDye（:1299-1302）
+      return inp.miscFits;
+    default:
+      return false;
+  }
+}
+
 /** 槽位 CD 覆盖层元素（CoolDown.png 32×32,槽内 (10,10) 32px = inset 19.2%/61.538%,
  *  同 FX43 图标盒几何;z-index 3 压过 img/.cnt（原版绘序 CD 最后）,眼钮 z5 不让） */
 function makeSlotCdEl(): HTMLElement {
@@ -6255,6 +6315,90 @@ export class UI {
     return getDimSlotForMouseItem({ context, slotUnlocked: unlocked, mouseFitsSlot: fits });
   }
 
+  /** ★BJ737-A issue#31 件2：ShouldHighlightSlotForMouseItem 装配（ItemSlot.cs:2360
+   *  Draw 内逐帧取 Main.mouseItem;本仓重绘模型下 heldStack 变更必经 refreshAll →
+   *  paintSlotChrome 同拍重算——与 slotItemFadeFor 同通道同拍）。checkItem.IsAir
+   *  早退（:1277）=heldStack 判空。armor 族四谓词逐项装配（:1286-1287）;
+   *  染料/misc 族走 dyeAccepts/miscAccepts 单源（与 H② 变暗面同谓词反面=互斥）。 */
+  private slotMouseItemHighlightFor(where: SlotWhere, i: number): boolean {
+    if (where === 'inv' || where === 'chest') return false;
+    const held = this.heldStack;
+    if (!held) return false;
+    const inv = this.game.player.inv;
+    const context = where === 'misc'
+      ? (MISC_SLOT_CONTEXTS[i] ?? 16)
+      : slotContext(where, i, true);   // chest 已早退;panelOpen 只影响 inv 族=无关
+    const unlocked = inv.isItemSlotUnlockedAndUsable(i);   // :1287/:1297 解锁臂
+    if (where === 'armor') {
+      const heldVid = ITEM_DEFS[held.id]?.vid ?? -1;
+      const cur = inv.armor[i];
+      return shouldHighlightSlotForMouseItem({
+        context, slot: i,
+        heldVanity: statOfInternal(held.id)?.van === 1,     // Item.vanity（van:1）
+        heldTypeId: heldVid,                                 // checkItem.type
+        slotItemTypeId: cur ? (ITEM_DEFS[cur.id]?.vid ?? -1) : 0,   // armor[slot].type
+        slotUnlocked: unlocked,
+        canEquip: this.armorAcceptsDrag(i, held.id),         // CanEquipInArmorSlot 面
+        heldIsDye: false, miscFits: false,
+      });
+    }
+    if (where === 'dye') {
+      return shouldHighlightSlotForMouseItem({
+        context, slot: i, heldVanity: false, heldTypeId: -1, slotItemTypeId: -1,
+        slotUnlocked: unlocked, canEquip: false,
+        heldIsDye: inv.dyeAccepts(held.id), miscFits: false,
+      });
+    }
+    const fits = where === 'miscDye' ? inv.dyeAccepts(held.id) : inv.miscAccepts(i, held.id);
+    return shouldHighlightSlotForMouseItem({
+      context, slot: i, heldVanity: false, heldTypeId: -1, slotItemTypeId: -1,
+      slotUnlocked: unlocked, canEquip: false, heldIsDye: fits, miscFits: fits,
+    });
+  }
+
+  /** ★BJ737-A issue#31 件2：持物高亮叠层绘制（ItemSlot.cs:2360-2382 Back22 边框帧）。
+   *  绘序=槽底(::after z-1)之上、类型幽灵图/物品图标之下（insertBefore firstChild,
+   *  原版 :2339 底 → :2381 高亮 → :2451 幽灵 → :2499 图标）。色=槽底贴图对应 tint
+   *  ×2 钳 255（:2363-2380 逐贴图支）：misc=Back3→(50,106,46)、miscDye=Back12→
+   *  (45,85,105)、armor/dye=Back13→loadout 行色（TryGetSlotColor,与 paintSlotChrome
+   *  的 --slot-tint 同表同拍）。
+   *  ★呈色法=纯色底+Back22 alpha 遮罩（实机像素复核定谳 2026-10-31）：Back22 是
+   *  【纯白边框帧,中心全透明】——spriteBatch.Draw 只画贴图不透明像素;CSS 若用
+   *  gradient×texture multiply（槽底 ::after 同款技法）会把透明心也填满=整格色块。
+   *  mask-image 按 Back22 alpha 门控=边框环恰原版相（白色帧 × tint = tint 逐值）。
+   *  同值守卫写（BJ270/开包 hitch 纪律）;关时整元素摘除（权威重绘幂等）。 */
+  private paintMouseItemHighlight(slotEl: HTMLElement, where: SlotWhere, i: number): void {
+    const on = this.slotMouseItemHighlightFor(where, i);
+    const hl = slotEl.querySelector('.sw-slot-hl') as HTMLElement | null;
+    if (!on) {
+      if (hl) hl.remove();
+      return;
+    }
+    let rgb: [number, number, number];
+    if (where === 'misc') rgb = [50, 106, 46];                     // Back3 支（:2365）
+    else if (where === 'miscDye') rgb = [45, 85, 105];             // Back12 支（:2373）
+    else {
+      // Back13 支（:2375-2379 TryGetSlotColor=loadout 行色;armor/dye 族）
+      const lo = UI.LOADOUT_COLORS[this.game.player.inv.currentLoadout] ?? UI.LOADOUT_COLORS[0];
+      const c = (where === 'dye' ? lo[2] : i <= 9 ? lo[0] : lo[1]).match(/\d+/g)!;
+      rgb = [Number(c[0]), Number(c[1]), Number(c[2])];
+    }
+    const tint = `rgb(${Math.min(255, rgb[0] * 2)}, ${Math.min(255, rgb[1] * 2)}, ${Math.min(255, rgb[2] * 2)})`;   // :2380 ×2 钳 255
+    let node = hl;
+    if (!node) {
+      node = el('div', 'sw-slot-hl');
+      node.style.cssText = 'position:absolute; inset:0; pointer-events:none; image-rendering:pixelated;'
+        + 'background-color:var(--hl-tint);'
+        + '-webkit-mask-image:url(sprites/vanilla/Inventory_Back22.png); -webkit-mask-size:100% 100%;'
+        + 'mask-image:url(sprites/vanilla/Inventory_Back22.png); mask-size:100% 100%;';
+      slotEl.insertBefore(node, slotEl.firstChild);
+    }
+    if (node.dataset.hl !== tint) {
+      node.dataset.hl = tint;
+      node.style.setProperty('--hl-tint', tint);
+    }
+  }
+
   private tickSlotCooldownOverlays(): void {
     const g = this.game;
     if (!g || !g.player) return;
@@ -7040,6 +7184,9 @@ export class UI {
       if (slotEl.style.getPropertyValue('--sw-ifade') !== fadeWant) {
         slotEl.style.setProperty('--sw-ifade', fadeWant);
       }
+      // ★BJ737-A issue#31 件2：持物高亮叠层（ItemSlot.cs:2360-2382 Back22 边框帧,
+      //  与 H② 变暗同拍同通道——heldStack 变更必经 refreshAll → 此处重算）
+      this.paintMouseItemHighlight(slotEl, where, i);
     }
     // 槽底贴图走 --slot-bgimg（::after 纹理层消费,2026-09-02）——物品/数字不随
     // 格子半透明（半透只在 ::after 的 opacity 上）

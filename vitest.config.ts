@@ -3,12 +3,14 @@
 // 运行中 dev server 的 watcher 重启,见 CLAUDE.md 并行会话约定）。
 // 内容 = vite.config.ts 原样展开 + node:fs 别名到 tests/fs-guard-shim.ts（BJ725-F
 // src 读守卫的装载通道——并行变异窗内结构锁读盘竞态根治,机制注见
-// tests/mutation-guard.ts BJ725-F 节首注）。
+// tests/mutation-guard.ts BJ725-F 节首注）+ node:fs/promises 别名到
+// tests/fs-promises-shim.ts（★BJ743-A 异步旁路收口）。
 // 分流语义（customResolver 首参=替换后 id,vite dist 源码亲读定谳）:
-//   · importer ∈ tests/（测试文件与测试 helper）→ shim（readFileSync 走守卫）
-//   · shim / mutation-guard 自身 → 取消回落真 node:fs（防自环:shim↔guard 循环 +
-//     mutation-guard 模块级求值依赖真 fs 绑定,环内 star 导出 TDZ 必炸）
-//   · 其余（vitest 内部模块/src/tools/node_modules）→ 取消回落真 node:fs（零扰动）
+//   · importer ∈ tests/ ∪ tools/（测试文件/测试 helper/经 tests import 进池的全 src
+//     扫描器——★BJ743-A 扩 tools/ 域）→ shim（readFileSync/readFile 走守卫）
+//   · shim / mutation-guard 自身 → 取消回落真 node:fs(/promises)（防自环:shim↔guard
+//     循环 + mutation-guard 模块级求值依赖真 fs 绑定,环内 star 导出 TDZ 必炸）
+//   · 其余（vitest 内部模块/src/node_modules）→ 取消回落原生（零扰动）
 // 纪律：本文件只承载测试面增量;vite 侧任何字段改动仍回 vite.config.ts 改,此处
 // 展开+透传,不复制语义（防双配置漂移）。
 import { defineConfig, configDefaults } from 'vitest/config';
@@ -16,7 +18,17 @@ import { fileURLToPath } from 'node:url';
 import base from './vite.config';
 
 const SHIM = fileURLToPath(new URL('./tests/fs-guard-shim.ts', import.meta.url));
-const EXEMPT = /fs-guard-shim|mutation-guard/;
+// ★BJ743-A（2026-10-31,R24 SEV-2）：node:fs/promises 姊妹 shim——原 find=/^(node:)?fs$/
+// 不匹配 'node:fs/promises',tests/ 域内 await import('node:fs/promises') 的 readFile
+// （结构锁读 src 面 ~17 站）旁路守卫直读真盘。异步守卫=readFileGuarded（五档同构,
+// 见 tests/fs-promises-shim.ts 头注）。
+const PSHIM = fileURLToPath(new URL('./tests/fs-promises-shim.ts', import.meta.url));
+const EXEMPT = /fs-guard-shim|fs-promises-shim|mutation-guard/;
+// ★BJ743-A：customResolver 路由域 = tests/ ∪ tools/——tools/id-domain-guard、l10n-audit、
+// recon-item/npc、atlas-lint 等全 src 扫描器经 tests/*.test.ts import 进 vitest 池,
+// 其自身 importer 在 tools/ 域（原仅 tests/ 分流=同为 BJ725-F 病根的读盘竞态暴露面）。
+// 独立 `node tools/*.mjs` 直跑不经本配置,零影响。
+const ROUTE_DOMAIN = /\/tests\/|\/tools\//;
 
 // ★BJ728-A 判例 4 优化（2026-10-27 用户令）：变异子 vitest（spawnVitest 带
 // SW_BJXXX_MUT / BJ725_MUT_SKIP 家族旗）免跑三个 vite 钩子审计（vanillaAtlas 素材
@@ -63,10 +75,22 @@ export default defineConfig({
         customResolver(this: {
           resolve: (id: string, im?: string, o?: object) => Promise<string | null>;
         }, _updatedId: string, importer: string | undefined, options: object) {
-          if (importer && /\/tests\//.test(importer) && !EXEMPT.test(importer)) return SHIM;
+          if (importer && ROUTE_DOMAIN.test(importer) && !EXEMPT.test(importer)) return SHIM;
           // 取消：解析原 builtin（skipSelf 防再入本 alias）→ vite 对 builtin 返 null
           // → resolveId 落空回落原生外置化 = 真 fs
           return this.resolve('node:fs', importer, { ...options, skipSelf: true });
+        },
+      } as never,
+      // ★BJ743-A：fs/promises 别名（find 与上条互斥不重叠;取消支解析原 builtin
+      // 'node:fs/promises'——skipSelf 只跳本条,上条 find 不匹配该 id 不受扰）。
+      {
+        find: /^(node:)?fs\/promises$/,
+        replacement: PSHIM,
+        customResolver(this: {
+          resolve: (id: string, im?: string, o?: object) => Promise<string | null>;
+        }, _updatedId: string, importer: string | undefined, options: object) {
+          if (importer && ROUTE_DOMAIN.test(importer) && !EXEMPT.test(importer)) return PSHIM;
+          return this.resolve('node:fs/promises', importer, { ...options, skipSelf: true });
         },
       } as never,
     ],

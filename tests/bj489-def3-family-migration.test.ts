@@ -136,15 +136,22 @@ describe('BJ489-§1：def-3 家族全清单结构锁（写位零残留+读者掷
       //  +settle/283 敌臂+settle +4（Arrow 16→20,gem magic/283 ranged 原版亲读勘误
       //  census 判语）;MagnetSphere 255 城镇 settle +1（1→2）;PrismProj 461 城镇
       //  settle +1（2→3）。锁语义=面存在性非清单冻结（BJ725-A 判例 3）。
-      ['entities/Arrow.ts', 20],       // ★BJ496①③：通用环+661 爆面+617/659 爆面+whipTagShot 支（旧 2）;★BJ497①：五遗留面收编（5→10）;★BJ704-G24：烟花爆面（10→11）;★BJ727-A：Kill 爆城镇臂 +5（11→16）;★BJ729-A：gem/283 双臂 DV+crit 补齐 +4（16→20）
-      ['entities/MagnetSphereProj.ts', 2],  // 255/260 BeamBoltProj;★BJ729-A：255 城镇 settle +1（1→2）
-      ['entities/LunarNebula.ts', 3],       // 634/635 飞行盒+Kill 爆+645
-      ['entities/RainbowProj.ts', 1],       // 251 段
-      ['entities/PrismProj.ts', 3],         // 632 光棱+461 光束;★BJ729-A：461 城镇 settle +1（2→3）
-      ['entities/MissileProj.ts', 5],       // 16/34/79 直击+Kill 爆+491+星怒 9（BJ486③ 既有）;★BJ727-A：KILL_BURST 城镇 settle +1（4→5）
-      ['entities/MonkStaffFury.ts', 4],     // 697/699/700+武僧蓄爆 25（BJ486④ 既有）
-      ['entities/SkyDragonFury.ts', 4],     // 707+708/709/1110（★BJ492② 右键三型收编,swCrit 载体退役）
-      ['entities/DeadCellsFlint.ts', 2],    // 1043 波+1041 尖刺
+      // ★G37-A（D5,2026-10-31）改判史：爆面 crit 段迁 rollVanillaHitCritConsumeTimer
+      //  单源（TimerCrit :12928 收编——16 掷位迁移+283 critter 环新增 1 掷位）
+      //  → 余 6 位（主环×2/631/钉 514×2/whipTagShot）;锁语义=面存在性非清单冻结（BJ725-A 判例 3）。
+      ['entities/Arrow.ts', 6],
+      ['entities/MagnetSphereProj.ts', 0],  // ★G37-A：敌臂+城镇 settle 双位迁 ConsumeTimer 单源（D6 DV+TimerCrit 随刀）
+      // ★BJ744 改判史：BJ741 G37①（R19-1）DV+TimerCrit 残差族批量收编——下列五文件
+      //  掷位全数迁 rollVanillaHitCritConsumeTimer 单源（:12915-28 类掷+TimerCrit 各自
+      //  独立求值后 ||;新面存在性由 tests/bj741a 3a「9 文件零旧形」结构锁承载）→
+      //  本表 plain 形计数归 0=旧形零残留负向锁（回退 plain 形=丢 TimerCrit 消费必红）。
+      ['entities/LunarNebula.ts', 0],       // 634/635 飞行盒+Kill 爆+645 三站迁单源（3→0,★BJ744）
+      ['entities/RainbowProj.ts', 0],       // 251 段迁单源（1→0,★BJ744）
+      ['entities/PrismProj.ts', 0],         // 632 光棱+461 光束+城镇 settle 三站迁单源（3→0,★BJ744）
+      ['entities/MissileProj.ts', 3],       // 16/34/79 直击+星怒 9+主环接触（★G37-A：KILL_BURST 敌臂+settle 双位迁 ConsumeTimer 单源 5→3）
+      ['entities/MonkStaffFury.ts', 0],     // 697/698/699/700 四站迁单源（4→0,★BJ744;698 bonus 25 形参保留）
+      ['entities/SkyDragonFury.ts', 0],     // 707+708/709/1110 四站迁单源（4→0,★BJ744）
+      ['entities/DeadCellsFlint.ts', 0],    // 1043 波+1041 尖刺迁单源（2→0,★BJ744）
     ];
     for (const [f, n] of counts) {
       const hits = SRC(f).split('rollVanillaHitCrit(').length - 1;
@@ -180,7 +187,9 @@ describe('BJ489-§1：def-3 家族全清单结构锁（写位零残留+读者掷
   it('1g emitFlintSpikes 入参载体=关断钉传播面（1041 尖刺掷率走实体面 rollVanillaHitCrit）', () => {
     const f = SRC('entities/DeadCellsFlint.ts');
     expect(f).toContain('spike.critChance = critChance;');   // 传播写位保留（钉载体）
-    expect(f).toContain('this.critChance > 0 && rollVanillaHitCrit(this.projId, game)');
+    // ★BJ744 改判史：BJ741 G37①（R19-1）1041 尖刺掷面迁 rollVanillaHitCritConsumeTimer
+    //  单源（TimerCrit :12928 并单源+DV）——旧 plain 形退役。
+    expect(f).toContain('rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0)');
   });
 });
 

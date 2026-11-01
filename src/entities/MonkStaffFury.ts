@@ -36,10 +36,15 @@ import { cutTilesBox } from './ProjCutTiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
-import { rollVanillaHitCrit } from './proj1457';
+import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt, resolveProjClass, IS_A_WHIP_PROJS } from './projTargets';
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ741 R19-1/G37①：TimerCrit :12928 消费并单源
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
+// ★BJ741 R19-1（2026-10-31）：DV 单源（:12970——四型号敌臂整缺=旧恒平值）+ Nano/confetti
+// 面（Projectile.cs:13688-13696）+ BuffType（浸剂 buff 门）
+import { damageVarRoll } from '../stats/DamageVar';
+import { BuffType } from '../stats/Buffs';
+import { ConfettiBurstProj } from './meleeOnHitProjs';   // 289 彩纸泡（meleeEnchant==7,:13693-96）
 import { soundTrackFiles } from '../data/vanillaNpcs';
 
 /** 玩家侧挂点（RotatedRelativePoint(MountedCenter) ≈ 中心；SkyDragonFury.DragonOwner 同口径） */
@@ -69,14 +74,19 @@ class HitCd {
 /** 敌怪桶最小形状（Enemy.hurt 单点结算；SkyDragonFury.EnemyLike 同形） */
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number, nanoMul?: number) => boolean;   // ★BJ741 R19-1：nanoMul 尾参（Enemy.hurt 第 11 参）
 };
 
 type RectLike = { x: number; y: number; w: number; h: number };
 
 /** 近战弹通用命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计）
  *  ★F3 接线（蓝队四轮）：四型号（697/698/699/700）数据面 melee → 焰爆石/拍击石双支
- *  （Projectile.cs:13439-13446）在本共享出口单点接线；加伤在 banner 外随暴击并入 */
+ *  （Projectile.cs:13439-13446）在本共享出口单点接线；加伤在 banner 外随暴击并入
+ *  ★BJ741 R19-1（2026-10-31）：浸剂三链由调用点收编进本共享出口【hurt 前】=
+ *  StatusNPC(:13634)→StrikeNPC(:13702) 原序（α-H6/A5「ichor 池反例」同款——首轮命中
+ *  即吃 ichor(+15) 穿甲池）。nano ×1.05（meleeEnchant==6,:13689）+ confetti 289
+ *  （==7,:13693-96）同块接入——nanoMul 经 Enemy.hurt 第 11 参在 penAdd 并入后施加
+ *  （BJ739 B19 通道,勿调用侧预乘）。 */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number,
   host?: { projId: number; x: number; y: number; w: number; h: number }): void {
@@ -84,24 +94,34 @@ function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
     { projId: host?.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
       targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
-  e.hurt(applyBannerDamageDealt(game, e, dmg)
-    + (snapBonusFury ? snapBonusFury : 0),
-    kdir * kb, 0, game, pen, crit, 0, true);
-}
-
-/** 浸剂三链（melee 弹命中侧；SkyDragonFury.applyHits 同款——null 门跳过测试态） */
-function applyImbue(game: GameHooks, e: EnemyLike): void {
-  const pl = game.player as unknown as { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
-  if (pl?.buffs) {
-    applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
+  // ★BJ741 R19-1：(melee||IsAWhip) 门（:13688）——四型号数据面全 melee,门保数据驱动
+  const meleeGate741 = resolveProjClass({ projId: host?.projId }) === 'melee'
+    || IS_A_WHIP_PROJS.has(host?.projId ?? 0);
+  const pl741 = game.player as unknown as
+    { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
+  if (meleeGate741 && pl741?.buffs) {
+    applyMeleeImbue(pl741.buffs, e as unknown as Record<string, number>,
       () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
         ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+    if (pl741.buffs.has(BuffType.ImbueParty as unknown as never)) {
+      game.spawnFriendlyProj?.(new ConfettiBurstProj(
+        e.x + e.w / 2, e.y + e.h / 2,
+        (e as unknown as { vx?: number }).vx ?? 0,
+        (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
+    }
   }
-  if (pl?.equipStats) {
-    applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
-    applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
+  if (meleeGate741 && pl741?.equipStats) {
+    applyFrostBurn(pl741.equipStats.frostBurn, e as unknown as Record<string, number>);
+    applyMagmaStoneProj(pl741.equipStats.magmaStone, e as unknown as Record<string, number>);
   }
+  const nanoMul741 = meleeGate741 && pl741?.buffs?.has(BuffType.ImbueNano as unknown as never) ? 1.05 : 1;
+  e.hurt(applyBannerDamageDealt(game, e, dmg)
+    + (snapBonusFury ? snapBonusFury : 0),
+    kdir * kb, 0, game, pen, crit, 0, true, 0, 0, nanoMul741);   // ★BJ741 R19-1：nanoMul 尾参
 }
+
+/** 浸剂三链已收编 hurtEnemy 共享出口（hurt 前=StatusNPC :13634 原序,★BJ741 R19-1
+ *  ——旧 applyImbue 调用点形退役,四站统一） */
 
 /** 绿色冲击尘 55（NewDustDirect 后置覆写：noGravity+色 (20,255,100,160)+DirectionTo 反溅；
  *  :70559-70562/:70822-70846） */
@@ -283,14 +303,15 @@ export class MonkStaffSpin extends Entity {
       if (e.dead || !this.hitCd.ready(e.id, 12)) continue;
       const d2 = distPtRectSq(this.owner.cx, this.owner.cy, e);
       if (d2 > 73 * 73) continue;
-      // ★BJ489 def-3：697 掷率=rollVanillaHitCrit（melee 旗,命中拍 owner 装配+:25712
-      //  持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      // ★BJ489 def-3：697 掷率=rollVanillaHitCritConsumeTimer（melee 旗,命中拍 owner
+      //  装配+:25712 持械折入动态,critTotal 出生拍冻结载体退役）;critChance≤0 关断钉保留
+      //  ★BJ741 R19-1（G37① DV✗T✗ 残差族）：TimerCrit :12928 消费并单源+DV :12970
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV 首掷（旧恒平值）
       // 击退向远离【玩家】中心（Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
     }
     // ---- CutTiles 沿挥轴 ±40（:15326-15334，宽 width×scale≈21.6 → 12px 步进采样）----
     for (let s = -40; s <= 40; s += 12) {
@@ -375,12 +396,12 @@ export class MonkSlam extends Entity {
       //  震波 698 逐发硬写 25,melee 旗（SetDefaults 698 :7387-7400）→ 掷 = 基 4+
       //  meleeCrit 聚合+:25712 持械折入 + 25。旧 critTotal+0.25 静态冻结载体建模退役,
       //  写位已摘）。
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game, 25);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0, 25);   // ★BJ741 R19-1：TimerCrit 并单源（bonus 25 保留）
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV :12970 首掷（旧恒平值）
       // 击退向 = 默认弹体相对向（698 不在 Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.vxSign;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
     }
   }
 
@@ -526,12 +547,12 @@ export class GhastlyGlaiveProj extends Entity {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       if (e.dead || !this.hitCd.ready(e.id, 10)) continue;   // idStaticNPCHitCooldown=10（:7415；★原版为 ID 静态共享表，此处实例级近似）
       if (!segHitsRect(this.cx, this.cy, hx, hy, 23, e)) continue;
-      // ★BJ489 def-3：699 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      // ★BJ489 def-3：699 掷率=rollVanillaHitCritConsumeTimer（melee 旗,命中拍动态;冻结载体退役）
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★BJ741 R19-1：TimerCrit 并单源+DV
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV :12970 首掷（旧恒平值）
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || facing;   // 远离玩家（:13652-13661）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
       // SummonMonkGhast（Damage :14272-14274 → :15238-15265；localAI[0]=1000 单次门）
       if (!this.ghastSummoned) this.summonGhast(game);
     }
@@ -670,12 +691,12 @@ export class MonkGhast extends Entity {
       if (e.dead || this.hitDone.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       this.hitDone.add(e.id);
-      // ★BJ489 def-3：700 掷率=rollVanillaHitCrit（melee 旗,命中拍动态;冻结载体退役）
-      const crit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      // ★BJ489 def-3：700 掷率=rollVanillaHitCritConsumeTimer（melee 旗,命中拍动态;冻结载体退役）
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);   // ★BJ741 R19-1：TimerCrit 并单源+DV
+      const dmg = damageVarRoll(this.damage,
+        ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);   // ★BJ741：DV :12970 首掷（旧恒平值）
       const kdir = Math.sign(this.vx) || 1;          // 默认弹体方向（700 不在 num40 特列）
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
-      applyImbue(game, e);
     }
   }
 

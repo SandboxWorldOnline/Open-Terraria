@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { languageManager } from '../src/i18n/LanguageManager';
-import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile } from '../src/data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile, VANILLA_VID_NORMALIZE } from '../src/data/items';
 import { GRASS_CONVERT_SHEETS, assortedPlaceOk } from '../src/world/evolution/PlantRules';
 import { internalIdOfVid } from '../src/net/leashedSync';
 
@@ -33,6 +33,10 @@ describe('JourneyBrowser 授予映射（vid→def 全量）', () => {
     expect(vids.length).toBeGreaterThan(1000);          // 原版全量面
     let checked = 0;
     for (const vid of vids) {
+      // ★BJ744 改判史：BJ738 P08 SetDefaults 归一化（226→227,Item.cs:4195-4212
+      //  case 226 共享块 type=227——226 非现役药水）把 226 权威键重定向 vi_227 →
+      //  归一化退位源 vid 豁免（消费端 JourneyPowersUI/itemSearch 均已排除）。
+      if (VANILLA_VID_NORMALIZE[vid] !== undefined) continue;
       const wantKey = VANILLA_ITEM_KEY_BY_ID[vid];
       const id = internalIdOfVid(vid);
       const dKey = id >= 0 ? ITEM_DEFS[id]?.key : undefined;   // ★≥0 判(0=合法位)

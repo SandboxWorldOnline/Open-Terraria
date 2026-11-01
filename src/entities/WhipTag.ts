@@ -16,7 +16,9 @@
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
 import { GorePiece } from './GorePiece';
-import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs, townVoodooGateOpen } from './projTargets';   // ★BJ729-A（D1 B27）：1045 城镇 voodoo 靶（townVoodooGateOpen=collide 位窄门谓词）
+import { playerCanHitEnemy, applyBannerDamageDealt, canBeChasedBy, hitTownNpcs, townVoodooGateOpen, hitCrittersAll, projOverlap } from './projTargets';   // ★BJ729-A（D1 B27）：1045 城镇 voodoo 靶（townVoodooGateOpen=collide 位窄门谓词）;★G37-A（D7）：critter 臂
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★G37-A：crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -649,7 +651,11 @@ export class MoonLordWhipProc extends Entity {
       if (en.dead || this.hitSet.has(en.id)) continue;
       if (this.x >= en.x + en.w || this.x + this.w <= en.x
         || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
-      en.hurt(applyBannerDamageDealt(game, en, this.damage), 0, 0, game, 50, false, 0, true);   // fromPlayer=DPS 计
+      // ★G37-A（D6,2026-10-31）：1045 melee（SetDefaults :9892-9910 亲读）→ crit 掷
+      //  :12915-27+TimerCrit :12928 接单源+DV :12970 逐靶掷（旧静态 false 平值=
+      //  BJ729-A D6 登记债）。
+      const crit1045 = rollVanillaHitCritConsumeTimer(1045, game, en);
+      en.hurt(applyBannerDamageDealt(game, en, Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0))), 0, 0, game, 50, crit1045, 0, true);   // fromPlayer=DPS 计
       // 链式补发（:14015-14018：ai[1]<2 → SpawnMoonLordWhipProc(damage, ai[1]+1)）
       if (this.gen < 2) {
         MoonLordWhipProc.spawn(game,
@@ -676,12 +682,34 @@ export class MoonLordWhipProc extends Entity {
         townVictim1045 = { x: tn.x, y: tn.y, w: tn.w, h: tn.h, vx: t2.vx, vy: t2.vy };
         return true;
       }, undefined, undefined, undefined,
-      () => ({ penPercent: 50 }))) {
+      (tn1045) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
+        crit: rollVanillaHitCritConsumeTimer(1045, game, tn1045), penPercent: 50 }))) {
       const tv1045 = townVictim1045 as { x: number; y: number; w: number; h: number; vx?: number; vy?: number } | null;
       if (this.gen < 2 && tv1045) {
         MoonLordWhipProc.spawn(game,
           (el) => (game as unknown as { entities: { add: (x: unknown, b?: string) => void } }).entities.add(el, 'projectiles'),
           tv1045, { x: tv1045.vx ?? 0, y: tv1045.vy ?? 0 }, this.gen + 1);
+      }
+      this.dead = true;
+      return;
+    }
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
+    //  动物同链（1045 ∉ MinionShot/SentryShot → CanNPCBeHit :20675 放行）;AABB 自盒;
+    //  penetrate=1 受理即亡;链式补发对 critter 靶同发（:14015-14018 victim 无关,
+    //  城镇臂同形——从受害体盒出生;hitCrittersAll 谓词捕获首受害体盒）。
+    let critterVictim1045: { x: number; y: number; w: number; h: number } | null = null;
+    const nCrit1045 = hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 1045 },
+      game, undefined, (c1045) => {
+        if (!projOverlap(this.x, this.y, this.w, this.h, c1045)) return false;
+        if (!critterVictim1045) critterVictim1045 = { x: c1045.x, y: c1045.y, w: c1045.w, h: c1045.h };
+        return true;
+      });
+    if (nCrit1045 > 0) {
+      const cv1045 = critterVictim1045 as { x: number; y: number; w: number; h: number } | null;
+      if (this.gen < 2 && cv1045) {
+        MoonLordWhipProc.spawn(game,
+          (el) => (game as unknown as { entities: { add: (x: unknown, b?: string) => void } }).entities.add(el, 'projectiles'),
+          cv1045, { x: 0, y: 0 }, this.gen + 1);
       }
       this.dead = true;
       return;

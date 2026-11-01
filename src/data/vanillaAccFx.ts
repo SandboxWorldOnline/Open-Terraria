@@ -9,8 +9,9 @@ export interface AccFx {
   mana?: number;      // statManaMax2 += N
   def?: number;       // statDefense += N
   move?: number;      // moveSpeed += X
-  fish?: number;
-  shield?: boolean;    // 格挡盾旗标(:30979 CanParryAgainst)      // fishingSkill += X（钓具族 :12549-12556/:14115-14140）
+  fish?: number;      // fishingSkill += X（钓具族 :12549-12556/:14115-14140）
+  // ★BJ740-A ACC10：shield?: boolean 死键退役——全 json 零源,旧消费恒 false;
+  //   举盾资格改走 accDrawSlotsOf(vid).shield（Item.shieldSlot 单源,Player.ts 装备环）
   meleeSpd?: number;  // meleeSpeed += X
   runSpeed?: number;  // accRunSpeed = X（基础 maxRunSpeed=3）
   dmgMelee?: number;

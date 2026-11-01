@@ -65,8 +65,12 @@ describe('R4 盔甲套装加成', () => {
     expect(ARMOR_SET_BONUSES['7|7|7'].critRanged).toBe(10);
     expect(ARMOR_SET_BONUSES['75|7|7'].critRanged).toBe(10);
   });
-  it('丛林套（8|8|8）：耗魔 manaCostMul 0.84', async () => {
+  it('丛林套（8|8|8）：耗魔 manaCostOff 0.16（加算池语义）', async () => {
     const { ARMOR_SET_BONUSES } = await import('../src/data/vanillaArmorSets');
-    expect(ARMOR_SET_BONUSES['8|8|8'].manaCostMul).toBeCloseTo(0.84, 5);
+    // ★BJ744 改判史：BJ742 R20-2 Jungle 耗魔乘区→加算（ArmorSetBonuses.cs:278-281
+    //  `manaCost -= 0.16f`,全树 manaCost 零乘区）——旧 manaCostMul 0.84 键随刀退役,
+    //  manaCostMul 保留为模组通道（原版套装零使用者）。
+    expect(ARMOR_SET_BONUSES['8|8|8'].manaCostOff).toBeCloseTo(0.16, 5);
+    expect(ARMOR_SET_BONUSES['8|8|8'].manaCostMul).toBeUndefined();
   });
 });

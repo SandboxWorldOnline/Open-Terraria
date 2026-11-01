@@ -413,7 +413,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     const jellyDontTake = (ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
     if (jellyDontTake && !zapJelly) continue;
     if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number, nanoMul?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     const bodyHit = self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y;
     const extHit = !bodyHit && extRects.some((r) =>
@@ -520,7 +520,11 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       pl.parryDamageBuff = false;                       // parryDamageBuff=false（:13633）
       pl.parryDamageBuffT = 0;                          // ClearBuff(198)（倒计时承载清零）
     }
-    if (meleeGateHere && imbuNano) mul *= 1.05;   // GetNanoFlaskDamageBoost()=1.05f（Player.cs:44790-44792）
+    // ★BJ739 B19（2026-10-31）：nano ×1.05 移出本乘区——原版 Projectile.cs:13684-13690
+    //  序 = checkArmorPenetration 加伤【后】才 (int)(dmg×1.05)（经 hurt nanoMul 参在
+    //  penAdd 并入后施加;旧先乘后入 hurt = 穿甲池不吃 nano 乘区,issue#29 B19）。
+    //  挥砍链（Game 近战站）原版恰为反序（Nano 先/pen 后,Player.cs:44761-66）不动
+    const projNanoMul = meleeGateHere && imbuNano ? 1.05 : 1;   // GetNanoFlaskDamageBoost()=1.05f（Player.cs:44790-44792）
     // (int) 截断 + 命中乘区。★BJ388 件2（BJ344 债清偿,2026-09-28）：dmgScale 改约
     //   【DV 后逐段先截后乘】——原版 dmg 在 :12970 DamageVar 已是 int,型号段乘完
     //   再各自 (int)（383 宽盒 ×0.6 :13088-13089/悠悠球无视线 ×0.75 :13318/555·546
@@ -595,7 +599,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   ②③原版均=受理（StrikeNPC :13702 照跑,proc/penetrate--/numHits++ :13875-13880/
     //   :14189-14196/:14263 无死亡·active 复查,flag10 锚 num41>0=伤害已实扣）。
     //   故受理面谓词 = !vanillaGated（非门拒即受理）;hurt 返值不再消费（回调判据唯一化）。
-    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? snapBonusHitEnemies : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放;★S02 crit ×2=Enemy.hurt 防后,snap 加伤随整体吃防后 ×2）——hurt 内原版管线;音/飘值=单点
+    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? snapBonusHitEnemies : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true, 0, 0, projNanoMul); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放;★S02 crit ×2=Enemy.hurt 防后,snap 加伤随整体吃防后 ×2）——hurt 内原版管线;音/飘值=单点;★BJ739 B19 nanoMul（penAdd 后 ×1.05,P.cs:13690）
     // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
     // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,

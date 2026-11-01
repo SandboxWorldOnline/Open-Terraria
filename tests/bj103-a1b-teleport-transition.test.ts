@@ -204,11 +204,14 @@ describe('BJ103-A1b Game.startCameraTransitionForPlayerTeleport（近滑行/远�
 // ============================================================
 describe('BJ103-A1b 传送面调用点结构锁', () => {
   it('六汇线全部接 startCameraTransitionForPlayerTeleport（Player.Teleport :37747 汇聚等价）', () => {
+    // ★G39-A（2026-11-01）窗口扩 9000→9300：teleportHeadReset 双字段插行（g36a D-⑨
+    //  清偿,九传送面各 +2 行）把 fireRecallTeleport 体内过渡调用推出窗外——
+    //  G36-A 判例 3（结构锁窗口是脆弱依赖）第二例;勿再手改本窗须先查在位窗口锁。
     for (const fn of ['fireRecallTeleport', 'wormholeTeleportTo', 'teleportNear',
       'teleportToMouse', 'playerNoSpaceTeleport', 'respawnPlayer']) {
       const i = gameSrc.search(new RegExp(`(private |  )${fn}\\(`));
       expect(i, fn).toBeGreaterThan(0);
-      const body = gameSrc.slice(i, i + 9000);
+      const body = gameSrc.slice(i, i + 9300);
       expect(/startCameraTransitionForPlayerTeleport\(/.test(body), `${fn} 未接过渡`).toBe(true);
     }
   });

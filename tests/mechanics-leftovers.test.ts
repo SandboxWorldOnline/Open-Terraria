@@ -206,12 +206,13 @@ describe('#20 减益主干 DoT 表（NaturalLifeRegen :18775-18904）', () => {
     const t = buffTypeByVanilla(144);
     expect(typeof t).toBe('number');
     expect(t).toBe(BuffType.Electrified);
-    // 读档恢复链（BuffState.applySaved 同表）也必须落数值键——用可落盘的 156
-    // （感电 144 在 Main.buffNoSave 名单 Main.cs:8896-8990，applySaved 按原版过滤）
+    // 读档恢复链（BuffState.applySaved 同表）也必须落数值键——用可落盘的 26 WellFed
+    // （感电 144 在 Main.buffNoSave 名单 Main.cs:8896-8990，applySaved 按原版过滤;
+    //   ★BJ742-A R21-④ 起 156 Stoned 亦入名单（Main.cs:9124）——旧夹具 156 随刀换 26）
     const b = new BuffState();
-    b.applySaved([[156, 3]]);
-    expect(b.has(BuffType.Stoned)).toBe(true);
-    expect(b.active.get(BuffType.Stoned)).toBe(3);
+    b.applySaved([[26, 3]]);
+    expect(b.has(BuffType.WellFed)).toBe(true);
+    expect(b.active.get(BuffType.WellFed)).toBe(3);
   });
 
   it('石化(156) 在 Main.debuff 表（Main.cs:8842）→ 护士可清', () => {

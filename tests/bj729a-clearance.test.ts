@@ -163,14 +163,17 @@ describe('BJ729-A D2：爆族敌怪臂 DV/crit 残差七面', () => {
     expect(hurt[0]!.crit).toBe(true);            // agg60+0.5 → rollVanillaHitCrit true（旧裸掷 critChance('ranged')/100=0.6 同真,判别在 M4 变异）
   });
   it('D2-S 结构锁：七面 DV/crit 形态（gem/659/661/1023/烟花/283/286）+城镇 settle 同链', () => {
+    // ★G37-A（D5,2026-10-31）改判史：爆面 crit 段整体收编 rollVanillaHitCritConsumeTimer
+    //  单源（类掷 :12915-27+TimerCrit 消费 :12928——BJ729-A 登记债 D5 清偿）→ 锁形
+    //  随刀迁移（锁语义=面存在性非字符串冻结,BJ726-A 形制）。
     const arrow = SRC('entities/Arrow.ts');
-    expect(arrow).toContain('const critGemAoe = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);');
+    expect(arrow).toContain('const critGemAoe = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);');
     expect(arrow).toContain('crit283');
     const game = SRC('core/Game.ts');
-    expect(game).toContain("crit: rollVanillaHitCrit(286, this as unknown as import('../entities/types').GameHooks)");
+    expect(game).toContain("crit: rollVanillaHitCritConsumeTimer(286, this as unknown as import('../entities/types').GameHooks, tn286)");
     expect(game).toContain('hitCrittersAll({ x: cx286 - R286, y: cy286 - R286, w: R286 * 2, h: R286 * 2, projId: 286 }');
-    // 城镇 settle 同链同掷（DV 入 settle）
-    expect(SRC('entities/Arrow.ts')).toContain("() => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game), penPercent: this.settlePen }))");
+    // 城镇 settle 同链同掷（DV 入 settle;TimerCrit 同扩）
+    expect(SRC('entities/Arrow.ts')).toContain("crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnG37, this.critChance > 0)");
   });
 });
 
@@ -312,7 +315,8 @@ describe('BJ729-A S02：TimerCrit 预倍漏站三处（crystal/scarab/cart ×4�
     expect(SRC('core/Game.ts')).not.toContain('eowFifth * (scarabTimerCrit ? 2 : 1)');
     expect(SRC('core/Game.ts')).not.toContain('explodeFriendlyVictimDamage(40, en) * (crystalTimerCrit ? 2 : 1)');
     expect(SRC('entities/Minecart.ts')).not.toContain('SUPER_CART_LASER_DMG) * (cartTimerCrit ? 2 : 1)');
-    expect(SRC('entities/Minecart.ts')).toContain('e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG), 0, 0, game, 0, cartTimerCrit, 0, true);');
+    // ★BJ741 改判史（2026-10-31 R19-4）：591 补 DV 掷（:12970,banner 前）——锁随刀
+    expect(SRC('entities/Minecart.ts')).toContain('e.hurt(applyBannerDamageDealt(game, e, damageVarRoll(SUPER_CART_LASER_DMG,');
   });
 });
 
@@ -320,8 +324,10 @@ describe('BJ729-A S02：TimerCrit 预倍漏站三处（crystal/scarab/cart ×4�
 describe('BJ729-A 变异恰红', () => {
   itMut('M1 ElectroSphere 城镇臂 crit 镜像摘除 → D1-1 红', () => {
     withMutation(ELECTRO_SRC,
-      '() => ({ crit: this.critChance > 0 && rollVanillaHitCrit(ELECTROSPHERE_PROJ, game),',
-      '() => ({ crit: false,',
+      // ★G37-A 改判史：城镇 settle 迁 rollVanillaHitCritConsumeTimer 单源（D6 DV+T）;
+      //  摘除目标=crit 行（dmg 首键后置行,单行摘除不破语法）
+      'crit: rollVanillaHitCritConsumeTimer(ELECTROSPHERE_PROJ, game, tn443, this.critChance > 0),',
+      'crit: false,',
       () => {
         const r = spawnVitest('bj729a-clearance', 'D1-1');
         expect(r.status, '变异须证红').not.toBe(0);
@@ -330,7 +336,8 @@ describe('BJ729-A 变异恰红', () => {
   });
   itMut('M2 gem 爆面 crit 掷摘除（回静态 false）→ D2-2 红', () => {
     withMutation(ARROW_SRC,
-      'const critGemAoe = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);',
+      // ★G37-A 改判史：gem 爆面 crit 段迁单源（D5 TimerCrit 收编）
+      'const critGemAoe = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);',
       'const critGemAoe = false;',
       () => {
         const r = spawnVitest('bj729a-clearance', 'D2-2');
@@ -350,7 +357,8 @@ describe('BJ729-A 变异恰红', () => {
   });
   itMut('M4 286 crit 收编摘除（回退裸掷形）→ D2-3 红（agg60 crit 位）', () => {
     withMutation(join(GAME_ROOT, 'src/core/Game.ts'),
-      "crit: rollVanillaHitCrit(286, this as unknown as import('../entities/types').GameHooks),",
+      // ★G37-A 改判史：286 城镇 settle crit 迁单源（D5 TimerCrit 收编）
+      "crit: rollVanillaHitCritConsumeTimer(286, this as unknown as import('../entities/types').GameHooks, tn286),",
       "crit: Math.random() < (this.player.critChance('ranged') / 100),",
       () => {
         // 旧裸掷漏基 4%+持械折入:agg60 → 0.5<0.6 同真——判别档改 DV 面:settle dmg

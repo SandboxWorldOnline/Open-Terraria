@@ -14,18 +14,25 @@
 //
 // 守卫语义（readFileSyncGuarded,详见 mutation-guard.ts BJ725-F 节首注）:锁空闲→直读;
 // 他人变异窗→读纯净备份;只读持锁者/变异子进程(env 旗)→直读。非 src 路径零开销透传。
+// ★BJ743-A（2026-10-31,R23-LOW-4）URL 形收口:原版只拦 string——readFileSync(new URL
+//   ('…/src/….ts', import.meta.url)) 形（tool-parity 等）绕过守卫。现 string 与
+//   file://URL 经 guardedTargetOf 归一后同路由;Buffer/fd/非法 URL 原参透传
+//   （归一仅用于守卫支,透传面保持原生语义零漂移）。姊妹面 node:fs/promises →
+//   tests/fs-promises-shim.ts（R24 SEV-2 异步旁路收口）。
 import * as realFs from 'node:fs';   // EXEMPT 豁免 → 真 fs
-import { readFileSyncGuarded, isGuardedSrcPath } from './mutation-guard';
+import { readFileSyncGuarded, guardedTargetOf } from './mutation-guard';
 
 export * from 'node:fs';             // EXEMPT 豁免 → 真 fs;具名全量再导出
 
 /** 守卫标记（探针/测试用;局部具名导出按 ESM 规则遮蔽上方星再导出） */
 export const __swFsShim = true as const;
 
-/** BJ725-F 守卫读：src 树 .ts 走守卫（并行变异窗内永得纯净态）,其余逐参透传真 fs */
+/** BJ725-F/BJ743-A 守卫读：src 树 .ts（string 或 file://URL）走守卫（并行变异窗内
+ *  永得纯净态）,其余逐参透传真 fs */
 export function readFileSync(file: unknown, ...args: unknown[]): unknown {
-  return typeof file === 'string' && isGuardedSrcPath(file)
-    ? readFileSyncGuarded(file, ...args)
+  const p = guardedTargetOf(file);
+  return p !== null
+    ? readFileSyncGuarded(p, ...args)
     : (realFs.readFileSync as (...a: unknown[]) => unknown)(file as string, ...args);
 }
 

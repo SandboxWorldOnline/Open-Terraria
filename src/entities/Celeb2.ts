@@ -35,13 +35,14 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, familyBodyStealthDim } from './Arrow';   // ★BJ704-G14 件3：族面减光求值器
 import { tintedTex } from '../render/StringLine';   // ★BJ704-G14 件3：本体减光 rgb 烘焙
-import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs } from './projTargets';   // ★BJ729-A（D1 B24）：城镇 voodoo 靶
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitTownNpcs, hitCritters } from './projTargets';   // ★BJ729-A（D1 B24）：城镇 voodoo 靶;★G37-A（D7）：critter 臂
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ProjGhostRing, drawCeleb2Chain } from './projGhostTrail';   // ★BJ235 烟花链残影
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
-import { rollVanillaHitCrit } from './proj1457';   // ★BJ494 掷率单源（:12915-12927 owner 装配）
+import { rollVanillaHitCritConsumeTimer } from './proj1457';   // ★BJ494 掷率单源;★G37-A：crit 段完整单源（:12915-28）
+import { damageVarRoll } from '../stats/DamageVar';   // ★G37-A（D6）：DV :12970 逐靶掷
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -420,12 +421,10 @@ export class Celeb2Rocket extends Entity {
       //  亲读）→ 三类掷 :12920 ranged 臂达=owner.rangedCrit（:25712-14 逐帧折入,命中拍
       //  动态）。ownedBySomeone=非 trap=true → TimerCrit :12928 无条件消费照达。
       //  critChance 字段保留=关断钉（celeb2-mk2 测试置 0 禁掷）。
-      const rollCrit = this.critChance > 0 && rollVanillaHitCrit(this.projId, game);
-      const timerCrit = (game.player as unknown as
-        { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
-        | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false;
-      const crit = rollCrit || timerCrit;
-      const dmg = this.damage;     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后(NPC.cs:82067)
+      // ★G37-A（D5/D6 收编）：三行拆形迁单源（:12915-28,零行为差）;DV :12970 逐靶
+      //  掷补齐（旧平值=BJ729-A D6 登记债）。
+      const crit = rollVanillaHitCritConsumeTimer(this.projId, game, e, this.critChance > 0);
+      const dmg = Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0));     // ★S02(BJ723-B):crit ×2 移 Enemy.hurt 防后
       // ★F3 接线（蓝队四轮）：庆祝弹射器 MK2 族（714/615/715-718）数据面 ranged
       // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在
       // banner 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
@@ -446,15 +445,19 @@ export class Celeb2Rocket extends Entity {
     //  friendly=false+hostile=false → 原版入场门恒 return 纯视觉,双臂销案。
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * this.knockback,
       'playerProj', this.projId ?? 714, undefined, undefined, undefined, undefined,
-      (tn) => ({
-        crit: (this.critChance > 0 && rollVanillaHitCrit(this.projId ?? 714, game))
-          || ((game.player as unknown as
-            { tryConsumingTimerCrit?: (g: GameHooks, x: number, y: number, w: number, h: number) => boolean }
-            | null)?.tryConsumingTimerCrit?.(game,
-              (tn as unknown as { x: number }).x, (tn as unknown as { y: number }).y,
-              (tn as unknown as { w: number }).w, (tn as unknown as { h: number }).h) ?? false),
+      (tnCb2) => ({
+        // ★G37-A（D5/D6 收编）：TimerCrit 迁单源;DV 城镇臂镜像补齐。
+        dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
+        crit: rollVanillaHitCritConsumeTimer(this.projId ?? 714, game, tnCb2, this.critChance > 0),
         penPercent: this.armorPen,
       }))) {
+      this.explode(game);
+      return;
+    }
+    // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小动物
+    //  同链（715-718 非 minion/sentry → CanNPCBeHit :20675 放行）;penetrate 1 受理
+    //  即 explode 消亡（:14189-196 同相,镜像敌怪/城镇支消亡位）。
+    if (hitCritters({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId ?? 714 }, game)) {
       this.explode(game);
       return;
     }

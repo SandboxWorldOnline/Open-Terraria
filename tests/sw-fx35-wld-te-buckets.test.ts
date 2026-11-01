@@ -24,6 +24,9 @@
 //     Position 逐段硬校验（WF:1788-1862）。
 // 判据：export→parse→export 全等（round-trip 主判据）+ 段字节长度锁 + 变异证红。
 import { describe, it, expect } from 'vitest';
+// ★BJ743-A（R24 SEV-2 族）：require('node:fs') 读形收编 ESM import（行为不变）。
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { exportWld } from '../src/wld/WldExport';
 import { parseWld } from '../src/wld/WldParser';
 import { parseWldToSave } from '../src/wld/WldImport';
@@ -332,8 +335,7 @@ describe('SW-FX35 导出段字节锁 + round-trip 全等', () => {
 
 describe('SW-FX35 真实档回归（Starter_World v279）：三桶导入→导出→自解析', () => {
   it('teSnap/townRooms/bestiary/powers 全量进 SaveData 并零漂移回写', () => {
-    const { existsSync, readFileSync } = require('node:fs') as typeof import('node:fs');
-    const { join } = require('node:path') as typeof import('node:path');
+    // ★BJ743-A:require 读形收编顶部 ESM import(守卫域外 .wld,行为不变)
     const REAL = join(__dirname, '..', 'Starter_World Master.wld');
     if (!existsSync(REAL)) return;
     const buf = new Uint8Array(readFileSync(REAL));

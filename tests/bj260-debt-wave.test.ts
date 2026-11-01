@@ -42,22 +42,32 @@ languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json',
 describe.skipIf(EXT_MISSING)('BJ260-① SOCIAL_VANITY_EFFECTS_VIDS 提取器化（S7 漏修#1）', () => {
   const product = productJson as { all: number[]; social: number[]; _meta: { counts: Record<string, number> } };
 
-  it('数据面：all=171/social=164/vanCoSet=7;抽检新件在集、van 同置 7 件扣除、音乐盒留集', () => {
+  it('数据面：all=171/social=62/vanCoSet=109;抽检新件在集、音乐盒族迁 van 臂（★BJ744 改判史）', () => {
+    // ★BJ744 改判史（2026-10-31,BJ744-A vanity-effects 锚改判+重产）：旧 social=164/
+    //   vanCoSet=7 系「音乐盒/高尔夫/信息件 van=1 后 social 门 OR 压制」时代形——
+    //   1457 DefaultToMusicBox :48638-48655 亲读后 musicBox/golfBall/infoAccessory
+    //   族独立分臂（social 62/vanCoSet 109/musicBox 85 等）;音乐盒 562 迁 van 臂
+    //   （itemTooltip 警示门 parity 独立成立,BJ744 台账）。
     expect(product._meta.counts.all).toBe(171);
-    expect(product._meta.counts.social).toBe(164);
-    expect(product._meta.counts.vanCoSet).toBe(7);
-    // S7 点名漏件抽检（信息配饰族/天壳/泰拉靴/悠悠球弦/高尔夫球/音乐盒）
-    for (const v of [15, 16, 17, 18, 3110, 5000, 5113, 5331, 5452, 5547, 3293, 3308, 4242, 4255, 3989, 562]) {
+    expect(product._meta.counts.social).toBe(62);
+    expect(product._meta.counts.vanCoSet).toBe(109);
+    // S7 点名漏件抽检（信息配饰族/天壳/泰拉靴/悠悠球弦/高尔夫球）
+    // ★BJ744 改判史：5113（高尔夫球?——重产后 van 臂）/562（音乐盒）已迁 van 臂,改验 all
+    for (const v of [15, 16, 17, 18, 3110, 5000, 5331, 5452, 5547, 3293, 3308, 4242, 4255, 3989]) {
       expect(product.social).toContain(v);
+    }
+    for (const v of [5113, 562]) {
+      expect(product.all).toContain(v);   // 迁 van 臂后仍在 all（social 不含）
     }
     // van 臂实压 7 件扣除（S7 已核;音乐盒族不在其列——itemstats 无 van 键）
     for (const v of [3581, 3929, 4563, 4762, 5075, 5076, 1987]) {
       expect(product.social).not.toContain(v);
       expect(product.all).toContain(v);
     }
-    // 音乐盒族留集（S7 简报「音乐盒族扣除」会造成 SW 警示/原版无警示分歧——勘误面）
+    // 音乐盒 562（BJ744 改判：van=1 后独立 musicBox 臂——all 在/social 不在;
+    //   警示门 parity 由 itemTooltip 的 social∧!van∧!hasVanityEffects 式承载）
     expect(product.all).toContain(562);
-    expect(product.social).toContain(562);
+    expect(product.social).not.toContain(562);
     // 旧 4 件回归
     for (const v of [485, 497, 861]) expect(product.social).toContain(v);
   });

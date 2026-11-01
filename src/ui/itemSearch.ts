@@ -12,7 +12,7 @@
 // modernCrafting.ts 零 setInterval/连抓实现，grep 定谳 2026-09-14），取用户规格
 // 档 ~8/s；上限 = 该物品 maxStack（并入钳制走 grantCraftToCursor 既有算式）。
 import { canMergeStack } from './SlotActions';
-import { ITEM_DEFS, vanillaItemCreateTile, PLACE_CLONE_SUPERSEDED } from '../data/items';
+import { ITEM_DEFS, vanillaItemCreateTile, PLACE_CLONE_SUPERSEDED, VANILLA_VID_NORMALIZE } from '../data/items';
 import { ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { isFunctionalTileItem } from '../world/evolution/PlantRules';
 
@@ -129,6 +129,9 @@ export function buildItemSearchPool(io: {
     const vid = mv ? Number(mv[1]) : null;
     if (vid !== null) {
       if (seenVid.has(vid)) return;
+      // ★BJ738 P08：SetDefaults 归一化退位件（226→227）不进池——目标 vid 真件
+      //  已由自身入池,双行即「旧名空功能件」复辟（原版 SetDefaults(226) 直转 227）
+      if (VANILLA_VID_NORMALIZE[vid] !== undefined) return;
       seenVid.add(vid);
       const ct = vanillaItemCreateTile(vid);
       if (ct !== -1 && coveredSheets.has(ct) && !isFunctionalTileItem(ct) && !d.tile) return;   // 惰性 vi_ 死条目（无 tile=不可放置）

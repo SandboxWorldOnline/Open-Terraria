@@ -119,8 +119,8 @@ describe('SW-BJ102 债② 巨石挖路径单 Spawn（Check2x2 NewProjectile :491
 
   it('B4 多弹口面结构锁：spawnBoulderRoll(TrapShot 直发)已退役、双臂只清格走单口', () => {
     // 源码锁（防回退）：挖除臂/家具臂不再含 TrapShot 直发;Spawn 单点=convertBoulderRoll
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
-    const { join, dirname } = require('node:path') as typeof import('node:path');
+    // ★BJ743-A（R24 SEV-2）：函数内 require('node:fs') 旁路守卫——改用顶部既有 ESM
+    //   import（readFileSync/join/dirname 同名同参,行为不变,经 fs-guard-shim）。
     const root = join(dirname(fileURLToPath(import.meta.url)), '..');
     const src = readFileSync(join(root, 'src/core/Game.ts'), 'utf8');
     expect(src).not.toContain('spawnBoulderRoll(');

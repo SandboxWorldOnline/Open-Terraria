@@ -109,6 +109,10 @@ describe('② checkMana 魔力花 QuickMana 支（:53226-53239）', () => {
     p.quickManaHook = () => { drank++; };
     expect(p.checkMana(20)).toBe(true);
     expect(drank).toBe(0);
+    // ★R24 翻案（2026-10-31 红蓝定谳,三轮连环错判终结）：不足支 statMana=0
+    //  （:53254）——五百五十五刀（f2f38e02）错锚 :5878（QuickBuff 有卫门扣减）
+    //  改扣量直落可负=G38-A 前判沿 BJ738 D6 误改 toBe(-15),R24 定谳真回归,
+    //  src 已回原版语义（Player.ts R24 节）。断言回 toBe(0)。
     expect(p.mana).toBe(0);                               // :53254 statMana = 0
     expect(p.slowMagicUse).toBe(true);                    // DoRunOutOfManaEffect :53258-53261
   });
@@ -120,7 +124,7 @@ describe('② checkMana 魔力花 QuickMana 支（:53226-53239）', () => {
     p.quickManaHook = () => { drank++; };
     expect(p.checkMana(20, true)).toBe(true);
     expect(drank).toBe(0);
-    expect(p.mana).toBe(0);
+    expect(p.mana).toBe(0);                               // :53243 魔力花支同归 0（R24）
     expect(p.slowMagicUse).toBe(true);
   });
 
@@ -131,7 +135,7 @@ describe('② checkMana 魔力花 QuickMana 支（:53226-53239）', () => {
     p.quickManaHook = () => { drank++; };                 // 背包无蓝药：喝不动
     expect(p.checkMana(20)).toBe(true);
     expect(drank).toBe(1);
-    expect(p.mana).toBe(0);
+    expect(p.mana).toBe(0);                               // :53243 魔力花支 0（R24）
     expect(p.slowMagicUse).toBe(true);
   });
 

@@ -114,6 +114,10 @@ describe('BJ157-① MagicProj ghostHeal proc 补缺（Projectile.cs:13877-79）'
       equipStats: { setBonus: { ghostHeal: true } },
       lifeSteal: 100 };
     g.player = target;
+    // ★BJ748（A23 尾迹收口）：BJ746 A23 起 applyLifeSteal ghost 支走 candidatePlayers()
+    //  选最缺血者（:12097-12108）——proto 桩必须补 remotePlayerProxies 字段（构造器
+    //  字段初始化被 Object.create 跳过,缺面=spread 炸「not iterable」;④ PVP shell 同式）。
+    g.remotePlayerProxies = [];
     const added: unknown[] = [];
     g.entities = { add: (e: unknown) => { added.push(e); } };
     const n0 = g.applyLifeSteal('ghost', 50, 0, 500, 600, true);
