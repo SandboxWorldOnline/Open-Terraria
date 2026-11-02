@@ -47,15 +47,23 @@ interface PackState { algoVersion: number; vendorSha: string; files: Record<stri
 interface ZipPart { file: string; phase: string; files: number; bytes: number; zipBytes: number; entries: string[]; inputHash: string }
 interface ZipManifest { algoVersion: number; contentHash: string; totalFiles: number; totalBytes: number; parts: ZipPart[] }
 
+// ★开源仓 clone 修复（2026-11-02,vibe-online 实报）:public/assets-zip/ 是
+//   .gitignore:18 排除的【开发机打包产物】——clone 侧无此目录(以及 zip 分片)。
+//   state(.pack-assets-state.json)随仓,但守卫对象是产物新鲜度——产物缺=无物可守,
+//   整套 skip(clone/CI 侧;开发机产物在则照常全量校验)。
+const PACKED = existsSync(join(OUT_DIR, 'manifest.json'));
 const state = JSON.parse(readFileSync(STATE_PATH, 'utf8')) as PackState;
-const manifest = JSON.parse(readFileSync(join(OUT_DIR, 'manifest.json'), 'utf8')) as ZipManifest;
+const manifest = PACKED
+  ? JSON.parse(readFileSync(join(OUT_DIR, 'manifest.json'), 'utf8')) as ZipManifest
+  : null;
 const files: string[] = scanInputs(PUB);
 
-describe('BJ630-R：pack-assets 新鲜度闸（换图必重打，陈旧 zip 包=红）', () => {
+(PACKED ? describe : describe.skip)('BJ630-R：pack-assets 新鲜度闸（换图必重打，陈旧 zip 包=红）', () => {
   it('账本结构在位：algoVersion/vendorSha/manifest 分片计划齐全', () => {
     expect(state.algoVersion).toBe(ALGO_VERSION);
     expect(typeof state.vendorSha).toBe('string');
     expect(state.vendorSha.length).toBeGreaterThan(0);
+    if (!manifest) return;   // ★clone 侧产物缺=skip 面
     expect(manifest.algoVersion).toBe(ALGO_VERSION);
     expect(manifest.parts.length).toBeGreaterThan(0);
     for (const p of manifest.parts) expect(existsSync(join(OUT_DIR, p.file)), `分片在盘 ${p.file}`).toBe(true);
@@ -77,11 +85,13 @@ describe('BJ630-R：pack-assets 新鲜度闸（换图必重打，陈旧 zip 包=
 
   it('manifest.contentHash 重算对拍：state 账本重导出的内容指纹须与在盘 manifest 一致', () => {
     // pack-assets :166 原式：sha1( entries 按扫描序 "path:hash\n" 串 )
+    if (!manifest) return;   // ★clone 侧产物缺=skip 面(describe.skip 已拦,TS 收窄)
     const expectHash = sha1(Buffer.from(files.map((f) => `${f}:${state.files[f]!.h}\n`).join(''), 'utf8'));
     expect(manifest.contentHash, 'manifest 与账本脱节=产物是旧包').toBe(expectHash);
   });
 
   it('逐片 zip 内字节抽检（首+尾 entry）：zip 解出 sha1 ≡ public 现盘 sha1', () => {
+    if (!manifest) return;   // ★clone 侧产物缺=skip 面
     const bad: string[] = [];
     for (const part of manifest.parts) {
       const zbuf = new Uint8Array(readFileSync(join(OUT_DIR, part.file)));

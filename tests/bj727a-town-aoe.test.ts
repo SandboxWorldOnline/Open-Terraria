@@ -105,7 +105,7 @@ describe('BJ727-A B1：settleKillExplosion 城镇臂（C-D4 余面本体）', ()
     const t = run(mkTown(22, PX, PY), { killGuide: true }, [0.5], { arpen: 12 });
     expect(t.calls.length).toBe(1);
     expect(t.calls[0]![0]).toBe(100);
-    expect(t.calls[0]![4]).toBe(12);           // penPercent=flags.arpen（敌怪臂 arpen 同源）
+    expect(t.calls[0]![5]).toBe(12);           // ★R30-P3-1 改判史:flatPen=flags.arpen(flat 域,TownNPC.hurt 第 6 参);旧 [4] penPercent 系 R25 批漏改的域错——flat≥1 喂 percent 槽会变满穿甲(钳 def/2)
     expect(t.calls[0]![9]).toBe(246);
   });
   it('B1-2 DV 判别档 mock0.9999 → 115（+15%;旧无城镇臂=零调用）', () => {

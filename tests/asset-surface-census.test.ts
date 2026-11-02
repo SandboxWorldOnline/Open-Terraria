@@ -73,7 +73,11 @@ describe('★P0-A 资产面完整性（index/zip/盘三面大小写敏感对账�
   });
 
   it('③ pack-assets manifest 全条目盘上精确同名（分片↔盘零漂移）', () => {
-    const m = JSON.parse(readFileSync(join(PUB, 'assets-zip', 'manifest.json'), 'utf8')) as {
+    // ★开源仓 clone 修复（2026-11-02）:assets-zip/=gitignore 开发机打包产物,clone
+    //   侧缺=本面 skip（对照 ⑤ dist-release 存在才验同形）。
+    const mPath = join(PUB, 'assets-zip', 'manifest.json');
+    if (!existsSync(mPath)) return;
+    const m = JSON.parse(readFileSync(mPath, 'utf8')) as {
       parts: Array<{ entries: string[] }>;
     };
     const bad: string[] = [];
@@ -107,6 +111,10 @@ describe('★P0-A 资产面完整性（index/zip/盘三面大小写敏感对账�
   it('⑤ dist-release 面（存在才验）:index/manifest 与盘同步', () => {
     const rel = join(ROOT, 'dist-release');
     if (!existsSync(join(rel, 'assets-index.json'))) return;   // CI 无发布产物则跳
+    // ★开源仓 clone 修复（2026-11-02）:public/assets-zip 同为 gitignore 产物——
+    //   clone 侧两侧都无,⑤ 的对拍对象缺席=skip（dist-release 在而 public 缺
+    //   仅发生在藏产物模拟/异常态,不构成可判面）。
+    if (!existsSync(join(PUB, 'assets-zip', 'manifest.json'))) return;
     const idx = JSON.parse(readFileSync(join(rel, 'assets-index.json'), 'utf8')) as { miscVanilla: string[] };
     const pubIdx = JSON.parse(readFileSync(join(PUB, 'assets-index.json'), 'utf8')) as { miscVanilla: string[] };
     // 发布 index 与源 index 同源（vite build 直拷 public/）——条目集一致

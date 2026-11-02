@@ -147,7 +147,14 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 export function vanRuntimeTileSolid(t: number): boolean {
   const sh = SHEET_OF_TYPE[t] ?? -1;
   if (VAN_TILE_SOLID_EXTRA.has(sh)) return true;
-  if (sh === 484 || sh === 659) return false;
+  // ★R30-P1（红蓝定谳,2026-11-02）:484/659 排除撤销——旧注「生成·装载收尾恒
+  //   false」系**读漏 finally-restore**:GenerateWorld finally → RestoreTemporary
+  //   StateChanges（WorldGen.cs:11119 → :22710-22715 Array.Copy(tileSolidBackup)）,
+  //   而 tileSolidBackup=Reset() 入口快照（:11140）——Reset 自己的 tileSolid[659]
+  //   =false（:11512）与 DesertBiome 的 [484]=false 都写在快照【后】,生成结束
+  //   全被还原抹掉 ⇒ 运行时 484=659=true（Main.cs:7603/:9767 初值即终值）。
+  //   NotReallySolid={387,388,10} 不含两者=原版可致动/算四邻实心。旧排除曾致:
+  //   致动器拒 484/659 + 以太块上放方块被拒（净回归）。
   return !!TILE_DEFS[t]?.solid;
 }
 export function vanGenSolidType(t: number): boolean {
