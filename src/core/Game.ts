@@ -30966,7 +30966,8 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         if (gateHitboxContains(hb, gwx, gwy)) {
           const [cpx, cpy] = gateHitboxClosestPoint(hb, this.player.cx, this.player.cy);
           if (this.inTileRange(Math.floor(cpx / TILE), Math.floor(cpy / TILE))) {
-            ;this.input.rightDown = false;        // releaseUseTile=false（:48）
+            this.potionOfReturnReturnToOriginalUsePosition();
+            this.input.rightDown = false;        // releaseUseTile=false（:48）
             this.tileInteractHappened = true;    // tileInteractionHappened=true（:47）
           }
         }
