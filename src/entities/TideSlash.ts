@@ -188,7 +188,7 @@ export class TideSlash extends Entity {
       'playerProj', 451, undefined, undefined, undefined, undefined,
       (tn451) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(451, game, tn451, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小动物
     //  同链（451 非 minion/sentry → CanNPCBeHit :20675 放行）;AABB 自盒几何镜像;
     //  hitSet 单跳语义（usesLocalNPCImmunity 同敌一次）→ 单发 hitCritters。

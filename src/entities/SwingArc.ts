@@ -453,7 +453,7 @@ export class SwingArc extends Entity {
       }, undefined, undefined, undefined,
       (tnArc) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnArc, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
     //  动物同链（弧族非 minion/sentry → CanNPCBeHit :20675 放行）;锥形几何镜像
     //  敌怪臂（主锥+拖尾锥）;usesLocalNPCImmunity 单跳=hitCrittersAll 逐靶一次
@@ -702,7 +702,7 @@ export class TrueNightsEdgeSlash extends Entity {
       }, undefined, undefined, undefined,
       (tn973) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn973, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7）：critter 臂——圆 100×scale+LOS 几何镜像敌怪臂（ClosestPointInRect）。
     hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game,
       undefined, (c973) => {
@@ -883,7 +883,7 @@ export class NightsEdgeFly extends Entity {
       }, undefined, undefined, undefined,
       (tn972s) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn972s, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7）：critter 臂——锥形几何镜像敌怪臂。
     hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: this.projId }, game,
       undefined, (c972) => {
@@ -1223,7 +1223,7 @@ export class ZenithSword extends Entity {
       undefined, undefined, undefined,
       (tn933) => ({ dmg: damageVarRoll(this.damage, game.player?.luck ?? 0),
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn933, this.critChance > 0),   // ★G37-A（D6）：TimerCrit 接单源
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // TrailingMode 4 提交（:17197 块=AI :16880 与 Damage :17184 之【后】——
     // 命中采样读压栈前旧环,与原版 Damage 内 oldPos 读序一致）
     this.commitTrail(compX, compY);
@@ -1559,7 +1559,7 @@ export class LightsBaneSlash extends Entity {
       undefined, undefined, undefined, undefined,
       (tn974) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn974, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7）：critter 臂——AABB 自盒镜像敌怪臂。
     hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 974 }, game);
   }
@@ -1678,7 +1678,7 @@ export class GrassSlash extends Entity {
       undefined, undefined, undefined, undefined,
       (tn976) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn976, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7）：critter 臂——AABB 自盒镜像敌怪臂。
     hitCrittersAll({ x: this.x, y: this.y, w: this.w, h: this.h, projId: 976 }, game);
   }
@@ -1825,7 +1825,7 @@ export class HorsemansPumpkin extends Entity {
       'playerProj', 321, undefined, undefined, undefined, undefined,
       (tn321) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn321, this.critChance > 0),
-        penPercent: this.armorPen }))) {
+        flatPen: this.armorPen }))) {
       game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) {
         for (const sc of [2, 1]) {

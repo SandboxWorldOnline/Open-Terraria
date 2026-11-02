@@ -139,7 +139,7 @@ export class MushroomBoiExplosionProj extends Entity {
       //  防再登记（勿接 hitCrittersAll——critterRejectFlag 同表恒拒,接=死码）。
       hitTownNpcsAoeBox(this.cx, this.cy, box / 2, game, this.damage, this.projId, 'playerProj',
         () => ({ crit: this.critChance > 0 && rollVanillaHitCrit(this.projId, game),
-          penPercent: this.armorPen,
+          flatPen: this.armorPen,
         }));
     }
     if (this.ai0 >= 3) this.dead = true;            // 3×projFrames(=1) Kill 门（:35105-35108）

@@ -636,10 +636,14 @@ function settleCritterHit(
   const rejected = vanillaGateRejected(gate);
   let crit = false;
   if (!rejected && ctx?.trap !== true) {
+    // ★R25-4（红蓝定谳,2026-11-02）::12915-12928 三类掷后 TryConsumingTimerCrit
+    //   【无条件】消费——懒惰 `||` 短路会吞消费面(掷中→charge 残留/NightsEdge 编排缺)。
+    //   分立求值(rollVanillaHitCritConsumeTimer 同判例,本 helper 是其外最大消费面)。
     const rollCrit = projId > 0 && rollVanillaHitCrit(projId, game);
-    crit = rollCrit || ((game.player as unknown as
+    const timerCrit = ((game.player as unknown as
       { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
       ?.tryConsumingTimerCrit?.(game, c.x, c.y, c.w, c.h) ?? false);
+    crit = rollCrit || timerCrit;
   }
   const landed = (c as unknown as {
     hurt: (d: number, kx: number, ky: number, g: GameHooks,

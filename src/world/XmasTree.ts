@@ -11,7 +11,10 @@
 // 锚点约定双兼容：
 //   原版（PlaceXmasTree_Direct :39577-39595）：锚点格 frameX=10（哨兵）、
 //     其余格 frameX=列号(1-3)/frameY=行号(1-7) 裸索引；wld 导入即此约定。
-//   本仓放置链（framedCellFrame 18px 步长）：锚点 (0,0)、其余 (dx*18, dy*18)。
+//   ★BJ754 TF-11（2026-11-02,issue#39）：本仓放置链已归一原版裸索引域
+//    （framedCellFrame case 171——旧 18px 步长写帧与 CheckXmasTree 裸索引回推
+//    写读域错置=放下即碎）;下方 18px 解码分支仅为【legacy 存档帧】兼容保留
+//    （本刀前放置的树从未存活过放置后复验,存量面≈0,防御性保留）。
 import type { TileStore } from './TileStore';
 
 export const XMAS_TREE_SHEET = 171;

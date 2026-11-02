@@ -795,7 +795,7 @@ export class BlasterBeam extends Entity {
       }, undefined, undefined, undefined,
       (tn741) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn741, this.critChance > 0),   // ★BJ741 R19-1（G37①）：TimerCrit 并单源（settle victim=城镇靶 hitbox）
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {

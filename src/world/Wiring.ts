@@ -16,6 +16,7 @@
 import { TileStore } from './TileStore';
 import { TILE_DEFS, PREVENTS_ACTUATION_UNDER_SHEETS } from '../data/tiles';
 import { canKillTileAt, type KillTileCtx } from '../entities/Mounts';
+import { vanRuntimeTileSolid } from './gen/vanilla/GenSolid';   // ★BJ754 TF-13：deActive tileSolid 域
 
 /** 器件分发表(P3 devices.ts 提供):返回 true 表示已处理该 case */
 export type DeviceHandler = (w: Wiring, sheet: number, x: number, y: number) => boolean;
@@ -710,8 +711,13 @@ export class Wiring {
     if (sh === 226 && j > this.worldSurface && !this.planteraDowned) return;
     // flag = tileSolid && !NotReallySolid{387,388,10}；314/379/386-389/476 显式置 false
     // （Wiring.cs:3227-3239；379 boulder 此前漏列）
-    const def = TILE_DEFS[st.type[t]];
-    let solid = !!def?.solid;
+    // ★BJ754 TF-13（2026-11-02,issue#39）：solid 真值域 = 原版 Main.tileSolid
+    //  （Wiring.cs:3214 直读）——平台 19/矿锭 239/种植箱 380/红队平台 427/队伍平台
+    //  435-439 九类 tileSolid=true 可致动（vanilla-tilecollision 对账差集）。旧读
+    //  TILE_DEFS.solid（运行时碰撞 LUT）漏九类=误拒（issue#39 实测 19/239/380/427/
+    //  435-439 wire 恒 16 不置 inActive 位,石块对照 16→48 正常）。经 GenSolid.
+    //  vanRuntimeTileSolid 单源（含 484/659 初值口径排除）。
+    let solid = vanRuntimeTileSolid(st.type[t]);
     if (sh === 314 || sh === 379 || sh === 386 || sh === 387 || sh === 388 || sh === 389 || sh === 476) solid = false;
     if (sh === 387 || sh === 388 || sh === 10) solid = false; // TileID.Sets.NotReallySolid（TileID.cs:355）
     if (!solid) return;

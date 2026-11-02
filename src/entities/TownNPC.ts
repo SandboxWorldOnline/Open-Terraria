@@ -557,9 +557,10 @@ export interface TownNpcProgression {
  *  tick 由 AI_007 头部 defense = defDefense 起步重算——本仓受击时现算等价）。
  *  顺序敏感项：Skyblock 的 num3 折半（num3>1 才取 (num3+1)/2，:53542-53545，
  *  非乘法）在链中段；tipsy 在链尾乘算（:53555 damage×1.1 / :53556 chance×0.9 /
- *  :53554 defense=(int)(defense×1.1) 截断）。209 的 num3÷3（:53548）在
- *  Skyblock 之后、tipsy 之前——由消费点内联（对乘法项可交换，仅与 Skyblock
- *  折半的组合序有差；skyblockLowTiles 本仓恒 false，见 fromWorld 登记） */
+ *  :53554 defense=(int)(defense×1.1) 截断——防的 ×1.1 作用域=基础+守护+进度
+ *  全量,由消费端 hurt() 合流后施加,★BJ750 ⑯ 见函数尾注）。209 的 num3÷3
+ *  （:53548）在 Skyblock 之后、tipsy 之前——由消费点内联（对乘法项可交换，仅与
+ *  Skyblock 折半的组合序有差；skyblockLowTiles 本仓恒 false，见 fromWorld 登记） */
 export function townNpcProgressionBoost(p: TownNpcProgression):
 { damageMul: number; chanceMul: number; defenseBonus: number } {
   let damage = 1;                        // num2 = 1f（:53400）
@@ -623,9 +624,14 @@ export function townNpcProgressionBoost(p: TownNpcProgression):
     if (chance > 1) chance = (chance + 1) / 2;
     damage += 0.5;
   }
-  if (p.tipsy) {                         // :53552-53557（链尾乘算/防截断）
+  if (p.tipsy) {                         // :53701-53706（链尾乘算;防在消费端全量算）
     damage *= 1.1; chance *= 0.9;
-    defense = Math.trunc(defense * 1.1);
+    // ★BJ750 ⑯（issue#38）：defense=(int)(defense*1.1)（:53703）的作用域 = 基础
+    //  defDefense + 树妖守护 + 进度加成【全量】（vanilla defense 字段 :53549-53562
+    //  先落 defDefense(+dryadWard 20/15/10) 再逐旗累加,tipsy 在链尾乘全量）——
+    //  本函数 defense 累计器从 0 起步（基础由调用方加）,×1.1 若在此截断则只放大
+    //  进度段 = 醉酒 NPC 少 1~4 防。defenseBonus 返回【未乘 tipsy】的进度段,全量
+    //  ×1.1 由消费端 hurt() 在 基础+守护+进度 合流后施加（Math.trunc 同 (int) 截断）。
   }
   return { damageMul: damage, chanceMul: chance, defenseBonus: defense };
 }
@@ -1447,6 +1453,12 @@ export class TownNPC extends Entity {
     if (this.dryadWardT > 0) {
       def += game.world.isMaster ? 20 : game.world.isExpert ? 15 : 10;
     }
+    // ★BJ750 ⑯（issue#38）：tipsy 防御 ×1.1 作用域 = 基础 + 守护 + 进度【全量】
+    //  （NPC.cs:53703 `defense = (int)((double)defense * 1.1)` 在链尾 :53701-53706——
+    //  vanilla defense 字段自 :53549-53562 defDefense(+dryadWard 20/15/10) 起步
+    //  逐旗累加后整乘;(int)=向零截断）。旧实现把 ×1.1 缩进进度段（defenseBonus
+    //  内 trunc）,基础与守护不吃倍率 → 醉酒 NPC 少 1~4 防。
+    if (this.tipsy) def = Math.trunc(def * 1.1);
     // ★对齐批④：穿甲加成先进伤（Player.cs:44762 `num3 += checkArmorPenetration`）
     // 再走防御减算（Main.cs:67126）。
     // ★蓝队 F6（2026-08-31）终形：CalculateDamageNPCsTake 是【double 不取整】面
@@ -5004,7 +5016,12 @@ export class TownNPC extends Entity {
   private exitAttackCommon(cdBase: number, cdRand: number): void {
     this.holdAim = 0;                     // ai[2] 态尽归零（:55080 族）
     const legT = Math.floor(cdBase + Math.floor(this.rng() * Math.max(1, cdRand)));
-    const cdV = cdBase / 2 + Math.floor(this.rng() * Math.max(1, cdRand));
+    // ★BJ751-㉒（issue#38）：原版 localAI[1]=(localAI[3]=numX/2+Next(maxValue))
+    //  （1457 :55084/:55356/:55554/:55682 四态退出，num46/55/65/80 均 int，
+    //  issue 旧引 :64813 漂移）——numX/2 为 **int/int 整除**（15/2=7）：奇数
+    //  AttackTime（护士 18=15/巫师 107=60 偶/动物学家/公主等）冷却恰 +7 而非 7.5，
+    //  atkCd-- 整拍计数不多 1 tick
+    const cdV = Math.trunc(cdBase / 2) + Math.floor(this.rng() * Math.max(1, cdRand));
     this.walkT = legT;                    // ai[1]
     this.atkCd = cdV;                     // localAI[1]
     this.turnLock = cdV;                  // localAI[3]（与 localAI[1] 同值同掷）

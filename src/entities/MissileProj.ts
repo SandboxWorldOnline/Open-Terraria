@@ -1006,7 +1006,7 @@ export class MagicMissileProj extends Entity {
         (tnKB) => ({   // ★G37-A（D5）：城镇臂 TimerCrit 同扩
           dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
           crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnKB, this.critChance > 0),
-          penPercent: this.armorPen,
+          flatPen: this.armorPen,
         }));
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
       // 沿 oldPos 尾迹迸散（79 :72436-72487 / 16 :72511-72577 / 34 :72605-72632，

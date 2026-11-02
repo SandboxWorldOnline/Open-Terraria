@@ -134,6 +134,22 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET_OF_TYPE[i] = s;
 }
+
+/** ★BJ754 TF-12/TF-13（2026-11-02,issue#39）：【运行时】Main.tileSolid 谓词（内部
+ *  tile id 域）——碰撞 LUT ∪ 九类差集 VAN_TILE_SOLID_EXTRA，再排除两枚「初值 true/
+ *  生成·装载收尾后恒 false」：
+ *  · 484 滚球仙人掌（Main.cs:7603 初值 true → DesertBiome cs:12537 起恒 false 到结束）；
+ *  · 659 以太块（Main.cs:9767 初值 true → 生成/装载收尾 WorldGen.cs:11512 恒 false）。
+ *  本仓 TILE_DEFS.solid 钉【初值】口径（192/481-483 同族先例,数据不可改），运行时
+ *  语义消费面——普通块四邻依附门（Player.cs:41571-41579 `Main.tileSolid[邻.type]`）
+ *  与致动器缩入门（Wiring.cs:3214）——须经本包装，勿裸读 def.solid（碰撞 LUT 漏
+ *  九类=误拒）亦勿裸读 vanGenSolidType（生成期覆写表在运行期为空,484/659 会漏排除）。 */
+export function vanRuntimeTileSolid(t: number): boolean {
+  const sh = SHEET_OF_TYPE[t] ?? -1;
+  if (VAN_TILE_SOLID_EXTRA.has(sh)) return true;
+  if (sh === 484 || sh === 659) return false;
+  return !!TILE_DEFS[t]?.solid;
+}
 export function vanGenSolidType(t: number): boolean {
   if (VAN_TILE_SOLID_EXTRA.has(SHEET_OF_TYPE[t] ?? -1)) return true;
   return genSolidType(t);

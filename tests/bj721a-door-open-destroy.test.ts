@@ -63,6 +63,9 @@ function makeBench(st: TileStore) {
   fake.checkDecorSupport = proto.checkDecorSupport;
   fake.killDecorPieceCells = proto.killDecorPieceCells;
   fake.solidAllowBottomSlopeAt = proto.solidAllowBottomSlopeAt;   // pumpkin 草族支撑臂
+  // ★BJ752-A（2026-11-02）：3×3 扫候选集扩容 tileFrameImportant 全表后,开态门 11
+  //  （无 kind 通用件）路由 checkFurnitureSupport——本台架不测门面,置 no-op 桩
+  fake.checkFurnitureSupport = () => {};
   const sweep = (cx: number, cy: number) =>
     (proto.checkDecorSquareFrame as (this: unknown, x: number, y: number) => void).call(fake, cx, cy);
   return { kills, sweep };
@@ -150,7 +153,9 @@ describe('BJ721-A 开门不拆门：可砍多格 DECOR 件占清位列的同型�
     // ★BJ722-A D1 后 = 8 可砍 + 12 新接（sunflower/orb/hangs/wallhang/hangtop/deco3x2/
     //  xmas/support2x2 ax,ay 形 + sapling×3/gnome x,top 形——其余新站几何形不同不计入本式）
     const n = (text.match(/killDecorPieceCells\(ax, ay|killDecorPieceCells\(x, top/g) ?? []).length;
-    expect(n).toBe(20);
+    // ★BJ752-A（2026-11-02）+3：banner(x,topB)/bottletop(x,topQ) 专支 + 通用失撑
+    //  destroy（checkFurnitureSupport 尾段,ax,ay 形）——'sign' 用 axS/ayS 变量名不计入本式
+    expect(n).toBe(23);
     expect(text).toContain('private killDecorPieceCells(ax: number, ay: number, w: number, h: number, type: number)');
     // ★BJ722-A：新站几何抽钉（防单站静默回退——计数式锁不辨成员）
     expect(text).toContain('killDecorPieceCells(ax, ay, 2, 4, st.type[i]);');            // sunflower 2×4

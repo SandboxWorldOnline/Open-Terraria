@@ -74,8 +74,16 @@ export function drawPlacePreview(ctx: Ctx2D, atlas: PvAtlas, pv: PlacePreviewDat
         const img = atlas.ensureVImage(`vanilla/Tiles_${pv.sheet}.png`);
         src = img ? { img, sx: fx2, sy: fy2, sw: 16, sh: 16 } : null;
       } else {
-        const [bx, by] = framedCellFrame(pv.sheet, pv.fw, pv.style, dx, dy);
-        fx2 = bx; fy2 = by;
+        // ★BJ754 TF-11（2026-11-02,issue#39）：圣诞树 171 幽灵源 = 16px 紧排网格
+        //  （TileObjectData.cs:2168-2170 CoordinateWidth 16+Padding 0;DrawPreview
+        //  :893-897 (cw+cp)*i 同式）——放置帧带是裸索引域（PlaceXmasTree_Direct）
+        //  不能直接喂 vframeAt,此处按 16px 步长取样（Tiles_171 ≡ Xmas_0 64×128）。
+        if (pv.sheet === 171) {
+          fx2 = dx * 16; fy2 = dy * 16;
+        } else {
+          const [bx, by] = framedCellFrame(pv.sheet, pv.fw, pv.style, dx, dy);
+          fx2 = bx; fy2 = by;
+        }
         src = atlas.vframeAt(pv.sheet, fx2, fy2);   // 落空回退面由调用域 vmeta 缺失=跳过（vanilla 同帧取不到不画）
       }
       if (!src) continue;

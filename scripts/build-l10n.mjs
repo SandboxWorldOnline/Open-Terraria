@@ -49,7 +49,17 @@ const selectedCultures = CULTURES.filter((c) => selected.includes(c.name));
 function readShards(culture) {
   return SHARDS.map((s) => {
     const f = join(L10N, `${culture}${s}.json`);
-    if (!existsSync(f)) throw new Error(`缺分片: ${f}`);
+    // ★开源仓 clone 修复（2026-11-02）：分片源在仓库外 tools/l10n/（G40 迁移）——
+    //   clone 侧无此目录。缺分片时给出可行动指引而非裸路径（曾致 vibe-online
+    //   yarn start:analyze 启动即崩）。产物 public/l10n 随仓跟踪,clone 侧勿重建。
+    if (!existsSync(f)) {
+      throw new Error(
+        `缺 l10n 分片: ${f}\n`
+        + `  分片源在仓库外 tools/l10n/（开源仓不含——见 C 档可移植注）。\n`
+        + `  · clone/部署环境：产物 public/l10n/ 已随仓,无需重建,直接用即可;\n`
+        + `    若 vite 侧仍报此错,说明 stale 守卫未生效（升 vite.config.ts l10nAuditAuto）。\n`
+        + `  · 开发机：从内部仓同步 tools/l10n/ 分片目录后重跑。`);
+    }
     return parseLenient(readFileSync(f, 'utf8'));
   });
 }

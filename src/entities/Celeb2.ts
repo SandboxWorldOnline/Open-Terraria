@@ -449,7 +449,7 @@ export class Celeb2Rocket extends Entity {
         // ★G37-A（D5/D6 收编）：TimerCrit 迁单源;DV 城镇臂镜像补齐。
         dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),
         crit: rollVanillaHitCritConsumeTimer(this.projId ?? 714, game, tnCb2, this.critChance > 0),
-        penPercent: this.armorPen,
+        flatPen: this.armorPen,
       }))) {
       this.explode(game);
       return;

@@ -118,6 +118,15 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  445 像素盒：触发态 frameX 0/18（PixelBoxPass Wiring.cs:531-553）,style 仅 0。
     //  419 灯 = default 即原版（`frameX=style*18; frameY=0`,state 轴恰在 X）。
     case 420: case 424: case 429: case 445: return [0, style * 18];
+    // ★BJ753 TF-08（2026-11-02,issue#39）：135 压板 / 428 测重板 = Style1x1 系
+    //  【纵向样式】族——TileObjectData.cs:4382-4389 CopyFrom(Style1x1) 后仅覆
+    //  CoordinateHeights{18}+Padding 0+yOff2,无 StyleHorizontal 覆写（ctor 缺省
+    //  false,TileObjectData.cs:1786）→ TileObject.Place :70-75 竖排
+    //  frameY=FullHeight(18)*num、frameX 恒 0。颜色档在 Y：掉落反推 KillTile
+    //  case 135/428 读 frameY/18（WorldGen.cs:66089-66090/:65827-65828）同域。曾落 default
+    //  X 向（style*18）→ 绿压板 541 放成 (18,0)、粉测重板 3626 放成 (54,0),
+    //  挖回全默认色（掉落侧一直读 Y=style0,读写域错置）。
+    case 135: case 428: return [0, style * 18];
     // 10 关门（PlaceDoor WorldGen.cs:32070-32090：frameX=54*(style/36)+变体*18、
     //  frameY=54*(style%36)+行*18——每 36 样式换一列，列内 54px 块三档变体。
     //  曾落 default 写 style*18 → 石门(style44)/活木·骨·血肉门等 style>0 全渲染错区+
@@ -137,6 +146,18 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  style∈0-4,18 步=帧写错带（渲染错姿+与 .wld 原生 28 步不一致,CheckGnome
     //  :54416 `frameX/28` 同域佐证）。
     case 567: return [style * 28, 0];
+    // ★BJ754 TF-09（2026-11-02,issue#39）：珊瑚 81 / 海贝 324 = FlexibleTileWand 单件
+    //  族的【非 18px 步长】帧带——81 = CoordinateWidth 24+pad2 ⇒ FullWidth 26 横排
+    //  无 wrap（TileObjectData.cs:4374-4383 heights{26}/width24/StyleHorizontal,
+    //  StyleWrapLimit 缺省 0）→ fx=26*style；324 = width20+pad2 ⇒ FullWidth/FullHeight
+    //  各 22、StyleWrapLimit=3（:4431-4440）→ 3 列折行：fx=(style%3)*22、
+    //  fy=floor(style/3)*22（海星 3-5 落 fy=22 行、螺壳 6-14 落 44/66/88 行）。
+    //  生成侧 StructuresPass placeCoral/placeShells 同步 26/22 步（:1918/:1929）
+    //  ——运行时 wand 路径曾走 default 18 步（fx=style*18）：珊瑚三帧 0/18/36 应
+    //  0/26/52；海星 2626 写 (54,0) 挖回贝壳 2625（掉落侧 KillTile case 324 按行
+    //  frameY/22 反推,见 vanillaStyleDrops.styleFromFrame[324] 同批）。
+    case 81: return [style * 26, 0];
+    case 324: return [(style % 3) * 22, Math.floor(style / 3) * 22];
     default: return [style * fw * 18, 0];
   }
 }
@@ -174,6 +195,17 @@ export function framedCellFrame(sheet: number, fw: number, style: number, dx: nu
     //  旧实现在此无条件 +21：装饰旗 337-340/789-791/845-847/1451-1469（类级
     //  placeStyle 0-16=style 直域）与破坏回收旗再放置全部被抬高 21 列=错帧+错掉落。
     return [(style % 111) * 18, Math.floor(style / 111) * 54 + dy * 18];
+  }
+  // ★BJ754 TF-11（2026-11-02,issue#39）：圣诞树 171 = HookPlaceOverride 专案
+  //  （TileObjectData.cs:2167 PlaceXmasTree_Direct,processedCoordinates:true——
+  //  Place :36-53 走 override 不落通用帧带）——锚点格 (10,0)（哨兵）,其余格写
+  //  列/行【裸索引】(dx,dy)（WorldGen.cs:39928-39946）。旧走通用 18px 帧（dx*18）
+  //  与幸存面 CheckXmasTree 的裸索引回推（:40006-40010 frameX<10 → x-fx/y-fy）
+  //  写读域错置：第二列/行格被判坏件 → 放下即碎（0/32 格+掉回 1873）。style
+  //  参数原版忽略（Direct 无 style 消费）,放置后帧与 .wld 导入（copyFrame）同域；
+  //  xmasCell 双编码兼容保留（legacy 18px 存档帧解码）。
+  if (sheet === 171) {
+    return dx === 0 && dy === 0 ? [10, 0] : [dx, dy];
   }
   const [bx, by] = furnitureStyleBase(sheet, style, fw);
   const rows = PLACE_ROW_FY[sheet];

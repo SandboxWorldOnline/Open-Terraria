@@ -226,7 +226,7 @@ export class BeamBoltProj extends Entity {
         'playerProj', this.projId, undefined, undefined, undefined, undefined,
         (tn255) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
           crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn255, this.critChance > 0),
-          penPercent: this.armorPen,
+          flatPen: this.armorPen,
           kb: Math.sign((tn255 as unknown as { x: number; w: number }).x
             + (tn255 as unknown as { w: number }).w / 2 - this.cx) * this.knockback || 1 }))) {
         this.pveNumHits++;

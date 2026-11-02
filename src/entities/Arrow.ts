@@ -2257,7 +2257,7 @@ export class Arrow extends Entity {
     //  settle 镜像本面敌怪臂链（巫毒窄门/免疫帧/banner/防后 crit ×2 走原语）。
     //  ★BJ729-A（D2）：settle 同扩 DV+crit（与敌怪臂同链同掷,D2 债清偿条款）。
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, dmg, this.projId, 'playerProj',
-      (tnG37) => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnG37, this.critChance > 0), penPercent: this.settlePen }));   // ★G37-A（D5）：城镇臂 TimerCrit 同扩（settle 逐靶=巫毒窄门后 hurt 前,:12928 同位）
+      (tnG37) => ({ dmg: damageVarRoll(dmg, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnG37, this.critChance > 0), flatPen: this.settlePen }));   // ★G37-A（D5）：城镇臂 TimerCrit 同扩（settle 逐靶=巫毒窄门后 hurt 前,:12928 同位）
     // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
     const aSpd = Math.hypot(this.vx, this.vy);
     const adx = aSpd < 1 ? 0 : this.vx / aSpd;
@@ -2329,7 +2329,7 @@ export class Arrow extends Entity {
       (tn617) => ({   // ★G37-A（D5）：城镇臂 TimerCrit 同扩（settle 逐靶=窄门后 hurt 前,:12928 同位）
         dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn617, this.critChance > 0),
-        penPercent: this.armorPen,
+        flatPen: this.armorPen,
       }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     // 爆尘散布（:73561-73594 逐尘 position = Center + 半盘向×rand×88 覆写）：UnitY 盘 =
@@ -2463,7 +2463,7 @@ export class Arrow extends Entity {
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
     hitTownNpcsAoeBox(this.cx, this.cy, R, game, this.damage, this.projId, 'playerProj',
       (tn659) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn659, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 30; i++) {
       const sc = 2 + Math.random() * 0.5;
@@ -2521,7 +2521,7 @@ export class Arrow extends Entity {
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷）。
     hitTownNpcsAoeBox(this.cx, this.cy, R661, game, this.damage, this.projId, 'playerProj',
       (tn661) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn661, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
-        penPercent: this.settlePen }));
+        flatPen: this.settlePen }));
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
     for (let i = 0; i < 4; i++) {                          // 4×d240（UnitY.RotByRandom 盘内）
       const th = Math.random() * Math.PI * 2, rr = Math.random() * R661 / 2;
@@ -2602,7 +2602,7 @@ export class Arrow extends Entity {
     //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷;休眠面随族接线）。
     hitTownNpcsAoeBox(this.cx, this.cy, R23, game, this.damage, this.projId, 'playerProj',
       (tn1023) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn1023, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩（休眠面随族）
-        penPercent: this.settlePen }));
+        flatPen: this.settlePen }));
     deadCellsBarrelExplosionFx(game, this.cx, this.cy);
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsBarrelExplosion,
       this.cx, this.cy);
@@ -4914,7 +4914,7 @@ export class Arrow extends Entity {
           (tnA29) => ({ dmg: damageVarRoll(this.damage,
             ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
             crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnA29, this.critChance > 0),
-            penPercent: this.settlePen }));
+            flatPen: this.settlePen }));
       }
       // ---- 尘四组 + gore（:73105-73160 逐参） ----
       const vr = Math.atan2(this.vy, this.vx);
@@ -5423,7 +5423,7 @@ export class Arrow extends Entity {
       //  ★BJ729-A（D2）：settle 同扩 DV（与敌怪臂同链同掷,D2 债清偿条款）。
       hitTownNpcsAoeBox(this.cx, this.cy, 96, game, this.damage, this.projId, 'playerProj',
         (tnFw) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0), crit: rollVanillaHitCritConsumeTimer(this.projId, game, tnFw, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
-          penPercent: this.settlePen }));
+          flatPen: this.settlePen }));
     }
     if (this.projId === 617 && !this.dead) this.arcanumDeathBurst(game);
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
@@ -5596,7 +5596,7 @@ export class Arrow extends Entity {
             this.damage, this.projId, 'playerProj',
             (tn283) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
               crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn283, this.critChance > 0),   // ★G37-A（D5）：TimerCrit 同扩
-              penPercent: this.settlePen,
+              flatPen: this.settlePen,
               kb: Math.sign((tn283 as unknown as { x: number }).x - seg.cx) * this.knockback }));
         }
       }

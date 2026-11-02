@@ -212,7 +212,7 @@ export class SolarEruptionWhip extends Entity {
       undefined, undefined, undefined, undefined,
       (tn611) => ({ dmg: damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0),
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn611, this.critChance > 0),   // ★G37-A（D6）：TimerCrit 接单源
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
     // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小
     //  动物同链（611 非 minion/sentry → CanNPCBeHit :20675 放行）;AABB 自盒;穿透鞭
     //  → hitCrittersAll 多靶（4t 节流窗对一击致死 critter=死面,iframes 近似同族口径）。

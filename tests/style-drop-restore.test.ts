@@ -783,8 +783,15 @@ function supportShell(w: World, drops: Drop[], projs: TrapShot[]) {
   g.spawnParticles = () => {};
   g.sfx = { play: () => {} };
   g.spawnDrop = (x: number, y: number, key: string, n: number) => { drops.push({ key, n }); return null; };
-  g.entities = { add: (e: unknown) => { if (e instanceof TrapShot) projs.push(e); }, drops: [] };
+  g.entities = { add: (e: unknown) => { if (e instanceof TrapShot) projs.push(e); }, drops: [], enemies: [] };
   g.player = {};   // 巨石滚石弹的 !isGeneratingOrLoadingWorld 门近似（cs:48764）
+  // ★BJ752-A（2026-11-02）：失撑拆除改走统一破坏链（killDecorPieceCells→breakTile）
+  //  ——补 breakTile 头/object 支所需桩（recLog/killTileDropBait/dumpChest/成就窗）
+  g.recLog = () => {};
+  g.killTileDropBait = () => {};
+  g.dumpChest = () => {};
+  g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
+  g.trackTile = 0;
   return g as unknown as { checkFurnitureSupport: (x: number, y: number) => void };
 }
 

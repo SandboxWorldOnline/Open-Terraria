@@ -221,7 +221,11 @@ describe.skipIf(EXT_MISSING)('③ TeleporterPass（TeleporterGenerator.cs 1:1，
             const pi = st.idx(x, y - 1);
             expect(st.flags[pi]).toBe(1);
             expect(st.type[pi]).toBe(PLATE);
-            expect(st.frameX[pi]).toBe(72);
+            // ★BJ753 TF-08 域勘正：压板颜色档在 frameY（原版 :254 PlaceTile →
+            //  case 135 Place1x1 default 支 `frameY=18*style`,WorldGen.cs:45626-45629;
+            //  旧钉 frameX=72 系 X 域错置,与放置面 default X 向同族病灶）
+            expect(st.frameX[pi]).toBe(0);
+            expect(st.frameY[pi]).toBe(72);
           }
         }
       }

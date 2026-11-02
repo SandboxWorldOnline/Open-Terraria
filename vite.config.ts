@@ -27,6 +27,13 @@ function l10nAuditAuto(): Plugin {
     //   不存在——existsSync 守卫（缺源=不触发自动重建；产物 public/l10n 随仓跟踪，
     //   校验由 tests/l10n-audit.test.ts 在仓内面锁定）。曾 clone 侧 statSync 直抛 ENOENT
     //   → vitest 启动即崩（npm run test 全灭）。
+    // ★开源仓 clone 修复（2026-11-02,vibe-online 实报）：G40 后分片源也迁到了仓库外
+    //   ../tools/l10n/（12 语言×7 分片）——clone 侧该目录同样不存在。若只守卫 custom
+    //   而 scripts/build-l10n.mjs 自身 mtime 晚于产物 mtime（git 检出顺序毫秒差）,
+    //   stale() 仍真 → 自动重建 → build-l10n 缺分片硬崩（「缺分片: …/tools/l10n/
+    //   en-US.json」启动即死）。守卫扩到分片目录：缺任一 l10n 源=恒不 stale,
+    //   clone 侧以仓内产物直接跑（键校验仍由 l10n-audit 仓内面承载）。
+    if (!existsSync(join(ROOT, '..', 'tools', 'l10n', 'en-US.json'))) return false;
     const srcNew = Math.max(...sources.map((f) => (existsSync(f) ? statSync(f).mtimeMs : 0)));
     return statSync(join(ROOT, 'public', 'l10n', 'zh-Hans.json')).mtimeMs < srcNew;
   };

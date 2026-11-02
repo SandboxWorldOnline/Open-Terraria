@@ -338,10 +338,18 @@ export async function readFileGuarded(file: string, ...args: unknown[]): Promise
         const holder2 = readLockBody(lp);
         if (holder2 && holder2.pid === holder.pid) return bak;   // 复核持锁未变才采信
       } else {
-        // 备份未写=变异未落盘=盘面仍纯净——直读（原参直返）
+        // 备份未写=变异未落盘=盘面仍纯净——直读。★R28-2（2026-11-01 红蓝 TOCTOU）:
+        //   陈旧判定与 awaited 读之间的毫秒窗内 mutator 可能已写备份+写变异——
+        //   await 后必须复核持锁者未变（与上方新鲜分支 :336-339 对称）,变则落空重试。
         const holder2 = readLockBody(lp);
         if (holder2 && holder2.pid === holder.pid) {
-          return await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+          const live = await (ORIG_READFILE as (...a: unknown[]) => Promise<unknown>)(file, ...args);
+          const holder3 = readLockBody(lp);
+          if (holder3 && holder3.pid === holder.pid
+            && statSync(bp).mtimeMs < holder.at - 50) {
+            return live;   // 复核:仍是同一持锁者且备份仍未写=窗内无事发生
+          }
+          // 窗内态变——落到外层 spin 重试
         }
       }
     } catch { /* 备份缺失/读取失败——落到持锁复核重试 */ }

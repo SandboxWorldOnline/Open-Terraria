@@ -103,6 +103,7 @@ const SUB_GEOM_PROPS = new Set(['width', 'height', 'origin', 'anchorbottom', 'an
   'anchorleft', 'anchorright', 'anchorwall', 'flattenanchors', 'direction', 'drawyoffset',
   'usescustomcanplace', 'anchoralternatetiles', 'anchorvalidtiles', 'anchorinvalidtiles']);
 const SUB_NEUTRAL_PROPS = new Set(['coordinatewidth', 'coordinatepadding', 'coordinateheights',
+  'coordinatepaddingfix',
   'style', 'stylehorizontal', 'stylewraplimit', 'stylemultiplier', 'randomstylerange',
   'drawstepdown', 'drawxoffset', 'drawfliphorizontal', 'allowalwaysonscreen', 'wraps',
   'hookpostplacemyplayer', 'drawframeoffsets', 'linkedalternates',
@@ -132,6 +133,11 @@ function mkWork() {
     //   TileObjectData.cs:1662-1679 区 StyleHorizontal=false/WrapLimit=0/Multiplier=1
     //   LineSkip=1,CoordinateWidth=0/Padding=0/Heights={16}）
     sh: false, swl: 0, sls: 1, sm: 1, cw: 0, cp: 0, hts: [16],
+    // ★BJ753 TF-07：CoordinatePaddingFix（:1571-1600 Point16,SetupBaseObject :1790
+    //   缺省 Zero）——Calculate :1808-1820 styleWidth=(cw+cp)*W+fix.X/
+    //   styleHeight=Σ(h+cp)+fix.Y。1457 全表仅 3 处：79 床(0,-2) :2609/
+    //   15 椅(0,2) :4147/497 马桶(0,2) :4180（备档脸按各自快照承值）。
+    pfx: 0, pfy: 0,
     // 转义：AnchorData 第二参为 newTile.Width 表达式时需在快照期以最终 W 具象化
   };
 }
@@ -157,6 +163,7 @@ function mkSubFace() {
     wall: false, uccp: false, altTiles: undefined,
     vTiles: undefined, ivTiles: undefined,
     sh: false, swl: 0, sls: 1, sm: 1, cw: 0, cp: 0, hts: [16],
+    pfx: 0, pfy: 0,                       // ★BJ753 TF-07（同 mkWork 注）
     liq: { ...LIQ_DEFAULTS }, waterDeath: false, lavaDeath: false,
     flatten: false, dir: '', yOff: 0,
   };
@@ -183,6 +190,9 @@ let altWork = null;
 let altPoisoned = false;
 let altCopied = false;          // 本备档是否已显式 CopyFrom（防无源提交）
 let pendingAltFaces = [];       // 已提交备档 [{face, sb}]
+// ★BJ753 TF-05：当前 newTile 的备档是否来自 CopyFrom/FullCopyFrom 继承（未 COW 另立）
+// ——vanilla addAlternate :2100-2102 对 !_hasOwnAlternates 面先置新空表再追加=弃继承。
+let altInherited = false;
 const pendingAudit = [];
 function mkAltWork() {
   // `new TileObjectData(_baseObject)`：1×1 无锚 + 模块缺省（同 mkSubFace 基础面）
@@ -284,19 +294,36 @@ for (let ln = 0; ln < lines.length; ln++) {
   }
   if ((m = L.match(/^newTile\.CopyFrom\((\w+)\)\s*;/))) {
     const nm = m[1];
-    if (!bases.has(nm)) { console.error(`[warn] CopyFrom 未知名 ${nm} @${ln + 1}`); }
-    work = deep(bases.has(nm) ? bases.get(nm) : mkWork());
+    const ent = bases.has(nm) ? bases.get(nm) : null;
+    if (!ent) { console.error(`[warn] CopyFrom 未知名 ${nm} @${ln + 1}`); }
+    work = deep(ent ? ent.face : mkWork());
     copiedThisBlock = true;   // ★BJ602：显式重立 → 后续 Width 不得净化继承锚
+    // ★BJ753 TF-05：CopyFrom 继承模板备档（TileObjectData.cs:1697-1715
+    //   `_alternates = copy._alternates` 模块引用共享——浴缸 90/床 79 经
+    //   CopyFrom(Style4x2)（:2569/:2607）承其 PlaceRight 备档 sb=1（:2566-2567）。
+    //   后续 addAlternate 的 COW 弃置（:2100-2102 `!_hasOwnAlternates → 新空表`）
+    //   由 altInherited 旗建模——继承后首笔 addAlternate 先清表再追加,源模板不受扰。
+    pendingAltFaces = ent ? ent.alts.map((a) => deep(a)) : [];
+    altInherited = pendingAltFaces.length > 0;
     continue;
   }
   if ((m = L.match(/^addBaseTile\(out (\w+)\)\s*;/))) {
     // addBaseTile（TileObjectData.cs:2001-2008）：newTile.Calculate() 先跑（death 耦合
     //   落进快照，StyleAlch 等 LavaDeath=true 的基样式快照 lava=notAllowed），再存快照、
     //   newTile 复位缺省。Style* 快照含 liq/death，后续 CopyFrom(Style*) 继承。
+    // ★BJ753 TF-05（2026-11-02）：`baseTile = newTile` 是【引用】携 Alternates（:2006
+    //   快照即模板工作面对象本体——addAlternate 已把备档挂在其 Alternates 列表上）;
+    //   复位后的新 newTile 备档为空。旧提取器快照只存几何/锚面,pendingAltFaces 未随
+    //   快照入册 → CopyFrom(Style4x2) 的床 79（:2607）丢失 PlaceRight 备档 = issue#39
+    //   TF-05「所有床朝右放置失败」根因（浴缸 90 此前靠泄漏碰巧正确——pendingAltFaces
+    //   未清,恰好漏给紧随其后的 addTile(90)）。修=备档随快照入册 + 显式清空（防漏给
+    //   无关后续 addTile）。
     const snap = deep(work);
     applyLiquidDeathCoupling(snap);
     delete snap.waterDeath; delete snap.lavaDeath;
-    bases.set(m[1], snap);
+    bases.set(m[1], { face: snap, alts: pendingAltFaces.map((a) => deep(a)) });
+    pendingAltFaces = [];                // 备档已入快照（=vanilla 复位 newTile 空 Alternates）
+    altInherited = false;
     copiedThisBlock = false;
     pendingSubTiles = new Map();
     resetLiquid(work);
@@ -314,6 +341,7 @@ for (let ln = 0; ln < lines.length; ln++) {
       copiedThisBlock = false;
       pendingSubTiles = new Map();
       pendingAltFaces = [];              // ★C14-F2：备档归属 newTile,一并复位
+      altInherited = false;              // ★BJ753
       altWork = mkAltWork(); altPoisoned = false; altCopied = false;
       resetLiquid(work);
       work.yOff = 0;                     // ★SW-FX26：复位同含 DrawYOffset（:1793 SetupBaseObject）
@@ -327,18 +355,28 @@ for (let ln = 0; ln < lines.length; ln++) {
       if (pendingAlts.length) rec.dirs = pendingAlts.slice();
       // ★C14-F2：备档全记录（Alternates）+ 样式/坐标模块面 sty——仅携带备档的记录
       // 入库（sty=Place :60-108 帧带数学面;备档面发散时自带 sty,否则继承基记录）。
+      // ★BJ753 TF-07：sty 增 pfx/pfy（CoordinatePaddingFix,Calculate :1808-1820 的
+      //   FullWidth/FullHeight 尾加项）——非零才入库（1457 全表仅 79/15/497 三记录,
+      //   其余 sty 逐字节稳定,防金标无谓漂移）。
       const styleDiverges = (a, b) => a.sh !== b.sh || a.swl !== b.swl || a.sls !== b.sls
         || a.sm !== b.sm || a.cw !== b.cw || a.cp !== b.cp
+        || (a.pfx ?? 0) !== (b.pfx ?? 0) || (a.pfy ?? 0) !== (b.pfy ?? 0)
         || JSON.stringify(a.hts ?? null) !== JSON.stringify(b.hts ?? null);
-      const stripStyle = (o) => { for (const k of ['sh', 'swl', 'sls', 'sm', 'cw', 'cp', 'hts']) delete o[k]; };
+      const styOf = (o) => {
+        const s = { sh: o.sh, swl: o.swl, sls: o.sls, sm: o.sm, cw: o.cw, cp: o.cp, hts: o.hts };
+        if (o.pfx) s.pfx = o.pfx;
+        if (o.pfy) s.pfy = o.pfy;
+        return s;
+      };
+      const stripStyle = (o) => { for (const k of ['sh', 'swl', 'sls', 'sm', 'cw', 'cp', 'pfx', 'pfy', 'hts']) delete o[k]; };
       if (pendingAltFaces.length) {
         rec.alts = pendingAltFaces.map(({ face, sb }) => {
           const a = deep(face);
-          if (styleDiverges(a, rec)) a.sty = { sh: a.sh, swl: a.swl, sls: a.sls, sm: a.sm, cw: a.cw, cp: a.cp, hts: a.hts };
+          if (styleDiverges(a, rec)) a.sty = styOf(a);
           stripStyle(a);
           return Object.assign(a, { sb });
         });
-        rec.sty = { sh: rec.sh, swl: rec.swl, sls: rec.sls, sm: rec.sm, cw: rec.cw, cp: rec.cp, hts: rec.hts };
+        rec.sty = styOf(rec);
       }
       // M-3b：per-style 液体记录——只存与基记录【发散】的样式（GetTileData :5142-5150
       // 对 SubTiles[style]==null/越界回落基记录,发散过滤恰好等价;同值条目省略）
@@ -353,7 +391,7 @@ for (let ln = 0; ln < lines.length; ln++) {
         const f = deep(face);
         resolveSubExprs(f);
         if (subDiverges(f, rec)) {
-          if (styleDiverges(f, rec)) f.sty = { sh: f.sh, swl: f.swl, sls: f.sls, sm: f.sm, cw: f.cw, cp: f.cp, hts: f.hts };
+          if (styleDiverges(f, rec)) f.sty = styOf(f);
           stripStyle(f);
           subs[String(st)] = f;
         }
@@ -370,6 +408,7 @@ for (let ln = 0; ln < lines.length; ln++) {
     }
     pendingAlts = [];
     pendingAltFaces = [];                // ★C14-F2：备档归属 newTile,addTile 一并复位
+    altInherited = false;                // ★BJ753
     altWork = mkAltWork(); altPoisoned = false; altCopied = false;
     // ★C14-F3：成员表随 addTile 全量复位（原版 addTile 尾 `newTile = new
     //  TileObjectData(_baseObject)` → AnchorValidTiles/InvalidTiles=null :1757-1758;
@@ -392,6 +431,10 @@ for (let ln = 0; ln < lines.length; ln++) {
     continue;
   }
   if ((m = L.match(/^addAlternate\((-?\d+)\)\s*;/))) {
+    // ★BJ753：COW 弃置（TileObjectData.cs:2100-2102 `if (!newTile._hasOwnAlternates)
+    //   newTile.Alternates = new List<>()`——CopyFrom 继承的模板备档整体让位于新空表,
+    //   源模板列表不受扰;首笔后 _hasOwnAlternates=true,后续 addAlternate 追加同表）。
+    if (altInherited) { pendingAltFaces = []; altInherited = false; }
     pendingAlts.push({ dir: lastAltDir });
     lastAltDir = '';
     // ★C14-F2：备档整记录提交（TileObjectData.cs:2098-2108）——Calculate() 耦合 +
@@ -430,6 +473,12 @@ for (let ln = 0; ln < lines.length; ln++) {
       for (const [st, lq] of Object.entries(srcRec.liqStyles ?? {})) pendingSubLiq.set(Number(st), structuredClone(lq));
       pendingSubTiles = new Map();
       for (const [st, f] of Object.entries(srcRec.subTiles ?? {})) pendingSubTiles.set(Number(st), structuredClone(f));
+      // ★BJ753 TF-05 登记债（不落刀）：FullCopyFrom 亦承备档（:1723 `_alternates =
+      //  copy._alternates`）,但 1457 现网三站 388→389/82→83→84 中唯 388 有备档——
+      //  其备档面来自【未建模 for 循环】（:2317-2334 `for k/l 1..4` 共 8 档 Origin
+      //  (0,k) 循环备档,行式提取只单跑一轮且局部量 k/l 未解析→oy 残字符串）,
+      //  389（开态高门）无物品放置面=零消费。继承只会传播该半垃圾面——待循环
+      //  备档提取建模后随刀补承（BJ753 债 D-1）。
     } else { poisoned = true; }
     continue;
   }
@@ -442,7 +491,7 @@ for (let ln = 0; ln < lines.length; ln++) {
     const src = m[1] === 'newTile' ? work
       : m[1] === 'newSubTile' ? subWork
       : m[1] === 'newAlternate' ? null      // newAlternate 脸未建模（dirs 锚覆盖缺失）→ 子脸不可信
-      : bases.get(m[1]);
+      : bases.get(m[1])?.face;               // ★BJ753：bases 条目改 {face, alts} 复合
     if (src) { subWork = fullSubFace(src); subPoisoned = false; }
     else subPoisoned = true;
     continue;
@@ -598,6 +647,7 @@ for (let ln = 0; ln < lines.length; ln++) {
           //  swl=2/sm=2 → 备档帧带全错）
           work.sh = false; work.swl = 0; work.sls = 1; work.sm = 1;
           work.cw = 0; work.cp = 0; work.hts = [16];
+          work.pfx = 0; work.pfy = 0;         // ★BJ753 TF-07：PaddingFix 同随净化门复位
           if (hadAnchors && !Object.isFrozen(prev)) {
             // 记录待审计：后续若至下一 addTile 无任何 anchor 写回则可能继承语义丢失
             pendingAudit.push({ idHint: +curIdGuess(prev), types: 'head-reset', kept: false });
@@ -659,6 +709,16 @@ for (let ln = 0; ln < lines.length; ln++) {
       case 'coordinatepadding': {
         const pNum = rhs.match(/new\s+Point16\((-?\w+),\s*(-?\w+)\)/);
         work.cp = pNum ? (parseInt(pNum[2], 10) || 0) : (parseInt(rhs) || 0);
+        break;
+      }
+      // ★BJ753 TF-07：CoordinatePaddingFix（:1571-1600 Point16 属性,LinkedAlternates
+      //   广写臂 :1599 不在 Initialize 面）——Calculate :1808-1820 全宽/全高尾加项。
+      //   1457 三站：79 床 (0,-2) :2609 / 15 椅 (0,2) :4147 / 497 马桶 (0,2) :4180。
+      case 'coordinatepaddingfix': {
+        const pFix = rhs.match(/new\s+Point16\((-?\d+),\s*(-?\d+)\)/);
+        if (pFix) { work.pfx = parseInt(pFix[1], 10) || 0; work.pfy = parseInt(pFix[2], 10) || 0; }
+        else if (/^Point16\.Zero\s*$/.test(rhs)) { work.pfx = 0; work.pfy = 0; }
+        else poisoned = true;
         break;
       }
       case 'coordinateheights': {
@@ -732,7 +792,7 @@ for (let ln = 0; ln < lines.length; ln++) {
     const src = m[1] === 'newTile' ? work
       : m[1] === 'newSubTile' ? subWork
       : m[1] === 'newAlternate' ? null      // 备档拷备档（无此用法,防御性毒化）
-      : bases.get(m[1]);
+      : bases.get(m[1])?.face;               // ★BJ753：bases 条目改 {face, alts} 复合
     if (src) { altWork = deep(src); altPoisoned = false; altCopied = true; }
     else { altWork = null; altPoisoned = true; altCopied = true; }
     continue;
@@ -788,6 +848,15 @@ for (let ln = 0; ln < lines.length; ln++) {
       // 中性面：Style 会被 addAlternate(baseStyle) 覆写（:2104）;DrawX/StepDown=绘制层
       case 'style': case 'drawxoffset': case 'drawstepdown': case 'stylehorizontal':
         break;
+      // ★BJ753 TF-07：备档脸 PaddingFix（:1571-1600 属性本体;1457 Initialize 面
+      //   无 newAlternate.CoordinatePaddingFix 直写=防御性建模）
+      case 'coordinatepaddingfix': {
+        const pFix = rhs.match(/new\s+Point16\((-?\d+),\s*(-?\d+)\)/);
+        if (pFix) { altWork.pfx = parseInt(pFix[1], 10) || 0; altWork.pfy = parseInt(pFix[2], 10) || 0; }
+        else if (/^Point16\.Zero\s*$/.test(rhs)) { altWork.pfx = 0; altWork.pfy = 0; }
+        else altPoisoned = true;
+        break;
+      }
       default:
         altPoisoned = true;
     }
