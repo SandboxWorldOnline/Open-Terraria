@@ -514,7 +514,7 @@ export class PhoenixBolt extends Entity {
       undefined, undefined, undefined, undefined,
       (tn706) => ({ dmg: Math.round(damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像
         crit: rollVanillaHitCritConsumeTimer(this.projId, game, tn706, this.critChance > 0),
-        penPercent: this.armorPen }))) {
+        flatPen: this.armorPen }))) {
       this.damage = Math.trunc(this.damage * 0.95);      // 穿透衰减（受理同相）
     }
     // ★G37-A（D7,2026-10-31）：critter 臂——原版 Damage() victim 循环（:12592）对小动物

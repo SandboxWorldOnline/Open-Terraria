@@ -10405,8 +10405,15 @@ export class Player extends Entity {
         const dir3 = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing;
         // ★BJ-C2/F11（2026-10-06）：同克盾冲撞——原版 :21328 `Main.rand.Next(100) <
         //  meleeCrit` 含基 4+:25712-14 持械折入,补 4+heldItemCritBonus（F11 同式）。
+        // ★R25-2（红蓝定谳,2026-11-02）::21328-21332 类掷后【紧跟】TryConsumingTimerCrit
+        //   (相交矩形,消费先于直击结算;旧缺=满蓄 6170 直击不强暴/charge 不置 −15)。
         const crit3 = Math.random() * 100 < 4 + this.critChance('melee')
-          + heldItemCritBonus(this.inv.heldItem());
+          + heldItemCritBonus(this.inv.heldItem())
+          || ((game.player as unknown as
+            { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
+            ?.tryConsumingTimerCrit?.(game,
+              Math.min(this.cx, en.cx), Math.min(this.cy, en.cy),
+              Math.abs(this.cx - en.cx) + 16, Math.abs(this.cy - en.cy) + 16) ?? false);
         // ★BJ746 A22①（issue#35,2026-11-01）：(int) 截断非 round——原版 :21317/21344
         //  `float num5 = 150f × meleeDamage` 直传 ApplyDamageToNPC/NewProjectile 双面
         //  均 (int)（1.25 档 187.5 → 187,旧 round 188）。hurt 内 max(1,) 保底承担。
@@ -10418,6 +10425,11 @@ export class Player extends Entity {
         //   ——OnHit 族【无】hp>5 门,adtnOnHit=true 豁免（尾参 12）;下方 608 爆闪环
         //   =弹面语义(Damage_PVE :13642 有 hp>5 门)保持缺省 false,两面上锁分立
         en.hurt(dmg3, dir3 * kb3, -4, game, playerArmorPenOf(game), crit3, 0, true, 0, 0, 1, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317);★G39-A(bj746a D1):直击面 ApplyDamageToNPC :20597 穿甲池(旧 pen 0)
+        // ★R25-1（红蓝定谳,2026-11-02）:原版直击(ApplyDamageToNPC→StrikeNPC)无 immune
+        //   写(:20597-20607 亲读)→608 爆闪 Damage_PVE 门(:12635)放行=直击靶双吃。
+        //   仓内 Enemy.hurt pierce=0 通用档写 iframes=10(:15884)会吞掉第二击——
+        //   直击后手动清回 0(608 环统一读门不受阻);终值 6 仍由 :21348 覆写。
+        if ((en as { iframes?: number }).iframes !== undefined) (en as { iframes: number }).iframes = 0;
         // ★BJ746 A22②（issue#35）：每次碰撞生成范围爆闪（:21345-46 NewProjectile
         //  (608, (int)num5, kb15) + 立即 Kill → Projectile.Kill :73438-608 支：
         //  maxPenetrate=penetrate=-1 + Damage() 一次性 AoE——命中盒 160×160 居中

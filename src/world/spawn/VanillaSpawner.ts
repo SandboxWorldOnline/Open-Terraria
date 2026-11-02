@@ -489,8 +489,15 @@ export class VanillaSpawner {
   lunar: LunarSpawnCtx | null = null;
   /** tresspassingDualDungeon（NPC.cs:313）：getfixedboi 玩家置身双地牢不可破墙内
    *  （Player.insideUnbreakableWalls）且 DangerousDungeonCurse 进度档 < 所在区档——
-   *  Game 侧比较后传入（Player.updateUnbreakableWallScan 维护扫描态） */
+   *  Game 侧比较后传入（Player.updateUnbreakableWallScan 维护扫描态）。
+   *  ★BJ749-⑧（重锚发现补臂）：消费面除 spawnAnNPC 的 DD2 掷（:2147）外还有
+   *  getSpawnRate ×0.6/×1.3 压制臂（NPC.cs:661-665）——本刀补接 */
   trespassDual = false;
+  /** ★BJ749-①（issue#38 生成域 1）：Main.wofNPCIndex >= 0（活体肉山 113——NewNPC
+   *  :8434 置 / ResetNPCSlotData :8407-8409 槽复位清）。Game 每周期注入；消费 =
+   *  getSpawnRate 地狱 ×0.3/×3 压制臂（NPC.cs:666-670）。boss 门摘除后这是 WoF
+   *  战期间唯一的压制位（其余 Boss 战照常刷怪 = 原版行为） */
+  wofActive = false;
   /** BirthdayParty.PartyIsUp（Game 的 partyState 求值后传入——微光小动物链消费） */
   partyUp = false;
   /** Star.starfallBoost（每夜 NightSetup 重掷，Game 注入——流星夜附魔夜爬虫支消费） */
@@ -633,6 +640,13 @@ export class VanillaSpawner {
     const num2 = nearbySlots / 15;
     let num3 = 45 + Math.floor(450 * num2);
     if (expert) num3 = Math.floor(num3 * 0.85);
+    // ★R27-3（红蓝定谳,2026-11-02）：NPC.cs:5920-5927 旅程滑杆 remap——
+    //   GetRemappedSliderValueFor(4)→num3=(int)(num3/value);0.1× 时雨怪 10× 稀疏、
+    //   10× 时 10× 密集（getSpawnRate 同位臂 :1441-45 已接,唯雨面缺）。
+    if (w.isJourney) {
+      const sv = spawnRateMultiplier(w.journeyPowers.spawnRateSlider);
+      num3 = Math.floor(num3 / sv);   // (int)(num3/value) 同 getSpawnRate 臂语义
+    }
     if (num3 < 1) num3 = 1;
     if (rng.int(0, num3 - 1) !== 0) return null;
     const x0 = Math.floor(px - viewW), x1 = x0 + viewW * 2;
@@ -1171,8 +1185,8 @@ export class VanillaSpawner {
     }
     const underworldY = (w.store.h - 200) * 16;
     if (playerYpx > underworldY) {
-      // L393-396：地狱 maxSpawns×2。（L668-673 肉山战 ×3/×0.3 压制不移植：
-      // 我方 trySpawnEnemy 在 Boss 在场时整体 return,压制强度已覆盖）
+      // L393-396：地狱 maxSpawns×2。（WoF 战 ×0.3/×3 压制已补接——见下方
+      //  ★BJ749-① 双地牢臂之后的独立 if，NPC.cs:666-670 原位序）
       maxSpawns = Math.floor(maxSpawns * 2);
     } else if (playerYpx > w.rockLevel * 16 + sHeightPx) {
       // L489-508（★IIIII228 remix 臂）：深岩层——remix hard?×0.45/×1.8:×0.5/×1.7、
@@ -1334,6 +1348,23 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.65);
       maxSpawns = Math.floor(maxSpawns * 1.3);
     }
+    // ★BJ749-⑧（重锚发现补臂）：双地牢越界压制（NPC.cs:661-665 独立 if——
+    //  神圣深层臂之后、WoF 臂之前）：tresspassingDualDungeon → rate×0.6/max×1.3。
+    //  此前只接了 spawnAnNPC 的 DD2 掷（:2147 对应 :1482-1494）,本臂整缺 =
+    //  getfixedboi 双地牢越界期刷怪率未压制
+    if (this.trespassDual) {
+      spawnRate = Math.floor(spawnRate * 0.6);
+      maxSpawns = Math.floor(maxSpawns * 1.3);
+    }
+    // ★BJ749-① 改判史（2026-11-01,issue#38 生成域 1）：WoF 战地狱压制（NPC.cs:666-670
+    //  `wofNPCIndex>=0 && player.position.Y > UnderworldLayer*16` → maxSpawns×0.3(int)/
+    //  spawnRate×3）。旧判=「不移植：我方 trySpawnEnemy 在 Boss 在场时整体 return,
+    //  压制强度已覆盖」——boss 门系自造门（原版 SpawnNPC :290-302 无之）,本刀摘除
+    //  后旧判失效,本臂补回原位（序=双地牢臂之后、nearby 阶梯之前,同 :661→:666→:671）
+    if (this.wofActive && playerYpx > underworldY) {
+      maxSpawns = Math.floor(maxSpawns * 0.3);
+      spawnRate *= 3;
+    }
     // L583-591（无条件）：附近怪 <20%/40%/60%/80% 上限时 ×0.6/×0.7/×0.8/×0.9
     if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.6);
     else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.7);
@@ -1375,13 +1406,19 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.5);
       maxSpawns = Math.floor(maxSpawns * 2);
     }
-    // L640-646：水蜡烛 spawnRate×0.75 / max×1.5；天空层再 ×0.5
+    // L640-646（★BJ749-④ issue#38 生成域 4 原文结构）：水/和平蜡烛【互斥】——
+    //  `if (ZoneWaterCandle) { if (!ZonePeaceCandle) {×0.75/×1.5} } else if
+    //  (ZonePeaceCandle) {×1.3/×0.7}`（NPC.cs:728-736）——两者同在时【双双不生效】
+    //  （旧实现只要有水蜡烛就吃 ×0.75/×1.5）。天空层再 ×0.5 是【独立 if】
+    //  （:737-740）：只看 ZoneWaterCandle,和平蜡烛在场不豁免
     if (waterCandle) {
-      spawnRate = Math.floor(spawnRate * 0.75);
-      maxSpawns = Math.floor(maxSpawns * 1.5);
+      if (!peaceCandle) {
+        spawnRate = Math.floor(spawnRate * 0.75);
+        maxSpawns = Math.floor(maxSpawns * 1.5);
+      }
       if (playerYpx / TILE < w.groundLevel * 0.35) spawnRate = Math.floor(spawnRate * 0.5);
     } else if (peaceCandle) {
-      // L645-648：和平蜡烛 ×1.3 / ×0.7（与水蜡烛互斥——原版 else if）
+      // L645-648：和平蜡烛 ×1.3 / ×0.7（水蜡烛不在场才生效）
       spawnRate = Math.floor(spawnRate * 1.3);
       maxSpawns = Math.floor(maxSpawns * 0.7);
     }
@@ -1508,8 +1545,14 @@ export class VanillaSpawner {
             spawnRate = Math.floor(spawnRate * 3);                          // :816
             if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :818-820
           } else {
-            this.friendlyHit();   // :826-828 非 ftw 恒友好(专家 1/30 例外未实装)
-            maxSpawns = Math.floor(maxSpawns * 0.6); // :830 无条件削减（专家例外轮也削）
+            // ★BJ749-⑤ 改判史（2026-11-01,issue#38 生成域 5,定谳=真回归须修）：
+            //  旧=「专家 1/30 例外未实装」自述欠账（专家/大师城镇内绝对安全）。
+            //  原版 NPC.cs:916-919 `if (!Main.expertMode || Main.rand.Next(30) != 0)
+            //  spawnFriendly = true`——专家/大师大城镇 1/30 概率跳过 friendly（该轮
+            //  照出敌怪）。掷骰仅专家域消费（|| 短路,与原版 Random 流同构）；
+            //  mainExpertMode = difficulty >= EXPERT（大师含）= Main.expertMode 域
+            if (!mainExpertMode(w) || this.rateRng() >= 1 / 30) this.friendlyHit();
+            maxSpawns = Math.floor(maxSpawns * 0.6); // :920 无条件削减（专家例外轮也削）
           }
         }
       }
@@ -1572,17 +1615,21 @@ export class VanillaSpawner {
       if (spawnTileSolid(st, tx, ty)) continue;
       if (!this.ignoreSafeWalls && WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) continue;
       this.skyMob = false;
-      // L890-897：天空怪选点门——!invaders && y<worldSurface×0.35 && !spawnFriendly &&
-      //  (x<0.45w || x>0.55w || hardMode)；L898-903 第二支：!invaders && y<worldSurface×0.45
-      //  && !spawnFriendly && hardMode && 1/10（困难模式加宽的第二天空层，此前缺失）。
-      //  原版"两侧 45% 带外"隐含不变量 = 浮空岛只在两侧、中央带无高空地面；此处沿用
-      //  本仓既定的"落脚面上方两格无墙"露天判据（兼容含中央浮空岛的存量世界，否则
-      //  中央岛会被当地表刷僵尸/水母），并补齐 !invaders/!spawnFriendly/困难第二带三门
-      const openAir = st.wall[st.idx(tx, ty - 1)] === 0 && st.wall[st.idx(tx, ty - 2)] === 0;
-      if (!this.invaders && !this.spawnFriendlyCycle && ty < this.world.groundLevel * 0.35 && openAir
+      // L890-897（=1457 NPC.cs:981-989）：天空怪选点门——!invaders && y<worldSurface×0.35
+      //  && !spawnFriendly && (x<0.45w || x>0.55w || hardMode)；L898-903 第二支：
+      //  !invaders && y<worldSurface×0.45 && !spawnFriendly && hardMode && 1/10
+      //  （困难模式加宽的第二天空层）。
+      //  ★BJ749-⑥ 改判史（2026-11-01,issue#38 生成域 6,定谳=真回归须修）：
+      //   旧=自述有意偏离「落脚面上方两格无墙」露天判据（兼容含中央浮空岛的存量
+      //   世界）。定谳推翻：①原版天空支无任何墙判定（房屋墙拒选在循环头 :979-980
+      //   wallHouse 统一把关）；②旧理由不成立——中央带（0.45w~0.55w）非困难态本就
+      //   因 x-带门走 else 地面搜索支（与 openAir 无关,原版同构;SW 世界生成 36 种子
+      //   1:1,浮空岛只在带外）；③openAir 实际唯一作用 = 压制「上方带墙候选」的
+      //   天空怪（有墙天空基地檐下鸟妖/飞龙变少）= 纯分歧零保护价值 → 摘除复原
+      if (!this.invaders && !this.spawnFriendlyCycle && ty < this.world.groundLevel * 0.35
         && (tx < st.w * 0.45 || tx > st.w * 0.55 || this.world.flags.hardMode)) {
         this.skyMob = true;
-      } else if (!this.invaders && !this.spawnFriendlyCycle && openAir
+      } else if (!this.invaders && !this.spawnFriendlyCycle
         && ty < this.world.groundLevel * 0.45 && this.world.flags.hardMode && rng.next() < 0.1) {
         this.skyMob = true;
       } else {

@@ -64,9 +64,12 @@ export interface AnchorRec {
   /** ★C14-F2：样式/坐标模块面（TileObject.Place :60-108 备档帧带数学）——
    *  sh=StyleHorizontal/swl=StyleWrapLimit/sls=StyleLineSkip/sm=StyleMultiplier/
    *  cw=CoordinateWidth/cp=CoordinatePadding/hts=CoordinateHeights。
-   *  仅携带备档的记录入库;FullWidth=(cw+cp)*w、FullHeight=Σ(hts+cp)
-   *  （Calculate TileObjectData.cs:1808-1820）。 */
-  sty?: { sh: boolean; swl: number; sls: number; sm: number; cw: number; cp: number; hts: number[] };
+   *  仅携带备档的记录入库;FullWidth=(cw+cp)*w+pfx、FullHeight=Σ(hts+cp)+pfy
+   *  （Calculate TileObjectData.cs:1808-1820——★BJ753 TF-07：尾加 CoordinatePaddingFix
+   *  两维;1457 全表仅 79 床(0,-2)/15 椅(0,2)/497 马桶(0,2) 三记录非零,提取器
+   *  非零才入库故 pfx/pfy 可选）。 */
+  sty?: { sh: boolean; swl: number; sls: number; sm: number; cw: number; cp: number;
+    pfx?: number; pfy?: number; hts: number[] };
   /** ★BJ602：UsesCustomCanPlace（TileObjectData.cs:145-155,ctor :1679 缺省 false）——
    *  CustomPlace（:5017-5038）路由维度。★暂只入库不设路由门（消费端 19/427/165/233
    *  等在册件照旧走既有路由）=登记债（BJ602）。 */
@@ -123,6 +126,22 @@ export function anchorSpecOf(sheet: number, style?: number): AnchorRec | null {
   }
   _resolved.set(key, out);
   return out;
+}
+
+/** ★BJ754 TF-10（2026-11-02,issue#39）：子样式【变几何】足迹解析——放置 anchorRec
+ *  选择、幸存面 w/h（checkFurnitureSupport）、破坏整件盒（breakTile object 支）三面
+ *  共用单源。style 命中 subTiles[style] 且记录与基记录【不是同一对象】（GetTileData
+ *  整记录替换语义,TileObjectData.cs:5127-5162——越界/缺 style 回落基记录）→ 返回
+ *  子样式 w/h（王朝桌 14 style25 = 3×1,Origin(1,0),TileObjectData.cs:3187-3191;
+ *  基 3×2）。未命中/基记录/exotic 回落（165/185/233 同为变几何候选但 165 基记录
+ *  exotic=恒 null、185/233 无 styleFromFrame 反推表=幸存/破坏面不可达,放置面
+ *  亦无对应物品入口——issue#39 仅独立验证 14/25,余者不扩刀）。 */
+export function substyleFootprint(sheet: number, style: number, dw: number, dh: number): { w: number; h: number } {
+  const base = anchorSpecOf(sheet);
+  if (!base) return { w: dw, h: dh };
+  const rec = anchorSpecOf(sheet, style);
+  if (!rec || rec === base) return { w: dw, h: dh };
+  return { w: rec.w, h: rec.h };
 }
 
 /** ★C14-F2（2026-10-11）备档评估链。原版 CanPlace（TileObject.cs:203-225）在单点
@@ -182,7 +201,9 @@ export function validateAnchorChainAt(st: World['store'], tx: number, ty: number
  *  CalculatePlacementStyle（TileObjectData.cs:1989-1999）num = placeStyle*StyleMultiplier
  *  + Style(备档 sb) + random;按记录样式模块折行（:63-68 wrap/lineSkip）;
  *  横排 frameX=FullWidth*col/frameY=FullHeight*row,竖排互换（:70-75）。
- *  FullWidth=(cw+cp)*w、FullHeight=Σ(hts+cp)（Calculate :1808-1820,PaddingFix 零表）。 */
+ *  FullWidth=(cw+cp)*w+pfx、FullHeight=Σ(hts+cp)+pfy（Calculate :1808-1820——
+ *  ★BJ753 TF-07：PaddingFix 尾加项补齐,椅 15/马桶 497 备档行带 38→40
+ *  （(16+2)+(18+2)+2,issue#39 实测右向蒸汽朋克椅 fy=874=23×38 应 920）。 */
 export function alternateFrameBase(rec: AnchorRec, sb: number, placeStyle: number,
   random = 0): [number, number] {
   const sty = rec.sty;
@@ -190,8 +211,8 @@ export function alternateFrameBase(rec: AnchorRec, sb: number, placeStyle: numbe
   let num = placeStyle * (sty.sm || 1) + sb + random;
   let row = 0;
   if (sty.swl > 0) { row = Math.floor(num / sty.swl) * (sty.sls || 1); num %= sty.swl; }
-  const fw = (sty.cw + sty.cp) * rec.w;
-  const fh = (sty.hts ?? []).reduce((a, h) => a + h + sty.cp, 0);
+  const fw = (sty.cw + sty.cp) * rec.w + (sty.pfx ?? 0);
+  const fh = (sty.hts ?? []).reduce((a, h) => a + h + sty.cp, 0) + (sty.pfy ?? 0);
   return sty.sh ? [fw * num, fh * row] : [fw * row, fh * num];
 }
 /** ★C14-F2 备档格内偏移（Place :93-108：frameX=base+k*(CoordinateWidth+CoordinatePadding),
@@ -434,6 +455,15 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
       if (rec.wall && st.wall[i2] === 0) return false;
     }
   }
+  return evalAnchorSides(st, ax, ay, rec, style);
+}
+
+/** ★BJ752-A（2026-11-02,issue#39 TF-01/02）：锚带评估核（top/bottom/left/right 四侧
+ *  evalCell）——validateAnchors（放置）与 validateAnchorBand（幸存）共源。锚格
+ *  带位一律取【足迹边缘】：底=行 ay+h、顶=行 ay-1、左=列 ax-1、右=列 ax+w
+ *  （CanPlace :404-716 同式;备档 ox/oy 只影响放置吸附不影响带位）。 */
+function evalAnchorSides(st: World['store'], ax: number, ay: number, rec: AnchorRec,
+  style = 0): boolean {
   const sideSpec = (side: 'top' | 'bottom' | 'left' | 'right'): SideSpec | null => {
     const a = side === 'top' ? rec.anchorTop : side === 'bottom' ? rec.anchorBottom
       : side === 'left' ? rec.anchorLeft : rec.anchorRight;
@@ -482,6 +512,29 @@ export function validateAnchors(st: World['store'], ax: number, ay: number, rec:
   return true;
 }
 
+/** ★BJ752-A（2026-11-02,issue#39 TF-01/02）：幸存锚带校验——放置侧 validateAnchors
+ *  的【锚带子集】（墙臂 + 四侧 evalCell）,不带占位/液体/5 格边距门：
+ *  · 占位门：幸存复验时足迹被本件自占（原版 Check* 无自占检查,CanPlace :357
+ *    只在放置时消费）;液体门：原版 Check3x2/Check2xX/Check1x2 幸存判据
+ *    （SolidTileAllowBottomSlope 族）无液体维度;边距门：TileFrame :82606-82609
+ *    的 5 格界门由【派发面】（checkDecorSquareFrame）承担,谓词本身不拒——
+ *    拒则边缘物件在原版「不派发=幸存」的等价语义下被误杀。
+ *  墙臂 = 足迹全格 wall>0（CanPlace :347-353 / CheckSign alt4 :44030 同式）。
+ *  消费面 = Game.checkFurnitureSupport 幸存分派（TF-01：wall 只认显式 AnchorWall
+ *  记录;TF-02：SolidWithTop/SolidSide 臂承接平台与合法底坡）。 */
+export function validateAnchorBand(st: World['store'], ax: number, ay: number, rec: AnchorRec,
+  style = 0): boolean {
+  if (!Number.isFinite(ax) || !Number.isFinite(ay)) return false;
+  if (!st.inBounds(ax, ay) || !st.inBounds(ax + rec.w - 1, ay + rec.h - 1)) return false;
+  if (rec.wall) {
+    for (let j = 0; j < rec.h; j++) {
+      for (let i = 0; i < rec.w; i++) {
+        if (st.wall[st.idx(ax + i, ay + j)] === 0) return false;
+      }
+    }
+  }
+  return evalAnchorSides(st, ax, ay, rec, style);
+}
 /** 点击格 → 锚定位置换算 + Smart 吸附。返回最终锚点（占位左上角）。
  *  候选序（vanilla 手感：Smart Cursor 对持拿物的幽灵吸附重定向，行为子集）：
  *  ①主 Origin 对位；②方向备选水平镜像；③★全窗吸附——

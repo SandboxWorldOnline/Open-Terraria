@@ -15,6 +15,12 @@ export const enum LIQUID_TYPE {
   SHIMMER = 4,
 }
 
+/** ★BJ752-A（2026-11-02,issue#39 TF-02/03）：onTileChanged 派发成因（原版触发面分域,
+ *  详见 onTileChanged 注）。'tile'=方块写面（setTile/坡/半砖/失活/deactivate）;
+ *  'wallKill'=墙移除（KillWall :60895 FramesOnKillWall 限定面）;'wallPlace'=墙
+ *  铺设/替换（SquareWallFrame,零 TileFrame）;'paint'=油漆/涂层（无 TileFrame）。 */
+export type TileChangedCause = 'tile' | 'wallKill' | 'wallPlace' | 'paint';
+
 export class TileStore {
   /** ★一百零八审计修:mod 注册的 tile 键→内部 id(装载期填充;生成 pass 解析用) */
   mods: { tileIdByKey: Record<string, number> } = { tileIdByKey: {} };
@@ -69,7 +75,7 @@ export class TileStore {
   static readonly COAT_WALL_MASK = 4 | 16;   // 墙侧两位（KillWall 清位域）
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
-  private listeners: Array<(x: number, y: number) => void> = [];
+  private listeners: Array<(x: number, y: number, cause?: TileChangedCause) => void> = [];
   /** ★C9d2 光照差量写日志（2026-09-28;?lightdelta=1 灰度时由 LightWorkerLink.bindStore
    *  挂载,null=零开销）:记录两次发送之间的全部 tile 通道变更格（世界索引 y*w+x）。
    *  变更原语内置推送;原版语义直写面（Game.ts CopyPaintAndCoating 族/联机 strip/
@@ -366,7 +372,14 @@ export class TileStore {
       TILE_DEFS[this.type[this.idx(x, y)]]?.vanilla?.sheet ?? -1);
   }
 
-  onTileChanged(fn: (x: number, y: number) => void) {
+  /** ★BJ752-A（2026-11-02,issue#39 TF-02/03）：监听派发成因通道——原版触发面分域：
+   *  方块变化（setTile/setSlope/setHalfBrick/deactivateTile）→ KillTile/PlaceTile 尾
+   *  SquareTileFrame（WorldGen.cs:81462,3×3 TileFrame 派发）；墙移除 → KillWall 尾
+   *  【仅 FramesOnKillWall 型】TileFrame(i,j)（:60895-60898）；墙铺设/替换 → SquareWallFrame
+   *  （:75740,零 TileFrame）；油漆/涂层 → 无 TileFrame。旧单通道把墙/油漆事件也送进
+   *  家具复验 = 「铺墙误拆平台桌」（TF-02 症状③）的触发面根因之一。第三参对既有
+   *  (x,y) 签名监听器透明（JS 多参忽略）,chunk mark 等视觉监听照旧全成因触发。 */
+  onTileChanged(fn: (x: number, y: number, cause?: TileChangedCause) => void) {
     this.listeners.push(fn);
   }
 
@@ -376,9 +389,10 @@ export class TileStore {
    *  门开关贴图不变化回归即此（用户实报:type 已切换/chunk 缓存不失效=旧 type 像素）。
    *  裸写窗宿主（Door.shiftTallGate/shiftTrapdoor）在窗关闭后对【写入域】逐格补派发:
    *  整件已完整 → Check* 完整性裁决不会判坏（BJ322 半写态病灶不复发）,监听全族
-   *  （mark/火把/藤/巨石/家具/DECOR/触发板）恢复原版「逐格直写监听即时派发」语义。 */
+   *  （mark/火把/藤/巨石/家具/DECOR/触发板）恢复原版「逐格直写监听即时派发」语义。
+   *  BJ752-A：cause 缺省 'tile'（补派发宿主均为方块写面）。 */
   notifyChanged(x: number, y: number): void {
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'tile'));
   }
 
   /** 液体变化独立通道：chunk 缓存不订阅（水不入烘焙画布，无需重建），
@@ -416,7 +430,8 @@ export class TileStore {
     if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
     // ★BJ322：suppressListeners 窗内跳过监听派发（netReporter 不受影响——联机同步面照常）
-    if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y));
+    // ★BJ752-A：cause='tile'（KillTile/PlaceTile 尾 SquareTileFrame 面）
+    if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y, 'tile'));
   }
 
   /** 运行期改半砖/坡面位（锤子交互用；生成期直接写数组即可） */
@@ -426,7 +441,7 @@ export class TileStore {
     this.half[i] = v ? 1 : 0;
     if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetHalfBrick, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'tile'));   // BJ752-A：锤击形态变化=方块写面
   }
 
   setSlope(x: number, y: number, s: number) {
@@ -436,7 +451,7 @@ export class TileStore {
     this.half[i] = 0; // 原版 SlopeTile 无条件 halfBrick(false)（WorldGen.cs:49174），slope=0 复位时同样
     if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetSlope, x, y, v: s, fx: 0, fy: 0 });
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'tile'));   // BJ752-A：同上
   }
 
   setTileSilent(x: number, y: number, type: number, frameX = 0, frameY = 0) {
@@ -478,7 +493,7 @@ export class TileStore {
     // type[i] 不动 ← 幽灵格核心语义
     if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: 0, fx: 0, fy: 0 });
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'tile'));   // BJ752-A：失活=方块写面
   }
 
   setWall(x: number, y: number, wall: number) {
@@ -500,7 +515,9 @@ export class TileStore {
         this.coat[i] &= ~TileStore.COAT_WALL_MASK; // ClearWallPaintAndCoating（Tile.cs:941-946）
       }
       if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWall, x, y, v: wall, fx: 0, fy: 0 });
-      this.listeners.forEach((fn) => fn(x, y));
+      // ★BJ752-A：墙移除=KillWall :60895（FramesOnKillWall 限定 TileFrame 面）；
+      // 铺设/替换=SquareWallFrame（零 TileFrame）。视觉监听（chunk mark）两态照发。
+      this.listeners.forEach((fn) => fn(x, y, wall === 0 ? 'wallKill' : 'wallPlace'));
       if (this.tileWriteLog) this.tileWriteLog.push(i);
     }
   }
@@ -526,7 +543,7 @@ export class TileStore {
     if (this.paint[i] === v) return;
     this.paint[i] = v & 31;
     if (this.tileWriteLog) this.tileWriteLog.push(i);
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'paint'));   // BJ752-A：视觉写面
   }
 
   setPaintSilent(x: number, y: number, v: number) {
@@ -544,7 +561,7 @@ export class TileStore {
     if (this.paintWall[i] === v) return;
     this.paintWall[i] = v & 31;
     if (this.tileWriteLog) this.tileWriteLog.push(i);
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'paint'));   // BJ752-A：视觉写面
   }
 
   setPaintWallSilent(x: number, y: number, v: number) {
@@ -565,7 +582,7 @@ export class TileStore {
     if (this.coat[i] === v) return;
     this.coat[i] = v;
     if (this.tileWriteLog) this.tileWriteLog.push(i);
-    this.listeners.forEach((fn) => fn(x, y));
+    this.listeners.forEach((fn) => fn(x, y, 'paint'));   // BJ752-A：视觉写面
   }
 
   setCoatSilent(x: number, y: number, mask: number, bits: number) {
@@ -600,7 +617,10 @@ export class TileStore {
     this.wire[i] = b;
     if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetActuated, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
-    this.listeners.forEach((fn) => fn(x, y));
+    // ★BJ752-A：致动翻转=DeActive/ReActive 尾 SquareTileFrame(resetFrame:false)
+    // （Wiring.cs:3228/:3246）——方块写面（Check3x2 族 !inActive 门由此生效,
+    // Check2x2 族裸 active() 判据天然不受影响=R20-I4 判语保持）。
+    this.listeners.forEach((fn) => fn(x, y, 'tile'));
   }
 
   setLiquid(x: number, y: number, amount: number, type: number) {

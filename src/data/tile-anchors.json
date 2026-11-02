@@ -760,7 +760,8 @@
     "hts": [
      16,
      18
-    ]
+    ],
+    "pfy": 2
    },
    "liqStyles": {
     "16": {
@@ -2145,6 +2146,61 @@
    "flatten": false,
    "dir": "PlaceLeft",
    "yOff": 0,
+   "alts": [
+    {
+     "w": 4,
+     "h": 2,
+     "ox": 1,
+     "oy": 1,
+     "anchorTop": null,
+     "anchorBottom": {
+      "t": [
+       "SolidTile",
+       "SolidWithTop",
+       "SolidSide"
+      ],
+      "cnt": 4,
+      "start": 0
+     },
+     "anchorLeft": null,
+     "anchorRight": null,
+     "wall": false,
+     "uccp": true,
+     "liq": {
+      "water": "allowed",
+      "lava": "notAllowed"
+     },
+     "flatten": false,
+     "dir": "PlaceRight",
+     "yOff": 0,
+     "sty": {
+      "sh": true,
+      "swl": 2,
+      "sls": 1,
+      "sm": 2,
+      "cw": 16,
+      "cp": 2,
+      "hts": [
+       16,
+       16
+      ]
+     },
+     "sb": 1
+    }
+   ],
+   "sty": {
+    "sh": true,
+    "swl": 2,
+    "sls": 1,
+    "sm": 2,
+    "cw": 16,
+    "cp": 2,
+    "hts": [
+     16,
+     18
+    ],
+    "pfy": -2
+   },
    "liqStyles": {
     "8": {
      "water": "allowed",
@@ -12124,7 +12180,8 @@
     "hts": [
      16,
      18
-    ]
+    ],
+    "pfy": 2
    },
    "liqStyles": {
     "14": {

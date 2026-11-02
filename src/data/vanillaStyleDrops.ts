@@ -451,6 +451,15 @@ const Timers: T = [583, 584, 585, 4484, 4485];
  *  逐档 if-链 23 档;style=fx/18 */
 const OreBars: T = [20, 703, 22, 704, 21, 705, 19, 706, 57, 117, 175, 381, 1184, 382, 1191, 391, 1198, 1006, 1225, 1257, 1552, 3261, 3467];
 
+/** ★BJ754 TF-09（2026-11-02,issue#39）：海贝 324 五行带——KillTile case 324
+ *  （WorldGen.cs:65793-65810 `switch (frameY / 22)`）:行 0 贝壳 2625 / 1 海星 2626 /
+ *  2 雷螺 4072 / 3 夜螺 4073 / 4 玛瑙贝 4071（= FlexibleTileWand Seashell/Starfish/
+ *  LightningWhelk/Tulip/Junonia 桶 style 段 0-2/3-5/6-8/9-11/12-14 的行射）。
+ *  越界行（>4）原版无 default=不掉;本仓 pick 口径回落行 0（C-4 备案同源,合法帧
+ *  域内不可达）。珊瑚 81 = 恒掉 275（KillTile case 81 :65229,TILE_DEFS.drop 静态
+ *  已对,无 style 档）。 */
+const SeashellRows: T = [2625, 2626, 4072, 4073, 4071];
+
 /** 钱币堆 330-333——KillTile case 330-333（WorldGen.cs:64197-64204）:恒掉对应币 71-74 */
 const CoinPiles: Record<number, number> = { 330: 71, 331: 72, 332: 73, 333: 74 };
 
@@ -509,6 +518,7 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   245: (fx) => Math.floor(fx / 36),                                   // 画 2×3（Check2x3Wall :45013 num）
   246: (_fx, fy) => Math.floor(fy / 36),                              // 画 3×2（Check3x2Wall :45170 num）
   239: (fx) => Math.floor(fx / 18),
+  324: (_fx, fy) => Math.floor(fy / 22),                             // 海贝（case 324 :65795 行=frameY/22 → SeashellRows;★BJ754 TF-09 与 furnitureStyleBase case 324 反函数）
   410: (fx) => Math.floor(fx / 36),                                   // 天塔柱（Check2xX :38601 num13）
   419: (fx) => Math.floor(fx / 18),                                   // 逻辑灯（case 419 :65349）
   420: (_fx, fy) => Math.floor(fy / 18),                              // 逻辑门（case 420 :65381）
@@ -571,6 +581,7 @@ export function styleDropVid(sheet: number, style: number): number {
     case 104: return pick(Clocks, style);
     case 172: return pick(Sinks, style);
     case 239: return pick(OreBars, style);
+    case 324: return pick(SeashellRows, style);   // ★BJ754 TF-09：海贝五行为档（KillTile case 324 :65793-65810）
     case 209: return pick(Cannons, style);
     case 215: return pick(Campfires, style);
     case 216: return pick(FireworksBoxes, style);

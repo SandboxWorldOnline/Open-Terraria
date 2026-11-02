@@ -158,7 +158,7 @@ export class ElectroSphereProj extends Entity {
       ELECTROSPHERE_PROJ, undefined, undefined, undefined, undefined,
       (tn443) => ({ dmg: Math.max(1, damageVarRoll(this.damage, ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0)),   // ★G37-A（D6）：城镇臂 DV 镜像敌怪臂
         crit: rollVanillaHitCritConsumeTimer(ELECTROSPHERE_PROJ, game, tn443, this.critChance > 0),
-        penPercent: this.armorPen }));
+        flatPen: this.armorPen }));
   }
 
   /** 消亡口（无 Kill 特效——vanilla 443 Kill 无专属分支；dead 旗交 EntityManager 剔除） */

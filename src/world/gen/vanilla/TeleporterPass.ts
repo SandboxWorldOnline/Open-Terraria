@@ -23,7 +23,8 @@
 //     .dungeonGenVars 外接盒）本仓无对应数据结构，按 vampireSeedFinishPass 同款
 //     dungeonX±170 带近似（仅 dualDungeons 种子生效，普通世界零分支）；
 //   - PlaceTile 走 setTileSilent 直写帧（传送门 235 = 3×1 单样式 frameX=列*18；
-//     压板 135 style4 frameX=72）——生成期无 TileObject 语义差。
+//     压板 135 style4 frameY=72——★BJ753 TF-08 域勘正:原版 Place1x1 default 支
+//     颜色档在 Y,旧注「frameX=72」系 X 域错置）——生成期无 TileObject 语义差。
 import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
@@ -288,7 +289,14 @@ export function runTeleporterPass(
     // PlaceTeleporter（:251-257）：235 锚行 3×1 + 压板 135 style4 + 双格导线
     for (const p of [a, b]) {
       for (let dx = 0; dx < 3; dx++) st.setTileSilent(p.x + dx, p.y, TELEPORTER, dx * 18, 0);
-      st.setTileSilent(p.x, p.y - 1, PLATE, 4 * 18, 0);           // style 4（:254）
+      // ★BJ753 TF-08 域勘正（2026-11-02）：压板颜色档在 Y——原版 :254
+      //  WorldGen.PlaceTile(x,y-1,135,…,style:4) → case 135 派发 Place1x1
+      //  （WorldGen.cs:60621-60630）→ switch default 支 `frameY=18*style`
+      //  （:45626-45629;唯 36/144/239 走 frameX=style*18 支）。旧写 (72,0)=X 域
+      //  错置（头注「frameX=72」自证同错）——同族 TrapsPass:1409/TemplePass:1334/
+      //  MicroBiomesPass:2765 均正确写 Y,此处孤立病灶:渲染错色+KillTile case 135
+      //  掉落反推（fy/18 :66089）恒 style0 红板。
+      st.setTileSilent(p.x, p.y - 1, PLATE, 0, 4 * 18);           // style 4（:254）
       addWire(st, p.x, p.y - 1, wireColor);                       // :255
       addWire(st, p.x, p.y, wireColor);                           // :256
     }

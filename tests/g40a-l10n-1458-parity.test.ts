@@ -61,7 +61,11 @@ export function diffShard(repo: Record<string, Record<string, string>>,
   return { missing, changed, extra };
 }
 
-const EXT_MISSING = !CULTURES.every((c) => existsSync(vanPath(c, '')));
+// ★开源仓 clone 修复（2026-11-02）：repo 分片目录 ../tools/l10n 与 1458 反编译树
+//   均在仓库外——clone 侧两者皆缺,双向守卫 skip（产物 public/l10n 的正确性由
+//   l10n-audit 仓内面承载）。
+const EXT_MISSING = !CULTURES.every((c) => existsSync(vanPath(c, '')))
+  || !existsSync(join(L10N, 'en-US.json'));
 (EXT_MISSING ? describe.skip : describe)('G40-A l10n base 分片 ↔ 1458 全量逐字对拍', () => {
   it('§1 12 语言 × 7 分片:missing=0 ∧ changed=0(逐键逐值)', () => {
     const problems: string[] = [];

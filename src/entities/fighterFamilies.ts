@@ -21,7 +21,7 @@ import type { Player } from './Player';
 import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { canHit, canHitLine } from '../physics/LineOfSight';
-import { getKnockbackMultiplierScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
+import { getKnockbackMultiplierScaledByDifficulty, getAttackDamageForProjectiles, mainExpertMode } from '../stats/ScaleStats';
 import { TILE_DEFS } from '../data/tiles';
 
 /** :57462-57471 flag8=false 全表（NPC.cs:57468）。flag8 的两处下游消费：
@@ -248,10 +248,16 @@ export function fighterMoveStep(e: Enemy, game: GameHooks, dir: number, player: 
   const spec = fighterMoveSpec(e);
   if (!spec) return;                        // 原版该型链上无分支（射击族排除表/突进族）
   let max = spec.max;
-  if (id === 489 && player) {               // :58770-58783 血僵尸按距离减速
+  // ★BJ751-㉑ 血僵尸 489（1457 :58934-58946，issue 旧引 :69779 漂移）：限速 =
+  // ((expert?3:2.5) − min(距离×0.0025,1.5)) ×0.8，**再乘** scaleBoost
+  // ×(1+(1−scale))（:58948-58951 尾段，489 在 boost 表内）——旧码①恒 2.5 档
+  // （注释"expert 恒 false"系专家模式实装前陈旧判语）②覆写丢 scaleBoost。
+  // 此处覆写 spec.max（已含 boost），须整式重算
+  if (id === 489 && player) {
     let num109 = Math.hypot(player.cx - e.cx, player.cy - e.cy) * 0.0025;
     if (num109 > 1.5) num109 = 1.5;
-    max = (2.5 - num109) * 0.8;
+    max = ((mainExpertMode(game.world) ? 3 : 2.5) - num109) * 0.8
+      * (1 + (1 - e.vanillaScale));
   }
   if (e.vx < -max || e.vx > max) {
     if (e.vy === 0) e.vx *= spec.damp;      // 原版 velocity *= damp（落地时 Y≈0 等价）

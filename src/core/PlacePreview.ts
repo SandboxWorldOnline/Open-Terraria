@@ -229,8 +229,13 @@ export function updatePlacePreviewFrame(ctx: PlacePreviewCtx): void {
     return;
   }
   // 表驱动族（tryPlace :27248-27257 anchorRec 门同式）
-  const rec: AnchorRec | null = anchorSpecOf(sheet);
-  if (!rec || !ctx.defFramed || ctx.defW !== rec.w || ctx.defH !== rec.h) return;
+  // ★BJ754 TF-10（2026-11-02,issue#39）：记录解析带 style（GetTileData 整记录替换）
+  //  ——变几何子样式（王朝桌 14 style25 3×1）幽灵足迹与实放同挡;足迹门仅对基记录
+  //  生效（子样式记录 ≠ 基记录时 defW/defH 与 rec.w/h 合法发散）。
+  const rec: AnchorRec | null = anchorSpecOf(sheet, ctx.style);
+  const baseRec: AnchorRec | null = anchorSpecOf(sheet);
+  const subHit = !!rec && !!baseRec && rec !== baseRec;
+  if (!rec || !ctx.defFramed || (!subHit && (ctx.defW !== rec.w || ctx.defH !== rec.h))) return;
   let ax: number, ay: number;
   if (rec.w > 1 || rec.h > 1) {
     // 多格：与实放同源 chooseAnchorFromClick（Origin 对位/镜像/全窗吸附）——

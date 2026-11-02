@@ -4831,7 +4831,11 @@ export class Enemy extends Entity {
       if (vidS === 183) this.ai0 += 1;                           // :61985-61988 猩红史莱姆
       if (vidS === 658) this.ai0 += 5;                           // :61989-61992 史后蓝仆从
       if (vidS === 659) this.ai0 += 3;                           // :61993-61996 史后粉仆从
-      if (vidS === 304) this.ai0 += (1 - this.hp / this.maxHp) * 10; // :61997-62001 南瓜跳跳按损血 0-10
+      // ★BJ751-⑰：原版 `(1 - life / lifeMax) * 10`（1457 NPC.cs:62202，issue#38 旧引
+      //  :73383 系行号漂移）——life/lifeMax 均 int（NPC.cs:6486/6488 字段声明），
+      //  int/int 整除在【除法位】：满血 life==lifeMax → 1-1=0 → +0；任何受损
+      //  life<lifeMax → 整除 0 → +10/t（无渐变）。Math.trunc 复刻正域整除语义
+      if (vidS === 304) this.ai0 += (1 - Math.trunc(this.hp / this.maxHp)) * 10; // :62200-62204（num53 :62202）南瓜跳跳：满血+0/受损+10
       if (grasshopper) this.ai0 += 3;                            // :62002-62005 蚱蜢 377/446
       if (vidS === 81) this.ai0 += (this.vanillaScale ?? 1) >= 0 ? 4 : 1; // :62006-62016 腐化史莱姆
       // num54 阶段基线表（S5，cs:62017-62025）：659 −500 / 667 −400 / 其余 −1000
@@ -5988,16 +5992,54 @@ export class Enemy extends Entity {
     // 时整段跳过（贴地行走不跳）；directionY 由上方 targeting 段按 1457 规则写
     const jumpGate580 = vidF !== 580 || this.dirY !== 1;
     const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
-    // ---- 台阶自动步升（L24512-24554）：前方高差 ≤16.1px 直接跨上（gfxOffY 视觉补偿略）----
-    if (this.vy >= 0 && vxSign !== 0) {
-      const ax = Math.floor((this.x + this.vx + this.w / 2 + (this.w / 2 + 1) * vxSign) / TILE);
+    // ---- 台阶自动步升（1457 NPC.cs:60461-60535，★BJ751-⑲⑳ 整谓词 1:1 重写）----
+    // 总门（:60466）= vy>=0 && (type!=580 || directionY!=1)——与下方跳跃段同门
+    // （jumpGate580）。探针（:60469-60476）：前移 vx 后体中心前 (w/2+1)×num194 列、
+    // 脚上 1px 行；num194 = vx 符号（vx==0 探中心列，原版字面——常态中心脚行为
+    // 空气格 no-op）。接受面（:60503）：A = 脚行整砖（active∧tileSolid∧!tileSolidTop，
+    // 脚行/脚上 1 行均非顶坡）或 B = 脚上 1 行半砖（active）——★⑲：半砖楼梯由此
+    // 承接（旧码 !half 直接拒绝半砖）。净空（:60503 续）：C1-C3 = 脚上 1/2/3 行
+    // 非实心（isSolid 域；C1 半砖例外 = 脚上 1 行半砖且其上 3 行 fr-4 非实心）；
+    // C4 = 身后列脚上 3 行非 tileSolid（★无 solidTop 豁免臂——平台 tileSolid[19]
+    // =true 计入，Main.cs:8032）。横向重叠（:60503 首）= 探针列与 NPC 盒重叠。
+    // 落点 num197（:60505-60509）= fr*16，脚行半砖 +8 / 脚上 1 行半砖 −8；
+    // 攀升门（:60510-60526）= num198 = feetY−num197 ≤ num199（16.1，★⑳ 蜘蛛
+    // 163/164/236/239/530 +8=24.1）。gfxOffY/stepSpeed 动画补偿沿旧注略。
+    if (this.vy >= 0 && jumpGate580) {
+      const num194 = vxSign;                                    // :60469-60473
+      const px = this.x + this.vx;                              // vector39.X（:60474-60475）
+      const ax = Math.floor((px + this.w / 2 + (this.w / 2 + 1) * num194) / TILE);
       const fr = Math.floor((this.y + this.h - 1) / TILE);
-      if (ax >= 0 && fr >= 2 && ax < st.w && fr < st.h
-        && solidAt(ax, fr) && !st.half[st.idx(ax, fr)]
-        && !solidAt(ax, fr - 1) && !solidAt(ax, fr - 2) && !solidAt(ax, fr - 3)) {
-        const top = fr * TILE;
-        const rise = this.y + this.h - top;
-        if (rise > 0 && rise <= 16.1) this.y = top - this.h;
+      if (ax >= 4 && fr >= 4 && ax < st.w - 4 && fr < st.h - 4   // InWorld(ax,fr,4)（:60479）
+        && ax * TILE < px + this.w && ax * TILE + TILE > px) {   // 横向重叠（:60503 首）
+        const iF = st.idx(ax, fr), i1 = st.idx(ax, fr - 1);
+        const nact = (i: number) => st.flags[i] !== 0 && !(st.wire[i] & TileStore.WIRE_ACTUATED);
+        const topSlope = (x: number, y: number) => {
+          const s = st.slope[st.idx(x, y)] ?? 0; return s === 1 || s === 2;
+        };
+        const solidNoTop = (i: number) => TileStore.SOLID_LUT[st.type[i]] === 1;   // tileSolid∧!solidTop
+        const solidTop = (i: number) => TILE_DEFS[st.type[i]]?.platform === true;  // tileSolidTop 域
+        const rawTileSolid = (i: number) => TileStore.SOLID_LUT[st.type[i]] === 1
+          || TileStore.PLATFORM_SOLID2_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1); // 含平台九件套
+        const condA = nact(iF) && !topSlope(ax, fr) && !topSlope(ax, fr - 1)
+          && solidNoTop(iF) && !solidTop(iF);                   // A（:60503）
+        const condB = st.half[i1] === 1 && nact(i1);            // B：脚上 1 行半砖
+        const c1 = !solidAt(ax, fr - 1) || (st.half[i1] === 1 && !solidAt(ax, fr - 4));
+        const c2 = !solidAt(ax, fr - 2);
+        const c3 = !solidAt(ax, fr - 3);
+        const iB = st.idx(ax - num194, fr - 3);
+        const c4 = !(nact(iB) && rawTileSolid(iB));             // C4（:60503 尾，无 solidTop 臂）
+        if ((condA || condB) && c1 && c2 && c3 && c4) {
+          let num197 = fr * TILE;                               // :60505
+          if (st.half[iF] === 1) num197 += 8;                   // 脚行半砖 +8（:60506-60508）
+          if (st.half[i1] === 1) num197 -= 8;                   // 脚上 1 行半砖 −8（:60508-60509）
+          if (num197 < this.y + this.h) {                       // :60510
+            const num198 = this.y + this.h - num197;
+            const num199 = 16.1 + (vidF === 163 || vidF === 164 || vidF === 236
+              || vidF === 239 || vidF === 530 ? 8 : 0);         // ★⑳ 蜘蛛 +8（:60522-60525）
+            if (num198 <= num199) this.y = num197 - this.h;     // :60526-60528
+          }
+        }
       }
     }
     // 重力 + 碰撞（原版 SteepSlowing/WalkDownSlope 略）。471 术士飞行态（ai[3]<0，
@@ -6083,9 +6125,14 @@ export class Enemy extends Entity {
       } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy)
         && st.slope[st.idx(fx, fy)] !== 1 && st.slope[st.idx(fx, fy)] !== 2) {
         this.vy = -5;                       // 卡在格内下部（非顶坡——原版 topSlope 门 :60523）
-      } else if (this.vanillaId !== 67 && player && player.y + player.h < this.y
-        && !solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1)) {
-        this.vy = -8;                       // 前方悬空且目标在上方 → 大跳 + 冲刺（67 噬人藤不跳 :60527）
+      } else if (this.dirY < 0 && this.vanillaId !== 67
+        && !solidAllowBottomSlope(st, fx, fy + 1) && !solidAllowBottomSlope(st, fx + dir, fy + 1)) {
+        // ★BJ751-⑱：原版（1457 :60729）= directionY<0（目标脚底 ≤ 自身脚底，aiStyle3
+        // 专档 SetTargetTrackingValues :78562-78568 写）——非"玩家脚高于自身顶"；
+        // 且 player 空/死亡时 directionY 保留旧值照判（不挂 player 门）。脚下判据
+        // = SolidTileAllowBottomSlope（:70698 单源，半砖/顶坡/致动不算地、平台算地、
+        // 界外算地不跳）——旧码 isSolid 把半砖当地、平台不当地两相颠倒
+        this.vy = -8;                       // 前方悬空且目标不低于自身 → 大跳 + 冲刺（67 噬人藤不跳 :60729）
         this.vx *= 1.5;
       } else if (this.vanillaId != null && !FIGHTER_NO_DOOR.has(this.vanillaId)) {
         // :60735-60739 行进无障碍（未命中任何跳跃分支）且 flag8 → 攻门进度归零
@@ -8568,7 +8615,10 @@ export class Enemy extends Entity {
     // 墓地豁免（:53154 `!Main.player[target].ZoneGraveyard` 首条件）：目标玩家在墓地时
     // 恶魔眼白天不驱散（scene 为本地玩家快照，单人下等价）
     const day = game.world.clock.isDay && !game.world.scene?.zoneGraveyard;
-    const eyeDiscouraged = day && this.cy <= game.world.groundLevel * TILE
+    // ★BJ751-㉓：原版（1457 :53303，issue 旧引 :62603 漂移）IsDiscouraged 收
+    //  npcPosition=position（调用点 :52856 直传 position）——命中盒【顶边】≤
+    //  worldSurface*16，非中心。顶边过线即驱散（中心判定晚半盒高才触发）
+    const eyeDiscouraged = day && this.y <= game.world.groundLevel * TILE
       && this.vanillaId != null && EYE_DAY_DESPAWN.has(this.vanillaId);
     let dirX: number, dirY: number, cx: number, cy: number;
     // Y 轴步长/二档/漂移（R6-B 2-2，1457 :53225-53256 default 档：步 0.04、超帽
