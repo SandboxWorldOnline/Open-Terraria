@@ -228,8 +228,12 @@ describe('★BJ754 TF-12：普通块邻接门 = 原版四邻并集（hasSupport 
     for (const sh of [19, 239, 380, 427, 435, 436, 437, 438, 439]) {
       expect(vanRuntimeTileSolid(idOfSheet(sh)), `sheet ${sh}`).toBe(true);
     }
-    expect(vanRuntimeTileSolid(idOfSheet(484))).toBe(false);
-    expect(vanRuntimeTileSolid(idOfSheet(659))).toBe(false);
+    // ★R30-P1 改判史（2026-11-02）：484/659 运行时=**true**——GenerateWorld
+    //   finally→RestoreTemporaryStateChanges 用 Reset 入口快照还原（快照在
+    //   [659]=false/:11512 写之前拍下）,生成期翻转全被抹掉；Main.cs:7603/:9767
+    //   初值即终值。旧 false 断言系读漏 finally-restore。
+    expect(vanRuntimeTileSolid(idOfSheet(484))).toBe(true);
+    expect(vanRuntimeTileSolid(idOfSheet(659))).toBe(true);
     expect(vanRuntimeTileSolid(idOfSheet(1))).toBe(true);
     expect(vanRuntimeTileSolid(idOfSheet(10))).toBe(true);      // 关态门 tileSolid[10]=true（Main.cs:8027）
   });

@@ -127,6 +127,12 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  X 向（style*18）→ 绿压板 541 放成 (18,0)、粉测重板 3626 放成 (54,0),
     //  挖回全默认色（掉落侧一直读 Y=style0,读写域错置）。
     case 135: case 428: return [0, style * 18];
+    // ★R30-P2（红蓝定谳,2026-11-02）:legacy 陷阱 137（PlaceTile 显式支
+    //   WorldGen.cs:60241-46 `frameY=18*style` 种类驻 Y;facing 后 frameX+=18
+    //   :41186-96 SpinTraps）——与 135/428 同域（uccp 族 TF-08 漏网的 legacy 弟兄）。
+    //   旧走 default (style*18,0) 种类进 X+placeStyle 缺失恒 0=超级镖/火焰/尖球/
+    //   长矛/毒镖陷阱全面退化普通镖陷阱（渲染/发射/掉落/镐力门四连错）。
+    case 137: return [0, style * 18];
     // 10 关门（PlaceDoor WorldGen.cs:32070-32090：frameX=54*(style/36)+变体*18、
     //  frameY=54*(style%36)+行*18——每 36 样式换一列，列内 54px 块三档变体。
     //  曾落 default 写 style*18 → 石门(style44)/活木·骨·血肉门等 style>0 全渲染错区+

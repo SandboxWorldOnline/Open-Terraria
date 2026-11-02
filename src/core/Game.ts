@@ -959,6 +959,10 @@ const BOSS_GAME_EVENT_BY_NPC: Record<number, number> = {
 // ---- 原版挖掘表（vanilla sheet id）----
 // tileNoFail（Main.cs:7138/7142-7152/7313-7338/7392/7772-8318/9407-9411/9498/10197-10198）：
 // 花草/藤蔓/苔藓/蘑菇/雪泥/宝石树芽/回声家具等——原版每击 100 直接破坏
+/** ★R29-①（2026-11-02）:Check2x2-generic 族 sheet 表——原版 Check2x2 的
+ *  else-if 支撑行（:48865-48877,裸 active+tileSolid∨tileTable+非半砖）成员:
+ *  泵 142/143、蝶罐 288-295、碎石 652（Boulders/杠杆 132/TNT 654 走专属支不入表）。 */
+const CHECK2X2_GENERIC_SHEETS = new Set<number>([142, 143, 288, 289, 290, 291, 292, 293, 294, 295, 652]);
 const TILE_NO_FAIL_SHEETS = new Set([
   3, 4, 24, 32, 35, 50, 51, 52, 61, 62, 69, 73, 74, 81, 82, 83, 84, 110, 113, 115, 129,
   162, 165, 184, 185, 186, 187, 192, 201, 205, 227, 233, 254, 324, 330, 331, 332, 333,
@@ -30962,8 +30966,7 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         if (gateHitboxContains(hb, gwx, gwy)) {
           const [cpx, cpy] = gateHitboxClosestPoint(hb, this.player.cx, this.player.cy);
           if (this.inTileRange(Math.floor(cpx / TILE), Math.floor(cpy / TILE))) {
-            this.potionOfReturnReturnToOriginalUsePosition();
-            this.input.rightDown = false;        // releaseUseTile=false（:48）
+            ;this.input.rightDown = false;        // releaseUseTile=false（:48）
             this.tileInteractHappened = true;    // tileInteractionHappened=true（:47）
           }
         }
@@ -46487,7 +46490,7 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
           'playerProj',
           (tn286) => ({ dmg: damageVarRoll(dmg, this.player.luck ?? 0),
             crit: rollVanillaHitCritConsumeTimer(286, this as unknown as import('../entities/types').GameHooks, tn286),   // ★G37-A（D5）：TimerCrit 同扩
-            penPercent: flags?.arpen ?? 0 }));
+            flatPen: flags?.arpen ?? 0 }));   // ★R30-P3-1:flags.arpen=flat 域(Arrow.settlePen)
       }
       return;
     }
@@ -46849,7 +46852,7 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         (tn41) => ({
           dmg: damageVarRoll(dmg, this.player.luck ?? 0),
           crit: rollVanillaHitCritConsumeTimer(41, this, tn41),   // ★G37-A（D5）：TimerCrit 同扩
-          penPercent: flags?.arpen ?? 0,
+          flatPen: flags?.arpen ?? 0,   // ★R30-P3-1:flat 域
         }));
       if (flags?.hostile) {
         const p = this.player;
@@ -47463,7 +47466,7 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
       (tnSke) => ({
         dmg: damageVarRoll(dmg, this.player.luck ?? 0),
         crit: rollVanillaHitCritConsumeTimer(projId, this, tnSke),   // ★G37-A（D5）：TimerCrit 同扩
-        penPercent: flags?.arpen ?? 0,
+        flatPen: flags?.arpen ?? 0,   // ★R30-P3-1:flat 域
       }));
     if (flags?.hostile) {
       const p = this.player;
@@ -52248,11 +52251,12 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
             const ci = st.idx(x, topB - 1);
             const cd = TILE_DEFS[st.type[ci]];
             const csh = cd?.vanilla?.sheet ?? -1;
-            if (cd?.platform || csh === 380) {
+            if ((PLATFORMS_SHEETS.has(csh) || csh === 380)) {
               // :46546-46548 平台/种植箱无条件覆盖
             } else {
               const num3 = st.slope[ci] === 1 || st.slope[ci] === 2 || !!st.half[ci] || !!cd?.solid;
-              const flag2 = !cd?.platform || (!!st.half[ci] || st.slope[ci] === 1 || st.slope[ci] === 2);
+              // ★R29-②:banner 平台臂同换窄集(CheckBanner :46546-48)
+              const flag2 = !PLATFORMS_SHEETS.has(csh) || (!!st.half[ci] || st.slope[ci] === 1 || st.slope[ci] === 2);
               const flag3 = (num3 && flag2) && !NOT_REALLY_SOLID_SHEETS.has(csh)
                 && st.slope[ci] !== 3 && st.slope[ci] !== 4;
               if (!flag3) badB = true;
@@ -52288,7 +52292,10 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
           else {
             const ci = st.idx(x, topQ - 1);
             const cd = TILE_DEFS[st.type[ci]];
-            const flag4 = st.hasTile(x, topQ - 1) && (!!cd?.platform || (cd?.vanilla?.sheet ?? -1) === 380);
+            const csh = cd?.vanilla?.sheet ?? -1;
+            // ★R29-②:原版 Check1x2Top :47146-47147 = TileID.Sets.Platforms ∨ 380
+            //   ——窄集,def.platform 超集(469 桌组/405 壁炉等)会把台面正下挂瓶误保活。
+            const flag4 = st.hasTile(x, topQ - 1) && (PLATFORMS_SHEETS.has(csh) || csh === 380);
             const flag5 = sheet === 698 && st.hasTile(x, topQ - 1) && !!cd?.rope;
             const solidArm = st.isActive(x, topQ - 1) && !!cd?.solid;
             if (!flag4 && !flag5 && !solidArm) badQ = true;
@@ -52441,10 +52448,14 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         //  frameX 直写（非杀环,1×1 单格）。TileObjectData 备档（136 三备档,BJ629
         //  件1 定谳）与此梯同构。
         const solidOf = (tx: number, ty: number): { ok: boolean; sheet: number } => {
+          // ★R29-③（红蓝定谳,2026-11-02）:case 136 原文 :86301/:86311/:86319
+          //   `Main.tileSolid[num] && !tileNoAttach[num]`——**无 !tileSolidTop**。
+          //   旧读 def.solid(排 solidTop)致矿锭 239/种植箱 380 上挂开关误杀/误换向。
+          //   vanRuntimeTileSolid=Main.tileSolid 运行时单源(BJ754 TF-13 同源)。
           if (!st.inBounds(tx, ty) || !st.isActive(tx, ty)) return { ok: false, sheet: -1 };
           const td = TILE_DEFS[st.type[st.idx(tx, ty)]];
           if (!td) return { ok: false, sheet: -1 };
-          return { ok: !!td.solid, sheet: td.vanilla?.sheet ?? -1 };
+          return { ok: vanRuntimeTileSolid(st.type[st.idx(tx, ty)]), sheet: td.vanilla?.sheet ?? -1 };
         };
         const below = solidOf(x, y + 1);
         const bi = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
@@ -52859,15 +52870,32 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       //  实证挖一格 3 弹的口源之一）。本臂整体退役,早退防落入通用 hasSupport。
       return;
     } else if (isTnt) {
-      // TNT 桶 654 非 Boulders 表 → Check2x2 else-if 支（:48464-48470）：下方
-      // active+(solid||table)+非半砖——同样无挂墙分支（贴墙悬空桶照样失撑爆,❌1）
+      // TNT 桶 654 非 Boulders 表 → Check2x2 else-if 支（:48464-48470/:48865-48877）：
+      // 下方 active+(solid||table)+非半砖——同样无挂墙分支（贴墙悬空桶照样失撑爆,❌1）
+      // ★R29-①（红蓝定谳,2026-11-02）:原文读 tileSafely2.active()【裸 active】
+      //   (Tile.cs:591 sTileHeader&0x20——不含 inActive)——致动块 active 仍真=保活;
+      //   旧 isActive(=nactive active∧!inActive)把致动支撑误杀（泵族同病,见下支）。
+      //   hasTile=active() 裸位同构 ✓。无坡门（顶坡支撑保活——与 Check3x2 分叉）。
       let bottomAll = true;
       for (let dx = 0; dx < w; dx++) {
         const bx = ax + dx, by = ay + h, bi = st.idx(bx, by);
         const belowTable = TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(bx, by)]?.vanilla?.sheet ?? -1);
-        if (!(st.isActive(bx, by) && (st.isSolid(bx, by) || belowTable) && !st.half[bi])) { bottomAll = false; break; }
+        if (!(st.hasTile(bx, by) && (st.isSolid(bx, by) || belowTable) && !st.half[bi])) { bottomAll = false; break; }
       }
       if (bottomAll) return;
+    } else if (CHECK2X2_GENERIC_SHEETS.has(sheet)) {
+      // ★R29-①（红蓝定谳,2026-11-02）:Check2x2-generic 族（泵 142/143、蝶罐
+      //   288-295、碎石 652——Boulders/TNT/132 之外走 :48865-48877 通用 else-if
+      //   支撑行）——裸 active+sT∨table+非 half,无挂墙分支、无坡门、无 inActive。
+      //   旧走 furnitureBandSurvives→evalCell isActive(nactive)+btOf===0——
+      //   致动/顶坡支撑误杀（泵置于致动石上被清,R29 探针实锤）。
+      let bottomAll2 = true;
+      for (let dx = 0; dx < w; dx++) {
+        const bx = ax + dx, by = ay + h, bi = st.idx(bx, by);
+        const belowTable2 = TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(bx, by)]?.vanilla?.sheet ?? -1);
+        if (!(st.hasTile(bx, by) && (st.isSolid(bx, by) || belowTable2) && !st.half[bi])) { bottomAll2 = false; break; }
+      }
+      if (bottomAll2) return;
     } else if (this.furnitureBandSurvives(def, sheet, ax, ay, w, h, onTable)) return;
     // 非空容器存活门（⚠️3 批 R10 观察#6）：原版 CheckChest 的失撑旗受
     // Chest.CanDestroyChest 门（:57979-57981 `(!active || !tileSolid) && CanDestroyChest`
