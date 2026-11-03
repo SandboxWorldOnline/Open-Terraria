@@ -73,12 +73,18 @@ function dotLoss(field: string, prep?: (e: Enemy) => void): number {
 // ===========================================================================
 // A/B 组：1457 新 debuff 家族 + DOTTally 管线（NPC.cs:92746-92800）
 // ===========================================================================
+// ★issue#46 N06（2026-11-03 改判史）：本组旧断言是「每效果独立浮点累加器」下的
+//  1 秒均值（dps×1s）。改为原版 DOTTally + lifeRegenCount 统一批次后（NPC.cs:80-141/
+//  :92714-92878），**1 秒窗口内只兑现已经跨过 120×num 门槛的整批**——长跑均值不变，
+//  60 帧快照值会随批次相位低于均值（残账结转）。逐帧时点断言见
+//  tests/issue46-ai-combat.test.ts（前 1/4/20/30/40/60 帧）。
+//  dotLoss = 单次 fixedUpdate(1)（dt=1 → 60 tick 的账面入账）。
 describe('A 组 1457 新 debuff（DOTTally 等价段）', () => {
-  it('395 PotentAcid = 90 HP/s（AddPoison(180,60),:92751）', () => {
-    expect(dotLoss('potentAcidT')).toBe(90);
+  it('395 PotentAcid（AddPoison(180,60),:92751）：90 HP/s，60 帧兑现 1 批 60', () => {
+    expect(dotLoss('potentAcidT')).toBe(60);
   });
-  it('397 ChlorophyteSpore = 90 HP/s（:92755）', () => {
-    expect(dotLoss('chlorophyteSporeT')).toBe(90);
+  it('397 ChlorophyteSpore（:92755）：同 180/60 → 60 帧 60', () => {
+    expect(dotLoss('chlorophyteSporeT')).toBe(60);
   });
   it('362 电鳗鞭 = 50 HP/s 平铺（Add(100,50),:92781——链式缩放删除）', () => {
     expect(dotLoss('eelWhipT')).toBe(50);
@@ -87,20 +93,21 @@ describe('A 组 1457 新 debuff（DOTTally 等价段）', () => {
     expect(dotLoss('poisonT', (e) => { e.acceleratePoisonsT = 1; })).toBe(12);
     expect(dotLoss('onFireT', (e) => { e.acceleratePoisonsT = 1; })).toBe(8);
   });
-  it('398 不加成裸 Add（电鳗鞭 50 恒定 / Oiled 25 恒定,:92840 只乘 SupportAcceleration 池）', () => {
+  it('398 不加成裸 Add（电鳗鞭 50 恒定 / Oiled 恒定,:92840 只乘 SupportAcceleration 池）', () => {
     expect(dotLoss('eelWhipT', (e) => { e.acceleratePoisonsT = 1; })).toBe(50);
-    expect(dotLoss('oiledT', (e) => { e.acceleratePoisonsT = 1; e.onFire3T = 1; }))
-      .toBe(15 * 2 + 25);   // onFire3 可加速 ×2,oiled 裸 Add 不乘
+    // onFire3 加速后 loss=60/t、oiled 裸 Add 50/t 不乘 → 合账 110/t；批次 max(5,10)=10,
+    // 门槛 1200 → 60 帧跨 5 批 = 50（残账 −600 结转下一批）
+    expect(dotLoss('oiledT', (e) => { e.acceleratePoisonsT = 1; e.onFire3T = 1; })).toBe(50);
   });
-  it('木史莱姆火系 +16 lifeRegen=+8 HP/s 扩全火焰族（1457 AddFlamable :116-119;'
+  it('木史莱姆火系 +16 lifeRegen 扩全火焰族（1457 AddFlamable :116-119;'
     + '1456 仅 onFrostBurn 块内）', () => {
     const slime = (e: Enemy) => { e.vanillaId = 1; e.ai1 = 9; };
-    expect(dotLoss('onFireT', slime)).toBe(4 + 8);
-    expect(dotLoss('frostburnT', slime)).toBe(8 + 8);
-    expect(dotLoss('onFire3T', slime)).toBe(15 + 8);
-    expect(dotLoss('cursedT', slime)).toBe(24 + 8);
-    expect(dotLoss('shadowFlameT', slime)).toBe(15 + 8);
-    // 非木史莱姆不加
+    expect(dotLoss('onFireT', slime)).toBe(12);       // loss24/batch0 → num5=12 一批
+    expect(dotLoss('frostburnT', slime)).toBe(16);    // loss32/batch2 → 8×2
+    expect(dotLoss('onFire3T', slime)).toBe(20);      // loss46/batch5 → 4×5（残账 −360）
+    expect(dotLoss('cursedT', slime)).toBe(30);       // loss64/batch10 → 3×10（残账 −240）
+    expect(dotLoss('shadowFlameT', slime)).toBe(20);  // loss46/batch5 → 4×5
+    // 非木史莱姆：onFire3 loss30/batch5 → 60 帧整好 3 批 = 15
     expect(dotLoss('onFire3T')).toBe(15);
   });
   it('熔岩史莱姆（ai1=364 族）对 20/70/395/397 运行时豁免静态免疫表（:61312-61316）', () => {

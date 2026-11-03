@@ -223,18 +223,26 @@ describe('BJ677 B. 岩浆行为锁（updateNpcLiquid,Collision_LavaCollision NPC
     expect(b.onFireT).toBe(7);
   });
 
-  it('E2E：Enemy.fromVanilla(39) 入浆首拍掉血不上火;僵尸 3 上火（npcLiquid 门经 Enemy.fixedUpdate 接通）', () => {
+  it('E2E：Enemy.fromVanilla(39) 入浆【无伤无火】（noTileCollide 支整块跳过）;僵尸 3 上火', () => {
+    // ★issue#46 N04（2026-11-03 改判史）：本断言旧形为「39 掉血 50（直伤照吃）」——
+    // 那是**未分流**的结果。1457 NPC.cs:91605-91618：`if (!noTileCollide)
+    // UpdateCollision(); else { position += velocity; if (WetCollision) TryRemoving... }`
+    // ——Collision_LavaCollision 唯一调用点 :93668 在 UpdateCollision 内，故
+    // noTileCollide 族（骨蛇 39/40/41 SetDefaults noTileCollide+noGravity）**既不
+    // 吃岩浆直伤也不置 lavaWet/wet**，穿墙支只清可水灭效果。本组 6 个 updateNpcLiquid
+    // 直调用例仍显式走非穿墙支（第 4 参缺省 false），语义不变。
     const w = lavaWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const h = hooks(w, p);
     const serpent = Enemy.fromVanilla(39, 20 * TILE, 36 * TILE)!;
     const hp0 = serpent.hp;
     for (let i = 0; i < 3; i++) serpent.fixedUpdate(1 / 60, h as never);
-    expect(serpent.hp).toBeLessThan(hp0);   // 50 直伤
-    expect(serpent.onFireT).toBe(0);        // 不上火
+    expect(serpent.hp).toBe(hp0);           // 穿墙支无岩浆直伤
+    expect(serpent.onFireT).toBe(0);        // 不上火（另：buffImmune 门本就拒 24）
+    expect(serpent.lavaWet).toBe(false);    // UpdateCollision 跳过 ⇒ lavaWet 不置位
     const z = Enemy.fromVanilla(3, 20 * TILE, 36 * TILE)!;
     for (let i = 0; i < 3; i++) z.fixedUpdate(1 / 60, h as never);
-    expect(z.onFireT).toBeGreaterThan(0);   // 对照组照上
+    expect(z.onFireT).toBeGreaterThan(0);   // 对照组（非穿墙）照上
   });
 });
 

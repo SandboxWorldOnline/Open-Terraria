@@ -30,6 +30,12 @@ export interface GameHooks {
    *  时 Enemy.targetClosest 回退 [player]（单机/测试 mock 零回归）。顺序即槽序
    *  近似（本地=房主槽 0 最先，原版平距严格 < 比较取先扫描者） */
   candidatePlayers?(): import('./Player').Player[];
+  /** WorldGen.CanKillTile 全式（1457 WorldGen.cs:62716-62832）——帮手链
+   *  （MinionProj 的 UsageProxy 等价，Projectile.cs:52238-52250）与玩家侧走**同一个**
+   *  原版函数（读 Main.hardMode + 宝箱内容，无玩家上下文）。缺省 undefined =
+   *  SmartCursor 回退 `Mounts.canKillTileAt` 无 ctx 档（单机/测试 mock 零回归）。
+   *  ★issue#44-6 红队补强（2026-11-03）：此前只给玩家侧接线，帮手侧落回退。 */
+  canKillTile?(x: number, y: number): boolean;
   /** 视口世界像素（Main.sWidth/sHeight 等价 = 画布尺寸÷缩放）——CanAnyPlayerSeeThisTile
    *  （NPC.cs:43877-43890 屏盒求交）等消费源。缺省 = 1920×1080 静态退档（单机测试 mock 兼容）。
    *  ★MINOR-6（2026-09-02）：CanAnyPlayerSeeThisTile 已画布无关化（原版常量 1920×1200,
@@ -409,7 +415,10 @@ export interface GameHooks {
    *  合并身份 = 词缀+本名，PopupText.NewText AffixName 语义） */
   showPickupLabel(itemKey: string, picked?: number, prefix?: number): void;
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */
-  dropContext?(): import('../drops/NpcDrops').DropExtras;
+  /** ★issue#46-N17（2026-11-03）：可选结算玩家——原版魂/钥匙/风筝等条件读
+   *  `info.player.Zone*`（Conditions.cs:825-871），该 player = NPCLoot 选出的
+   *  最近玩家（非恒房主）。Enemy 死亡链传 closest；缺省=房主 scene 回退（旧面）。 */
+  dropContext?(player?: LootPlayerCtx | null): import('../drops/NpcDrops').DropExtras;
   /** 月事件上下文（南瓜月/霜月 wave-gate 掉落条件）：Game 实现，缺省按无事件（恒 false） */
   moonEventCtx?(): { kind: 1 | 2; wave: number } | null;
   /** WorldGen.Skyblock.noAltars（:3062/:3146-3167 读档 Census → 全图无 tile 26 恶魔

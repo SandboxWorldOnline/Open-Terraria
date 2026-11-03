@@ -1025,6 +1025,35 @@ export function buffTypeByVanilla(v: number): BuffType | undefined {
   return BUFF_TYPE_BY_VANILLA.get(v);
 }
 
+/** ★BJ755-A T1（2026-11-02,bj739a D-① 清偿）：msg50 远端 buff 栏 → 代理镜像
+ *  裸写（MessageBuffer.cs:2462-2469 `buffType[n]=type; buffTime[n]=60` + 尾段
+ *  Array.Clear 的 BuffState 等价）。
+ *  · 裸写不走 apply（AddBuff 逻辑：免疫门/fed-state 换档/难度时长缩放/44 槽
+ *    驱逐——原版 reader 即裸数组写,apply 族会破坏镜像（如专家难度 ×2 时长
+ *    污染、免疫门丢条目））;
+ *  · 时长=1s（60t 镜像;代理不跑 fixedUpdate 无 tick 递减=原版远端 60t 重置
+ *    语义近似面,备案勿自造递减——任务书条款）;
+ *  · 未映射 id（本仓 BUFF_DEFS 无档）跳过但不出错（原版 int 数组可存任意 id,
+ *    本仓 BuffType 键域限已映射集——原始值仍留 RemotePlayerState.buffTypes,
+ *    未来消费面（头顶图标）直读该数组不受此限）;
+ *  · 消费=Game.simulateRemotePlayers（proxy.buffs 注入）;渲染消费面（头顶
+ *    buff 图标/debuffTint）按任务书分期不在本刀。
+ *  ★单机零扰动证：唯一调用点在 simulateRemotePlayers（net?.active 门内,
+ *    单机不可达）;联机下 proxy.buffs 本无写入方（代理不走 buff 链）,
+ *    镜像后集合=对端 msg50 集。 */
+export function applyRemoteBuffMirror(buffs: BuffState, vanillaIds: readonly number[]): void {
+  const want = new Set<BuffType>();
+  for (const v of vanillaIds) {
+    if (v <= 0) continue;
+    const bt = BUFF_TYPE_BY_VANILLA.get(v);
+    if (bt !== undefined) want.add(bt);
+  }
+  for (const t of [...buffs.active.keys()]) {
+    if (!want.has(t)) buffs.active.delete(t);   // Array.Clear 尾段等价（缺席即清）
+  }
+  for (const t of want) buffs.active.set(t, 1); // buffTime=60t 镜像（1s）
+}
+
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
 export function buffName(t: BuffType): string {
   return Lang.buffName(BUFF_DEFS[t].vanillaBuff) ?? BUFF_DEFS[t].fallbackName;

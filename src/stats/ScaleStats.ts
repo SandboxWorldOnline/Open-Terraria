@@ -367,7 +367,7 @@ export interface ScalingStats {
 export interface ScaleStatsWorld {
   /** Main.Difficulty（Main.cs:2764-2786，mainDifficulty() 求值结果） */
   difficulty: number;
-  /** Main.hardMode */
+  /** Main.hardMode（★issue#46 N03：绑定对象上为 live getter，读时反映运行时变化） */
   hardMode: boolean;
   /** Main.getGoodWorld */
   getGoodWorld: boolean;
@@ -377,11 +377,13 @@ export interface ScaleStatsWorld {
   remixWorld: boolean;
   /** Main.zenithWorld（getfixedboi = SeedFlags.everything）——SetDefaults 尾段 lifeMax 预调整 */
   zenithWorld: boolean;
-  /** NPC.downedPlantBoss（ExpertHardmode 段 :18462 +20 阈值） */
+  /** NPC.downedPlantBoss（ExpertHardmode 段 :18578 +20 阈值；★issue#46 N03 live getter） */
   downedPlantBoss: boolean;
   /** NPC.AnyNPCs(type)（Tweaks/ExpertHardmode 的 getGoodWorld 联动门） */
   anyNpc: (type: number) => boolean;
-  /** NPC.GetActivePlayerCount()（单人恒 1，Main.cs:18518-18521 netMode==0） */
+  /** NPC.GetActivePlayerCount()（NPC.cs:18528-18543：netMode==0 恒 1；联机统计
+   *  active && !ghost 玩家槽。★issue#46 N15：绑定对象上为 live getter，
+   *  只在 difficulty>=Expert 档位被 ScaleStats_ByPlayerCount 消费） */
   activePlayerCount: number;
 }
 
@@ -404,22 +406,33 @@ export function bindScaleStatsWorld(ctx: ScaleStatsWorld | null): void { boundWo
 export function scaleStatsWorld(): ScaleStatsWorld { return boundWorld ?? CLASSIC_SCALE_WORLD; }
 
 /** World → ScaleStatsWorld 投影（Game.afterWorldLoad 用；anyNpc 由实体桶实现）。
- *  difficulty 为 live getter（读时重算 mainDifficulty）——旅程强度滑杆运行时
- *  拖动即生效，无需重新绑定（对应原版 Main.Difficulty 属性每次读重算） */
+ *  全部世界进度项均为 **live getter**（读时重算），不落读档快照：
+ *   - difficulty : mainDifficulty(world)（Main.Difficulty 属性每次读重算；旅程滑杆运行时生效）
+ *   - hardMode   : ★issue#46 N03 —— 原版 ScaleStats 每次现场读 `Main.hardMode`
+ *                  （NPC.cs:18183 `if (difficulty >= Expert && Main.hardMode)`）；旧实现
+ *                  读档布尔快照 → 同会话打肉山后新造怪仍按肉前缩放，重进才更新。
+ *   - downedPlantBoss : ★issue#46 N03 —— 原版 ScaleStats_ForExpertHardmode 现场读
+ *                  `downedPlantBoss`（NPC.cs:18578，阈值 80→100）；旧实现同为快照。
+ *   - activePlayerCount : ★issue#46 N15 —— 原版 ScaleStats 入口现场调
+ *                  `GetActivePlayerCount()`（NPC.cs:18190/NPC.cs:18528-18543：netMode==0
+ *                  恒 1，联机统计 active && !ghost 玩家槽）；旧实现恒 1 → 房主造怪
+ *                  在专家档位按单人 Boss 血量。注入源由 Game 绑定（本地+远端代理）。
+ *  签名第 3 参缺省 = 单机恒 1（未绑定世界/测试裸对象零回归）。 */
 export function scaleStatsWorldOf(
   world: Pick<World, 'difficulty' | 'seedFlags' | 'flags'> & { journeyPowers?: import('../world/JourneyPowers').JourneyPowersState },
   anyNpc: (type: number) => boolean,
+  activePlayerCount?: () => number,
 ): ScaleStatsWorld {
   return {
     get difficulty() { return mainDifficulty(world); },
-    hardMode: !!world.flags?.hardMode,
+    get hardMode() { return !!world.flags?.hardMode; },
     getGoodWorld: !!world.seedFlags?.getGoodWorld,
     tenthAnniversaryWorld: !!world.seedFlags?.tenthAnniversary,
     remixWorld: !!world.seedFlags?.remix,                 // Main.remixWorld = don't dig up
     zenithWorld: !!world.seedFlags?.everything,            // Main.zenithWorld = getfixedboi
-    downedPlantBoss: !!world.flags?.['downed_262'],
+    get downedPlantBoss() { return !!world.flags?.['downed_262']; },
     anyNpc,
-    activePlayerCount: 1,   // 单机（NPC.GetActivePlayerCount :18518 netMode==0 → 1）
+    get activePlayerCount() { return activePlayerCount ? activePlayerCount() : 1; },
   };
 }
 

@@ -61,6 +61,13 @@ export interface RemotePlayerState {
    *  （服务端以同步控制位跑 DoCommonDashHandle :21740） */
   dash: boolean;
   facing: number; selectedItem: number; dead: boolean;
+  /** ★G43 D-N15（2026-11-03 清偿）：msg13 flagBits[1]（本仓新增独立位）——硬核幽灵相
+   *  （原版 Player.ghost）。**勿并入 flagBits[6]**：那是 dead∪ghost 并集（BJ742-A R22
+   *  定谳+结构锁，普通死亡也须远端显 dead）。本位只喂 NPC.GetActivePlayerCount 语义
+   *  （NPC.cs:18528-18543 `active && !ghost`——普通死亡照计，硬核幽灵不计）。
+   *  旧端不发 → false（照计=改动前行为）；旧接收端忽略未知位。原版服直连时由
+   *  VanillaClient 从 msg13 c2[6]（真 ghost 位）映射。 */
+  ghostPhase: boolean;
   /** 新权威包到达标记（Game 消费注入 netOffset 后清零） */
   fresh: boolean;
   active: boolean;
@@ -117,6 +124,15 @@ export interface RemotePlayerState {
    *  NPC.cs:91765;本仓等价活消费=room.ts msg23/27 逐接收端 AOI 过滤中心）。
    *  旧 server 剥尾/旧 client 未发 → null（AOI 退回 avatar 位=改动前行为） */
   camTarget: { x: number; y: number } | null;
+  /** ★BJ755-A T1（2026-11-02,bj739a D-① 清偿）：msg50 PlayerBuffs 远端镜像——
+   *  定长 44 槽（Player.maxBuffs=44,Player.cs:1491）vanilla buff id 数组,槽语义
+   *  对齐原版 reader 的 `buffType[n]=type; buffTime[n]=60` 槽位赋值（保序压缩
+   *  重建:空槽=0）。buffTime 60t 不镜像（消费面=代理栏渲染/谓词,无 tick 递减
+   *  需求——原版远端 buff 时长本就是近似,类型变化才重发;备案勿自造递减）。
+   *  消费=Game.simulateRemotePlayers → applyRemoteBuffMirror 注入 proxy.buffs
+   *  （裸写,不走 AddBuff 逻辑——原版 reader 即裸数组写）。SW 原生协议无 buff
+   *  同步面 → 恒全零（改动前行为） */
+  buffTypes: number[];
 }
 
 /** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers；
@@ -300,7 +316,15 @@ export class ClientNet {
   private ws: WebSocket | null = null;
   private parser = new FrameParser();
   private hooks: ClientNetHooks;
-  private game: { player: { appearance?: unknown; hostile: boolean; team: number; inv: { slots: Array<{ id: number; stack: number } | null> } } };
+  private game: {
+    player: {
+      appearance?: unknown; hostile: boolean; team: number; dead?: boolean;
+      inv: { slots: Array<{ id: number; stack: number } | null> };
+      /** ★G43 D-N15：本地硬核幽灵相（Game 真身=Player.isGhostPhase；测试假件可缺省） */
+      isGhostPhase?(world: World): boolean;
+    };
+    world?: World;
+  };
   private hostToken = '';
 
   /** 组装中的世界（收到 msg7 建骨架，strip 到齐后交给 onWorldReady） */
@@ -539,9 +563,11 @@ export class ClientNet {
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash 缺省
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
+              ghostPhase: false,   // ★G43 D-N15（msg13 flagBits[1]；此后由该包覆写）
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
               deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
               camTarget: null, sitting: false, porAnchors: null,   // ★G36-A D3
+              buffTypes: new Array(44).fill(0),   // ★BJ755-A T1：msg50 镜像（SW 原生协议恒零）
             };
             this.players.set(slot, p);
           } else if (!p.active) {
@@ -550,6 +576,7 @@ export class ClientNet {
             // 未决挥击 FIFO 同键位一并作废。
             p.pvpDefense = null;
             p.pvpImmuneT = 0;
+            p.ghostPhase = false;   // ★G43 D-N15：上一 occupant 的幽灵位不得跨会话残留
             this.pendingMeleeHits.delete(slot);
           }
           p.active = true;
@@ -605,10 +632,12 @@ export class ClientNet {
             up: false, down: false, left: false, right: false, jump: false, useItem: false,
             dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash（旧端恒 0）
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
+            ghostPhase: !!(flag & 2),   // ★G43 D-N15（独立位；[6] 是 dead∪ghost 并集）
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
             deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
             camTarget, sitting: false, porAnchors: null,   // ★G36-A D3
+            buffTypes: new Array(44).fill(0),   // ★BJ755-A T1：msg50 镜像（SW 原生协议恒零）
           };
           this.players.set(slot, p);
         }
@@ -622,6 +651,7 @@ export class ClientNet {
         p.selectedItem = sel;
         p.sleeping = !!(flag & 1);   // flagBits[0]（原版 bitsByte26[0] sleeping.isSleeping）
         p.dead = !!(flag & 64);           // flagBits[6] = ghost
+        p.ghostPhase = !!(flag & 2);      // ★G43 D-N15：flagBits[1] 独立硬核幽灵位（旧端恒 0）
         p.hostile = hostile; p.team = team;
         p.camTarget = camTarget;          // ★刀D：netCameraTarget 镜像（逐包覆写,原版同相）
         p.fresh = true;                   // Game 侧注入 netOffset 后清零
@@ -1149,7 +1179,13 @@ export class ClientNet {
     const sel = (p.inv as unknown as { selected: number }).selected & 0xff;
     // 控制位变化即时发（原版 TrySyncingInput Player.cs:6484：任一 control/selectedItem
     // 变化立刻 SendData(13)）——原地起跳这类"位置未动"的操作不再等静止心跳
+    // ★G43 D-N15（2026-11-03）：硬核幽灵独立位——[6] 并集语义不动（BJ742-A R22），
+    //  [1] 只喂远端 GetActivePlayerCount（原版 NPC.cs:18534-18540 `active && !ghost`：
+    //  普通死亡照计，硬核幽灵不计）。测试假件无 world/isGhostPhase → false。
+    const ghostPhase = !!this.game.world
+      && this.game.player.isGhostPhase?.(this.game.world) === true;
     const ctrlChanged = ctrl !== this.lastSentCtrl || sel !== this.lastSentSel || p.dead !== this.lastSentDead
+      || ghostPhase !== this.lastSentGhost                                        // 幽灵相切换即时发
       || (p as unknown as { sleeping: boolean }).sleeping !== this.lastSentSleep;   // 躺床切换即时发(原版 Start/StopSleeping SendData(13))
     const now = performance.now();
     const moved = Math.abs(p.x - this.lastSentPos.x) > 1 || Math.abs(p.y - this.lastSentPos.y) > 1;
@@ -1163,10 +1199,12 @@ export class ClientNet {
     this.lastSentCtrl = ctrl;
     this.lastSentSel = sel;
     this.lastSentDead = p.dead;
+    this.lastSentGhost = ghostPhase;   // ★G43 D-N15
     this.lastSentHostile = this.game.player.hostile;
     this.lastSentTeam = this.game.player.team;
-    // flagBits: [0]sleeping(原版 bitsByte26[0]) [2]hasVelocity [5]hasCameraTarget(刀D,注k)
-    // [6]ghost [7]hostile(v7)；尾部 u8 team(0-5) + [f32 camX,camY 若 flagBits[5]]
+    // flagBits: [0]sleeping(原版 bitsByte26[0]) [1]hardcoreGhost(★G43 D-N15,独立位)
+    // [2]hasVelocity [5]hasCameraTarget(刀D,注k) [6]ghost(并集) [7]hostile(v7)；
+    // 尾部 u8 team(0-5) + [f32 camX,camY 若 flagBits[5]]
     // ★BJ742-A R22（幽灵并集面定谳备案）：[6] 承载 dead∪ghost 并集——原版
     //   bitsByte22[6]=player.ghost（NetMessage.cs:468,硬核幽灵独立位,普通死亡
     //   dead=true/ghost=false）;本仓远端代理无独立 ghost 字段（ghost ⟹ dead 恒
@@ -1177,6 +1215,7 @@ export class ClientNet {
     this.lastSentSleep = (p as unknown as { sleeping: boolean }).sleeping;
     const cam = this.pendingCamTarget;
     const flag = 4 | ((p as unknown as { sleeping: boolean }).sleeping ? 1 : 0)
+      | (ghostPhase ? 2 : 0)                                      // ★G43 D-N15 独立幽灵位（[6] 并集不变）
       | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0)
       | (cam ? 32 : 0);
     // ★刀D 尾段（位置序在 team 段后,PROTO 注 k）：原版 msg13 在 bitsByte24[5] 置位后
@@ -1310,6 +1349,7 @@ export class ClientNet {
   private lastSentCtrl = -1;
   private lastSentSel = -1;
   private lastSentDead = false;
+  private lastSentGhost = false;   // ★G43 D-N15：msg13 flagBits[1] 硬核幽灵位（变化即时发）
   private lastSentSleep = false;   // msg13 flagBits[0] 躺床位(变化即时发)
   private lastSentHostile = false;
   private lastSentTeam = 0;
@@ -1572,7 +1612,7 @@ export class ClientNet {
 
   /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */
   sendStrike(netId: number, rawDmg: number, kbx: number, kby: number, crit?: boolean) {
-    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).finish()); /* BJ725B-M5 变异:crit 字节摘除 */   // BJ723-B D5 清偿（BJ725-A）：尾部 u8 crit
+    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).u8(crit ? 1 : 0).finish());   // BJ723-B D5 清偿（BJ725-A）：尾部 u8 crit
   }
 
   /** PvP 近战命中意向上报（v7 msg44，C→S→定向转发被击者；权威=被打方本地结算）。

@@ -20,7 +20,8 @@
 //  无法表达 solid=true 覆写，故用 Map<number, boolean>（true 覆写也记）——语义是
 //  Main.tileSolid 赋值的逐条重放，比 Set 更忠实且不损任何 Set 能表达的场景。
 //
-// ★翻转时间线（普通种子，1456 逐行核实；特殊种子专属翻转见文末备案）：
+// ★翻转时间线（普通种子，1456 逐行核实；★R31-F1 重锚块见文末——1457 序列级
+//   对拍+漂移表+pass 序变更登记；特殊种子专属翻转见文末备案）：
 //   cs:11500  Reset          659=false（generateWorld 尾,唯一真正的"生成期初值"翻转）
 //   cs:12537  DesertBiome 头 484=false（此后生成期再无 =true，恒非实心到结束）
 //   cs:15114  Gems 头        484=false（冗余重放）
@@ -58,6 +59,34 @@
 //   cs:18538/18552-53（remixWorldGen）；SettleLiquidsPart2 cs:21057（getGoodWorldGen）。
 //   另 Liquid 沉降自带翻转族（Liquid.cs:70/110/140 经 SetBoulderSolidity）属运行时
 //   液体模块,不在生成 pass 范围。
+//
+// ★R31-F1 重锚块（2026-11-02 定谳,1457 序列级对拍——上表与备案的 cs: 行号=1456,
+//   T7 worldgen 开工前须逐行重锚 1457,勿凭本表行号直引）：
+//   对拍法：全树 tileSolid 翻转面两版提取（字面式 true/false + 变量式 solid/flag/t）
+//   按序对拍。判语：翻转集合 1456 ⊂ 1457,差=恰 3 笔 MicroBiomes 增量（见下）,
+//   非WorldGen 文件零 diff,余皆纯行号漂移且**非均匀**（分段常数,跳变点即内容迁址）：
+//     Reset :11500→:11512（+12）/Piles 头 :18906→:18924（+18）/Piles 尾 :19591→
+//     :19609（+18）/BeeLarva :21022→:21040（+18）/TileCleanup :21331→:21704（+373
+//     =MicroBiomes 整段 ~354 行搬家的行数）/FinalCleanup :22306→:22338（+32）/
+//     GrowLivingTree :28257→:28381（+124）/templePart2 :34530→:34868（+338）。
+//   三笔 1457 增量（皆 MicroBiomes 槽前移的伴随面,SpecialSeed/getGood 域,运行时
+//   单源零影响——终态两版逐位一致,序列对拍+终态推演双证）：
+//     1457 :21075  MicroBiomes 头 56(黑曜石)=true（getGoodWorldGen）——SW 已接线
+//               （MicroBiomesPass.ts IIIII220,其注引 1457 cs:21072-21074）
+//     1457 :21077  MicroBiomes 头 229=true（!Skyblock.denyAllGeneration,无 getGood
+//               门）——SW 未单独接线：真链 BeeLarva 头 :21040 已置 true ⇒ no-op
+//               （MicroBiomesPass.ts :640 的 IIIII193 补播是轨段 save/restore 域
+//               限定,非 pass 头全局位）
+//     1457 :21420  MicroBiomes 尾 56=false（getGoodWorldGen）——SW 已接线
+//               （MicroBiomesPass.ts :725）;SettleLiquidsPart2 头 :21430 56=true
+//               （getGood）两版同在（1456 :21057,备案在册）,SW 未接线（同 no-op 性质）
+//   ★pass 序变更（真语义差,登记 T7 D-②,冻结期内不动）：1457 将 MicroBiomes 从
+//   101 位（…TileCleanup→LihzahrdAltar→MicroBiomes→Lilypads）前移 4 槽至 97 位
+//   （BeeLarva→**MicroBiomes**→SettleLiquidsPart2→Cactus→TileCleanup→LihzahrdAltar
+//   →Lilypads;105-pass 全序对拍仅此一差,1458 同序亲证 :21069）。三笔翻转即此次
+//   前移的伴随面（提前进液体沉降窗,须自备 56 实心窗+还原）。SW pass 表
+//   （WorldGen.ts '微群系' 槽,注引 cs:21785=1456）=1456 残序——RNG 流在槽 97 起
+//   与 1457 分岔,属 053 收敛后的下一道对齐面。
 import { TILE_DEFS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import type { TileStore } from '../../TileStore';
 

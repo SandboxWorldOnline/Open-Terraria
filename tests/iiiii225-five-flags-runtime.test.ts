@@ -145,10 +145,13 @@ describe('IIIII225 ⑤：源锚定（防覆写锚）', () => {
     expect(s).toContain('spawnRate = Math.floor(spawnRate * 0.3)');
     expect(s).toContain('maxSpawns = Math.floor(maxSpawns * 1.8)');
   });
-  it('VanillaSpawner：CheckToSpawnSpider NTB×FTW 地狱 1/5（NPC.cs:5790-5800）', () => {
+  it('VanillaSpawner：CheckToSpawnSpider NTB×FTW 地狱 1/5（1457 NPC.cs:5790-5801）', () => {
     const s = src('../src/world/spawn/VanillaSpawner.ts');
-    expect(s).toContain('CheckToSpawnSpider（NPC.cs:5790-5800）');
-    expect(s).toContain('spawnTileY >= this.world.lavaLine && !N(5)');
+    expect(s).toContain('CheckToSpawnSpider（1457 NPC.cs:5790-5801）');
+    // ★issue#46-N12 锁随刀走：地狱线 = UnderworldLayer=maxTilesY-200（1457 Main.cs:2886），
+    // 单源 = World.underworldLine getter；不是世界生成熔岩线 lavaLine（旧锁把 bug 钉成权威）。
+    expect(s).toContain('spawnTileY >= this.world.underworldLine && !N(5)');
+    expect(s).not.toContain('spawnTileY >= this.world.lavaLine && !N(5)');
   });
   it('VanillaSpawner：NewNPC FTW 野生交换 46→614/62→66（NPC.cs:81576-81586）', () => {
     const s = src('../src/world/spawn/VanillaSpawner.ts');

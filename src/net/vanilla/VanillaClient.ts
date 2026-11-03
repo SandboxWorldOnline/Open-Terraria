@@ -14,6 +14,7 @@ import type { ClientNet, RemotePlayerState, NpcSnap, ProjSnap, ItemOpMsg } from 
 import { DEFAULT_ROOM_RULES, TileOpAction } from '../protocol';
 import { TILE_DEFS } from '../../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../../data/items';
+import { vanillaIdOfBuff } from '../../stats/Buffs';   // ★BJ755-A T1：msg50 writer vid 枚举
 import { Lang } from '../../i18n/Lang';
 import { MsgId, VWriter, VReader, VanillaFrameParser, VANILLA_RELEASE, SECTION_W, SECTION_H } from './codec';
 import { decodeVanillaSection, applyVanillaTileArea, VANILLA_FRAME_IMPORTANT, type SectionChest } from './sections';
@@ -67,6 +68,10 @@ export interface VanillaHooks {
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** 服务器权威玩家受伤/致死（msg117/118;damage=服务器终值,本地不再二次减免） */
   onPlayerHurt?: (damage: number, hitDir: number) => void;
+  /** ★BJ755-A T2：服务器中继的玩家治疗（msg66 己槽分支——他人 HealProj 命中本端
+   *  或 self-heal 之外的到达;amount=i16 终值。消费=Game：hp += 钳 maxHp + 绿飘字
+   *  HealEffect(broadcast:false) 等价面） */
+  onPlayerHeal?: (amount: number) => void;
   /** 远端/服务器弹幕快照（msg27 → Game.netApplyProjSnaps,SW kind0 直飞傀儡+vid 贴图） */
   onProjectileSync?: (snaps: ProjSnap[]) => void;
   /** 弹幕击杀（msg29 → Game.netRemoveProjPuppets——傀儡即时回收,消 180t GC 兜底） */
@@ -708,6 +713,9 @@ export class VanillaClient {
         rp.facing = c1 & 64 ? 1 : -1;
         rp.selectedItem = sel;
         rp.sleeping = !!(c4 & 1);
+        // ★G43 D-N15：原版 c2[6]=player.ghost（NetMessage.cs:468 独立位,非 dead∪ghost）
+        //  ——直接映射代理 ghostPhase（SW 原生协议另用 flagBits[1]，见 ClientNet）。
+        rp.ghostPhase = !!(c2 & 64);
         rp.sitting = !!(c3 & 4);   // ★G36-A D3：b23[2] sitting.isSitting（门分组判据）
         rp.porAnchors = por;
         rp.camTarget = camT;
@@ -738,7 +746,19 @@ export class VanillaClient {
         const active = r.u8() === 1;
         if (slot === this.mySlot) return;
         if (active) {
-          if (!this.players.has(slot)) this.players.set(slot, this.mkRemote(slot));
+          const prev = this.players.get(slot);
+          if (!prev) this.players.set(slot, this.mkRemote(slot));
+          else if (!prev.active) {
+            // ★改判史：槽复用（上一 occupant 下线后再上线）。原版 msg14 置
+            //  Main.player[slot].active=true 且换人时 ghost=false；本支原先只
+            //  「首见才建代理」，复用槽的 active 永远停在 false →
+            //  simulateRemotePlayers 整段跳过（新 occupant 永不入世）。G43 D-N15
+            //  复核顺带定谳：active 必须随包复位；ghostPhase 亦须清，否则新
+            //  occupant 首包 msg13 前 Game.activePlayerCountForScale 会按残留
+            //  幽灵位误跳过（NPC.cs:18537 active && !ghost）。
+            prev.active = true;
+            prev.ghostPhase = false;
+          }
         } else {
           const rp = this.players.get(slot);
           if (rp) rp.active = false; // 代理由 simulateRemotePlayers 下帧剔除
@@ -763,6 +783,48 @@ export class VanillaClient {
         const rp = this.players.get(slot);
         if (!rp) return;
         rp.mana = mana; rp.manaMax = manaMax;
+        return;
+      }
+      case MsgId.PlayerBuffs: { // 50（远端 buff 栏——★BJ755-A T1,bj739a D-① 清偿）
+        // 线格式（1457 MessageBuffer.cs:2448-2474 = 1458 :2456-2482,两版零 diff）：
+        //   [u8 slot][u16 buffType]×N（保序压缩,只发 >0 槽）[u16 0 终止子]。
+        // reader 语义 1:1：逐 `[u16 type]` 读到 0,槽位赋值 `buffType[n]=type;
+        // buffTime[n]=60`（60t 硬编码——远端 buff 时长本就是近似,类型变化才重发）,
+        // 尾槽 Array.Clear。己槽跳过（:2455-2458 `slot==myPlayer && !SSC` → break）
+        // ——非 SSC 客户端对自有 buff 是权威端,不回写（SW 无 SSC 支持=TShock 备案域外）。
+        // buffTime 不镜像（无 tick 递减消费面,备案勿自造递减——任务书条款）。
+        // ★界钳：原版 reader 无 44 界检查（恶意 45+ 条目=越界写;SW fail-soft 钳
+        //   44,线消费仍由终止子驱动——合法流量恒 ≤44[writer 侧 maxBuffs 循环]零差）。
+        const slot = r.u8();
+        if (slot === this.mySlot) return;
+        const rp = this.players.get(slot) ?? this.mkRemote(slot);
+        const bt = (rp.buffTypes?.length === 44) ? rp.buffTypes : (rp.buffTypes = new Array(44).fill(0));
+        let n = 0, v: number;
+        while ((v = r.u16()) > 0) {
+          if (n < 44) bt[n] = v;
+          n++;
+        }
+        for (let i = Math.min(n, 44); i < 44; i++) bt[i] = 0;   // Array.Clear 尾槽（:2468）
+        this.players.set(slot, rp);
+        return;
+      }
+      case MsgId.HealPlayer: { // 66 HealProj 远端治疗（★BJ755-A T2,bj746a D4 清偿——msg16 覆盖病灶消解）
+        // 线格式（1457 MessageBuffer.cs:3030-3048 = 1458 :3038-3056,零 diff）：
+        //   [u8 slot][i16 amount];amount>0 → statLife+=amount（钳 statLifeMax2）
+        //   + HealEffect(broadcast:false) + netMode==2 中继（TrySendData(66,-1,whoAmI)）。
+        // 己槽=本地玩家治疗（服务器中继他人发来的 66;自己发的 66 服务器中继排除
+        // 发送者,不会回声）——经 onPlayerHeal 钩子进 Game（hp 钳+绿飘字,同
+        // onPlayerHurt 形制）;远端槽=代理 rp.hp += 钳（msg16 随后校准,与 vanilla 同相）。
+        const slot = r.u8();
+        const amount = r.i16();
+        if (amount <= 0) return;                       // :3034 负控门
+        if (slot === this.mySlot) {
+          this.hooks.onPlayerHeal?.(amount);
+          return;
+        }
+        const rp = this.players.get(slot);
+        if (!rp) return;
+        rp.hp = Math.min(rp.maxHp, rp.hp + amount);   // 钳 statLifeMax2（:3038-3041;maxHp=既镜像值）
         return;
       }
       case MsgId.SyncNpc: { // 23（服务器权威 NPC 快照 → 傀儡,金标 readerRaw 1:1）
@@ -1016,8 +1078,8 @@ export class VanillaClient {
         return;
       }
       default:
-        // P2+：21 掉落 / 20 tile 变更 / 32 箱物 / 50 buff / 151 弹幕 …
-        // 帧定界由 parser 保证（自证纪律）,未实现面静默记账不炸。
+        // 未消费号静默记账（帧定界由 parser 保证,自证纪律,不炸玩）。
+        // ★BJ755-A：50 buff / 66 HealPlayer 已接（2026-11-02）。
         return;
     }
   }
@@ -1030,11 +1092,13 @@ export class VanillaClient {
       up: false, down: false, left: false, right: false, jump: false, useItem: false,
       dash: false,   // ★BJ742-A R22-⑦：ctrlBits[7] controlDash（原版服 msg13 c1[7]）
       facing: 1, selectedItem: 0, dead: false,
+      ghostPhase: false,   // ★G43 D-N15：原版服 msg13 c2[6]（NetMessage.cs:468 player.ghost）
       fresh: false, active: true, lastFresh: performance.now(),
       hostile: false, team: 0, deathsPve: 0, deathsPvp: 0,
       hp: 100, maxHp: 100, mana: 20, manaMax: 20, luck: 0,
       pvpImmuneT: 0, pvpDefense: null, sleeping: false, camTarget: null,
       sitting: false, porAnchors: null,   // ★G36-A D3：msg13 bitsByte23[2]/[6]+尾段
+      buffTypes: new Array(44).fill(0),   // ★BJ755-A T1：msg50 镜像（44 槽 vanilla id）
     };
   }
 
@@ -1234,7 +1298,40 @@ export class VanillaClient {
   tick() {
     if (!this.active || !this.worldDelivered) return;
     this.sendControls13();
+    this.syncBuffs();      // ★BJ755-A T1：msg50 buff 差分（原版逐 tick 语义）
     this.maintainSections();
+  }
+
+  /** ★BJ755-A T1（bj739a D-① 清偿）：msg50 buff 差分上报（Main.cs:17848-17861
+   *  TrySyncingMyPlayer buff 段 1:1——live player vs clientPlayer 快照逐槽比
+   *  buffType[j]（只比类型不比时长）,有差 SendData(50)+SendData(13) 成对,尾段
+   *  clientClone 刷新快照=差分防抖）。
+   *  · 线格式（NetMessage.cs:997-1010 writer）：[u8 mySlot][u16 vid]×N（槽序,
+   *    只发 >0）[u16 0 终止子];
+   *  · msg13 半边：SW 逐拍全量发 13（sendControls13）——强于原版成对拍,免补;
+   *  · 快照=vanilla id 逗号键（Map 迭代序=SW buff 施加序,近似原版槽序;集合
+   *    不变不重发——buffTime 到期由 tick 驱逐后才变键,原版同相）;
+   *  · 越界 id 滤除（vid∈(0,401)=BuffID.Count,1457/1458 同值 :973）——原版服务
+   *    器 UpdateBuffs 以 buffType 值索引 Main.debuff 等定长数组,mod 伪 vid
+   *    （9000+）/未映射（-1）上线=IndexOutOfRange 崩服。 */
+  private lastSentBuffKey: string | null = null;
+  private syncBuffs() {
+    if (this.mySlot < 0) return;
+    const p = this.game.player as null | { buffs?: { active: Map<number, number> } };
+    const act = p?.buffs?.active;
+    if (!act) return;
+    const ids: number[] = [];
+    for (const [bt] of act) {
+      const vid = vanillaIdOfBuff(bt);
+      if (vid > 0 && vid < 401) ids.push(vid);
+    }
+    const key = ids.join(',');
+    if (key === this.lastSentBuffKey) return;   // 同 type 不重发（clientClone 快照等价）
+    this.lastSentBuffKey = key;
+    const w = new VWriter().u8(this.mySlot);
+    for (const v of ids) w.u16(v);
+    w.u16(0);                                   // 终止子（NetMessage.cs:1008）
+    this.send(w.finish(MsgId.PlayerBuffs));
   }
 
   private sendControls13() {
@@ -1422,6 +1519,21 @@ export class VanillaClient {
       .u8((flags & 1) | 2) // crit 位透传 + pvp 位恒置
       .i8(0);
     this.send(w.finish(117));
+  }
+  /** ★BJ755-A T2（bj746a D4 清偿）：HealProj 到位治疗上报（msg66 HealPlayer——
+   *  writer 线格式 [u8 slot][i16 amount],NetMessage.cs:1112-1115;发送位与原版
+   *  AI_052 到达位同构,Projectile.cs:28943-28950：结算门内 owner==本地 ∧
+   *  !moonLeech → 本地写 + SendData(66,..,targetSlot,healAmount)）。
+   *  单源=HealProj 命中位经 entityNet.reportHeal → Game 解析槽位调此口
+   *  （勿在 Game.applyLifeSteal 重复——发射位≠发送位,任务书条款）。
+   *  负控 amount≤0 不发（reader :3034 同门;vanilla ai[1] 构造恒正,防御钳）。
+   *  服务器侧（MessageBuffer :3030-3048）：statLife+=amount 钳 max2 →
+   *  TrySendData(66,-1,发送者) 中继——目标端（含被治疗的远端 B）经 case66
+   *  reader 收款,发送者自身无回声。 */
+  sendHeal66(targetSlot: number, amount: number) {
+    if (!this.active || !this.worldDelivered) return;
+    if (amount <= 0 || targetSlot < 0 || targetSlot > 255) return;
+    this.send(new VWriter().u8(targetSlot).i16(amount).finish(MsgId.HealPlayer));
   }
   sendBestiaryEvent() { this.todo('sendBestiaryEvent'); }
   getProxyPvpImmuneRemaining(): number { return 0; }

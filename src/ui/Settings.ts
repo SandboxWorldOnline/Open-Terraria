@@ -668,7 +668,8 @@ export class SettingsPanel {
           return row;
         })(),
         // ---- M14 IngameOptions 杂项（IngameOptions.cs:647-848 逐项；行文案=原版官译）----
-        // 自动保存（:619 Main.autoSave 默认 true；DoUpdate_AutoSave :19589 墙钟触发）
+        // 自动保存（IngameOptions.cs:619 两版同位 Main.autoSave 默认 true；DoUpdate_AutoSave
+        // 1457 :19920（1456 :19589）墙钟触发）
         this.modeRow(
           Lang.menu(67).replace(/[:：].*$/, ''),
           () => String(d.autoSave),

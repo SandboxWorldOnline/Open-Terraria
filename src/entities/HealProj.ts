@@ -21,6 +21,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { entityNet } from '../net/entitySyncHooks';   // ★BJ755-A T2：msg66 治疗上报（结算位单源）
 
 export class HealProj extends Entity {
   w = 6; h = 6;
@@ -121,6 +122,14 @@ export class HealProj extends Entity {
           const n = Math.floor(this.heal);             // (int)ai[1] :27130 / :28942
           this.target.hp = Math.min(this.target.maxHp, this.target.hp + n);
           if (n > 0) game.addDamageNumber(this.target.x + this.target.w / 2, this.target.y, n, false, '#40E080');
+          // ★BJ755-A T2（bj746a D4 清偿,2026-11-02）：msg66 HealPlayer 上报——
+          //  原版同位（Projectile.cs:28943-28950）：结算门内 SendData(66,..,目标槽,
+          //  (int)ai[1]),目标=本地玩家或远端代理【双臂同发】（服务器侧 statLife+=
+          //  钳 max2 后中继:远端目标经中继收款,自身治疗保服务器权威 hp 账与
+          //  msg16 广播一致——旧债病灶=只写本地代理 hp,下一次 msg16 覆盖回退）。
+          //  n>0 负控（vanilla ai[1] 构造恒正;reader :3034 同门）;钩子单机恒
+          //  null 零开销（entitySyncHooks 注入模式）;mock hooks 缺 net 注入=跳过。
+          if (n > 0) entityNet.reportHeal?.(this.target, n);
         }
         this.dead = true;                              // Kill() :28952 无条件
       }

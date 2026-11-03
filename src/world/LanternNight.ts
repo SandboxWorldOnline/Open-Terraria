@@ -5,9 +5,9 @@
 // 当夜状态 LanternsUp = GenuineLanterns || ManualLanterns（Manual 仅服务端指令/联机，
 //   本仓无该入口，字段位保留）。
 // 消费点索引（全部已接，见 Game.ts / SkyRenderer.ts / Weather.ts）：
-//   - Main.cs:64709 入夜 CheckNight（NaturalAttempt）
-//   - Main.cs:64854 黎明 CheckMorning（双旗清零）
-//   - Main.cs:64429 每帧 UpdateTime（Genuine 不满足 LanternsCanPersist 即提前收场）
+//   - 1457 Main.cs:66205 入夜 CheckNight（NaturalAttempt；1456 :64709）
+//   - 1457 Main.cs:66354 黎明 CheckMorning（双旗清零；1456 :64854）
+//   - 1457 Main.cs:65940 每帧 UpdateTime（Genuine 不满足 LanternsCanPersist 即提前收场；1456 :64429）
 //   - Main.cs:64717 入夜 LanternsUp → stopEvents（压掉血月等夜事件 roll）
 //   - Main.cs:64684 ShouldNormalEventsBeAbleToStart（无月灾/398/倒计时 → LanternsUp）
 //   - Main.cs:64288 云层：cloudBGActive=0、numClouds 钳 30

@@ -4027,6 +4027,12 @@ export class MinionProj extends Entity {
       gravDir: p.gravDir,
     };
     let fx = -1, fy = -1;
+    // ★issue#44-6 红队补强（2026-11-03）：原版 UsageProxy 与玩家侧走**同一个**
+    //  `WorldGen.CanKillTile`（无玩家上下文，读 Main.hardMode + 宝箱内容）。
+    //  不注入 → SmartCursor 回退 `Mounts.canKillTileAt` 无 ctx 档（hardMode 恒
+    //  false）→ 困难模式下「巨石上方地狱熔炉」等档判反、帮手拒绝协助该格。
+    //  钩缺席时**不写该字段**（保持 undefined → 走上述回退），而非注入 `() => false`。
+    if (game.canKillTile) env.canKillTile = (x, y) => game.canKillTile!(x, y);
     const setFound = (x: number, y: number): void => { fx = x; fy = y; };
     const taken = (): boolean => fx !== -1;
     switch (ig.intention) {

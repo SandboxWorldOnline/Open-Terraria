@@ -8,7 +8,7 @@
 //       且 上格（ax..ax+1, ay-1）无 基础箱/假箱/88/470/475 族。
 // （★与沙不同：巨石不在 Sets.Falling、GetSandfallProjData 无 case——悬挂的巨石贴图
 //   本身是"合法状态"，只有上方有容器遮挡-下方又空时才释放；下方有墙也不计庇护。）
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS } from '../data/tiles';
 import { TileStore } from './TileStore';
 
 /** 结构最小视图：真实 TileStore 或测试 mock 均可注入 */
@@ -115,6 +115,27 @@ export function solidAllowBottomSlope(st: BoulderCellGrid, x: number, y: number)
   if ((sl === 1 || sl === 2)
     && !(d.platform === true && platformProperTopFrame(st.frameX[i]))) return false;
   return d.solid === true || d.platform === true;     // main.tileSolid ∪ tileSolidTop
+}
+
+/** ★G41-A（bj751a D1,2026-11-02）WorldGen.SolidTileNoPlatforms（WorldGen.cs
+ *  :70727-70748）1:1：界外（!InWorld fluff0）=true；active ∧ ¬TileID.Sets.
+ *  Platforms{19,427,435-439}（TileID.cs:243 窄集——矿条 239/花箱 380 不在其列
+ *  =算墙）∧ (tileSolid∨tileSolidTop) ∧ 未致动 ⇒ 封顶/梯墙面。
+ *  消费位=AI_003 flag5 头行封顶（NPC.cs:60443）与跳梯 1-3 级
+ *  （:60692/:60694/:60705/:60724）——单一来源,禁在消费侧复刻。
+ *  ★与 isSolid 的两差异（bj751a D1 定谳）：①窄集平台【不算】墙（isSolid 的
+ *  SOLID_LUT 本就排平台,但旧头行近似 `(solid||platform)&&!(solid&&platform)`
+ *  的 platform 支=宽 tileSolidTop 集,把平台也当墙=头顶平台误封顶禁跳）;
+ *  ②非平台 solidTop（239 矿条/380 花箱/桌子 14 等）【算】墙（isSolid 放行）。 */
+export function solidTileNoPlatforms(st: BoulderCellGrid, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;   // 原版 !InWorld(i,j) → true（界外算墙）
+  const i = st.idx(x, y);
+  if ((st.flags[i] & 1) === 0) return false;   // !active()——幽灵/空格不算墙
+  if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d) return false;
+  if (PLATFORMS_SHEETS.has(d.vanilla?.sheet ?? -1)) return false;   // 窄集排除（TileID.cs:243）
+  return d.solid === true || d.platform === true;   // tileSolid ∪ tileSolidTop
 }
 
 /**

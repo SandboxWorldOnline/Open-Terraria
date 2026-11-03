@@ -47,9 +47,12 @@ describe('R2 敌 debuff DoT（NPC.cs:92585/92697/92708，lifeRegen/2=HP/s）', (
     e.fixedUpdate(1, hooks as never);
     expect(e.hp).toBe(1000 - 30);
     // 诅咒焰 1 秒
+    // ★issue#46 N06（2026-11-03 改判史）：旧期望 24 = 逐效果累加器的 1 秒均值。
+    // 原版统一批次：诅咒焰 AddFlamable(48,10) → 60 帧跨 2 批 = 20（门槛 1200，
+    // 残账 −480 结转——本例同实体连跑三窗，carry 已含在期望内）。
     e.hp = 1000; e.cursedT = 1;
     e.fixedUpdate(1, hooks as never);
-    expect(e.hp).toBe(1000 - 24);
+    expect(e.hp).toBe(1000 - 20);
   });
 
   it('ichor：checkArmorPenetration 单池（NPC.cs:81913-81938）——pool>def 钳 def/2 恰抵半防', () => {

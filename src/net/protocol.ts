@@ -166,7 +166,9 @@ export const enum Msg {
   PlayerState = 13,   // C→S→广播（v2 对齐原版 msg13）：{u8 slot, u8 ctrlBits, u8 flagBits,
                       //   u8 selectedItem, f32 x, f32 y, [f32 vx, f32 vy 若 flagBits[2]]}
                       //   ctrlBits: [0]up [1]down [2]left [3]right [4]jump [5]useItem [6]direction
-                      //   flagBits: [2]hasVelocity [5]hasCameraTarget(注k) [6]ghost(死亡) [7]hostile
+                      //   flagBits: [1]hardcoreGhost(★G43 D-N15,独立位,旧端忽略)
+                      //             [2]hasVelocity [5]hasCameraTarget(注k) [6]ghost(死亡∪幽灵并集)
+                      //             [7]hostile
                       //   尾段（位置序,均 remaining 门）：[u8 team 0-5（v7）]
                       //   [f32 camX, f32 camY 若 flagBits[5]（注k,netCameraTarget 面）]
                       //   position=碰撞盒左上（原版语义）

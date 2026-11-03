@@ -80,7 +80,11 @@ const DRESSER_CHEST_IDS = idsWithSheets(88);
 const TELEPORTER_IDS = idsWithSheets(235);
 /** 关门表 10（TileID.cs ClosedDoor——内部 id 17；开门 11/内部 18 不参与锁判定） */
 const DOOR_CLOSED_IDS = idsWithSheets(10);
-/** 祭坛 77——CheckTileBreakability 的非困难模式保护（WorldGen.cs:62494-62495） */
+/** 地狱熔炉 77——CheckTileBreakability 的非困难模式保护（WorldGen.cs:62966-62969
+ *  `if (target.type == 77 && !Main.hardMode) return true;`）。
+ *  ★红队勘正（2026-11-03）：旧注写「祭坛 77」是**命名错误**——TileID.cs:591 是
+ *  Hellforge，恶魔祭坛是 **26**（TileID.cs:489）。行为面一直是对的（77 就是原版
+ *  那条线），只有注释误导。常量名沿用 `ALTAR_IDS`（改名的涟漪大于收益）。 */
 const ALTAR_IDS = idsWithSheets(77);
 
 // ★2026-09-03 MountData 接口与 MOUNT_DATA 表体抽出至 data/mountData.ts（叶子模块,
@@ -740,7 +744,7 @@ function platformProperTopFrame(frameX: number): boolean {
  *  CanPoundTile 内已被 POUND_BLACKLIST/BOULDER_IDS 拦截、后者过不了
  *  solidOrSlopedTile 的 solid 门——子项在砸坡路径上不可达，等价 */
 export interface KillTileCtx {
-  /** Main.hardMode——祭坛 77 的 CheckTileBreakability 门（WorldGen.cs:62494） */
+  /** Main.hardMode——地狱熔炉 77 的 CheckTileBreakability 门（WorldGen.cs:62966） */
   hardMode: boolean;
   /** Chest.CanDestroyChest（Chest.cs:590-606）：锚格有宝箱且含非空物品 → false */
   chestDestroyable(x: number, y: number): boolean;
@@ -756,8 +760,8 @@ function isLockedDoorAt(st: DrillStore, x: number, y: number): boolean {
     && (st.frameX?.[i] ?? 0) < 54;
 }
 
-/** CheckTileBreakability_HasReasonToReturnEarly（WorldGen.cs:62491-62507）1:1：
- *  异种时祭坛 77 非困难模式 / PreventsTileRemovalIfOnTopOfIt → 早退；锁门恒拦；
+/** CheckTileBreakability_HasReasonToReturnEarly（WorldGen.cs:62962-62977）1:1：
+ *  异种时地狱熔炉 77 非困难模式 / PreventsTileRemovalIfOnTopOfIt → 早退；锁门恒拦；
  *  scanForContainer 时容器族恒拦。未激活格 type=0 不命中任何集合（原版同语义） */
 function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, ty: number,
   scanForContainer: boolean, ctx?: KillTileCtx): boolean {
@@ -774,7 +778,8 @@ function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, 
 
 /** WorldGen.CanKillTile 全量（WorldGen.cs:62716-62832；钻头智能光标/坡面平滑共用）。
  *  1:1 覆盖：越界/未激活/自身墙 350 → false；上方异种树干（分支/树顶帧豁免 + frameY<198）、
- *  棕榈 323 枝帧、宝箱/祭坛族承载位（21/26/72/77/88/467/488）、梳妆台 80 两侧帧 → false；
+ *  棕榈 323 枝帧、宝箱/祭坛/熔炉承载位（21/26/72/77/88/467/488——26=恶魔祭坛,
+ *  77=地狱熔炉,TileID.cs:489/:591）、梳妆台 80 两侧帧 → false；
  *  追加四子项（:62316-62356）：巨石上方容器保护、上锁门、传送器 235 上方 3 格扫描、
  *  容器内容非空（CanDestroyChest）。
  *  ★不查 pick 力——原版该判定与镐力无关（光束会锁树/装饰，挖掘实效仍走 PickTile 主链）。
