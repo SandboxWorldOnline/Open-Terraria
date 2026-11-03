@@ -180,7 +180,9 @@ describe('BJ749-A 结构锁：Game.ts 生成域接线', () => {
     expect(fn).toContain('const viewHalfH = 1200 / 2 / TILE;');
     expect(fn).not.toContain('this.camera.viewH / (this.camera.zoom || 1)');
     // 入侵深度门同源常量化（ShouldSpawnInvasionEnemies NPC.cs:447 sHeight）
-    expect(fn).toContain('shouldSpawnInvasionEnemies(w, p.cx, p.cy, 1200,');
+    // ★G41-A 改判史（bj749a D-2,2026-11-02）：原版 SetSpawnFlags :404 传
+    //  player.position（顶边左）——锚 p.cx/p.cy → p.x/p.y（结构锁随刀迁移）。
+    expect(fn).toContain('shouldSpawnInvasionEnemies(w, p.x, p.y, 1200,');
   });
 
   it('S4 ⑦ 史莱姆雨盒内快照 + MaxWorldViewSize 常量窗（Main.cs:758）', () => {

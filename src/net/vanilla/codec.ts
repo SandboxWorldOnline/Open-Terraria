@@ -16,7 +16,7 @@ export const MsgId = {
   RequestWorldData: 6, WorldData: 7, SpawnTileData: 8, StatusText: 9, TileSection: 10,
   PlayerSpawn: 12, PlayerControls: 13, PlayerActive: 14, PlayerLifeMana: 16,
   AreaTileChange: 20, SyncItem: 21, SyncNpc: 23, SyncChestItem: 32,
-  InitialSpawn: 49, PlayerMana: 42, PlayerBuffs: 50, ClientUuid: 68, NetModules: 82,
+  InitialSpawn: 49, PlayerMana: 42, PlayerBuffs: 50, HealPlayer: 66, ClientUuid: 68, NetModules: 82,
   SyncProjectile: 27, KillProjectile: 29, PlayerHurtV2: 117, PlayerDeathV2: 118,
   TileManipulation: 17, SyncItemDespawn: 151,
   FinishedConnectingToServer: 129, SyncCavernMonsterType: 136, SyncLoadout: 147,

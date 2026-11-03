@@ -278,10 +278,14 @@ export function nearbyMask(st: TileStore, i: number, j: number): number {
   return mask;
 }
 
-/** 写回前后轨帧（唯一写入口：保持 type/active 不变，走 setTile 联动渲染/联机） */
+/** 写回前后轨帧（唯一写入口：保持 type/active 不变，联动渲染/联机）。
+ *  ★issue#45（2026-11-03）：改走 setTileFrame（cause='frame'）——原实现调
+ *  st.setTile 会无条件派发 listeners,经 3×3 幸存链（checkDecorSquareFrame →
+ *  checkFurnitureSupport → frameTrack）自我回写 → 无限递归爆栈。原版 FrameTrack
+ *  写帧是裸字段写（Minecart.cs:1143-1160,零事件）,本原语为该语义的 SW 等价
+ *  （详见 TileStore.setTileFrame 注）。 */
 function writeFrames(st: TileStore, i: number, j: number, front: number, back: number): void {
-  const idx = st.idx(i, j);
-  st.setTile(i, j, st.type[idx], front, back < 0 ? 0xFFFF : back);
+  st.setTileFrame(i, j, front, back < 0 ? 0xFFFF : back);
 }
 
 // ============================================================================

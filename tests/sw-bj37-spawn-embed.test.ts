@@ -183,8 +183,11 @@ describe('【SW-BJ37】FindSpawnTile 落地面平台支（原版站平台顶,非
     const vs = sp as unknown as {
       findSpawnTile(rng: RNG, vw: number, vh: number): boolean;
       pX: number; pY: number; spawnTileY: number;
+      areaPxX: number; areaPxY: number;   // ★G41 分锚改判史(2026-11-02):区域锚
+      // 与 Center 锚分立(findSpawnTile 读 areaPxX/Y,SetSpawnFlags 读 pX/pY)——
+      // 夹具须双注,旧单注 pX/pY 时区域锚 0/0 → 候选漂到地图左上角(落点行 3-10)。
     };
-    vs.pX = 110; vs.pY = 35;
+    vs.pX = 110; vs.pY = 35; vs.areaPxX = 110 * 16; vs.areaPxY = 35 * 16;
     const hits: number[] = [];
     for (let k = 0; k < rounds; k++) {
       vs.spawnTileY = -1;

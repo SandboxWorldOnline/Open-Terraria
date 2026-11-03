@@ -18,8 +18,12 @@ export const enum LIQUID_TYPE {
 /** ★BJ752-A（2026-11-02,issue#39 TF-02/03）：onTileChanged 派发成因（原版触发面分域,
  *  详见 onTileChanged 注）。'tile'=方块写面（setTile/坡/半砖/失活/deactivate）;
  *  'wallKill'=墙移除（KillWall :60895 FramesOnKillWall 限定面）;'wallPlace'=墙
- *  铺设/替换（SquareWallFrame,零 TileFrame）;'paint'=油漆/涂层（无 TileFrame）。 */
-export type TileChangedCause = 'tile' | 'wallKill' | 'wallPlace' | 'paint';
+ *  铺设/替换（SquareWallFrame,零 TileFrame）;'paint'=油漆/涂层（无 TileFrame）。
+ *  ★issue#45（2026-11-03）：'frame'=纯帧写面（setTileFrame,只改 frameX/frameY）。
+ *  原版帧写（Minecart.FrameTrack → tile.FrontTrack(),Minecart.cs:1143-1160）是
+ *  裸字段写,不产生任何 WorldGen.TileFrame 派发——故幸存链/沙检的 cause 门恒排除
+ *  本成因；渲染重烘/流体/光照/联机帧同步照常消费（详见 setTileFrame 注）。 */
+export type TileChangedCause = 'tile' | 'wallKill' | 'wallPlace' | 'paint' | 'frame';
 
 export class TileStore {
   /** ★一百零八审计修:mod 注册的 tile 键→内部 id(装载期填充;生成 pass 解析用) */
@@ -432,6 +436,32 @@ export class TileStore {
     // ★BJ322：suppressListeners 窗内跳过监听派发（netReporter 不受影响——联机同步面照常）
     // ★BJ752-A：cause='tile'（KillTile/PlaceTile 尾 SquareTileFrame 面）
     if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y, 'tile'));
+  }
+
+  /** ★issue#45（2026-11-03）：纯帧写原语——只改 frameX/frameY,type/active/半砖/
+   *  坡面/油漆/致动位一律不动;派发 cause='frame'（netReporter 照常,渲染/流体/
+   *  光照/联机帧同步面不丢）。
+   *  病灶：矿车轨道重定帧原走 setTile（MinecartTrack.writeFrames）,而 setTile
+   *  不做新旧值比较、无条件派发 listeners → checkDecorSquareFrame 3×3 扫
+   *  （BJ752-A 起候选集并入 VANILLA_TILE_FRAME_IMPORTANT,含 314）→
+   *  checkFurnitureSupport → frameTrack → writeFrames → setTile → 无限递归
+   *  RangeError → 帧循环熔断（issue#45 线上实报,任意含轨道世界在 3×3 内一次
+   *  方块变化即必崩）。
+   *  原版对照：Minecart.FrameTrack 写帧 = tile.FrontTrack((short)…)/BackTrack(…)
+   *  裸字段写（Minecart.cs:1143-1160,无条件写但零事件）;WorldGen.TileFrame 对
+   *  314 的唯一派发即 FrameTrack（WorldGen.cs:86569-86572）——原版**不存在**
+   *  「帧写回触发 TileFrame」的通路。本原语=该语义的 SW 等价面：帧变化不是方块
+   *  类型变化,幸存链（wireSurvivalChainListeners）与沙检（onSandCheck）的
+   *  cause 门因此天然排除,跨格级联语义不变（邻格重定帧仍由『外部方块写』的
+   *  3×3 扫发起,不因帧写二次进入）。 */
+  setTileFrame(x: number, y: number, frameX: number, frameY: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.frameX[i] = frameX;
+    this.frameY[i] = frameY;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: this.type[i], fx: frameX, fy: frameY });
+    if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y, 'frame'));
   }
 
   /** 运行期改半砖/坡面位（锤子交互用；生成期直接写数组即可） */

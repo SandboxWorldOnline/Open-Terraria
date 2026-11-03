@@ -28,6 +28,39 @@ import { chumSpots } from '../../entities/chumBucket';
 import { scanChosenTileZones } from '../DungeonDualZones';
 import { ParticleOrchestraType } from '../../net/syncModules';   // δB B12：双地牢刷生纸屑爆编排型
 
+/** ★issue#46-N01（P1,2026-11-03）：GetSpawnRate 具名入参。
+ *  事故根因=旧位置参数尾部三个 boolean 顺序（Game 传 Invisibility/anglerSet/
+ *  zoneShadowCandle，形参收 shadowCandle/invis/anglerSet）——三者同为 boolean，
+ *  tsc 无法发现：隐身被当成影子蜡烛（误置 noWorms/townNPCs 覆写并吃错门）、
+ *  渔夫套吃隐身乘区、真影子蜡烛吃渔夫乘区。改具名对象后字段身份由编译器守护，
+ *  生产调用（Game.trySpawnEnemy）无位置可错位。
+ *  原版锚（1457）：ZoneShadowCandle=:400、影子蜡烛清 noWorms/noGroundWorms/
+ *  townNPCs=:420-425；player.invis ×1.2/×0.8=:703-710；anglerSetSpawnReduction
+ *  ×1.3/×0.7=:718-721。（issue 所引 1458 :425-429/:714-733 为同语句，1457 重锚） */
+export interface SpawnRateOptions {
+  playerYpx: number;
+  nearbySlots: number;
+  waterCandle: boolean;
+  sHeightPx: number;
+  playerXpx?: number;
+  peaceCandle?: boolean;
+  sunflower?: boolean;
+  calmed?: boolean;
+  battle?: boolean;
+  townNPCs?: number;
+  dayTime?: boolean;
+  zoneEvil?: boolean;
+  bloodMoon?: boolean;
+  /** Player.buffType 含 BuffType.Invisibility（内部枚举 94；≠ 原版 buff ID 10） */
+  invisibility?: boolean;
+  /** Player.anglerSetSpawnReduction（渔夫三件套） */
+  anglerSetSpawnReduction?: boolean;
+  /** Player.ZoneShadowCandle（SceneMetrics：影子蜡烛 tile 646 范围） */
+  zoneShadowCandle?: boolean;
+  /** player.Center.Y 像素（仅 :802 deep 门；缺省=playerYpx） */
+  centerYpx?: number;
+}
+
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
   /** 玩家 4000px 内各塔是否在场（SceneMetrics.CloseEnoughTo*Tower = WithinRangeOfNPC(塔id, 4000)，
@@ -376,6 +409,10 @@ export class VanillaSpawner {
   private viewHalfW = 0; private viewHalfH = 0;
   /** 本地玩家中心 px（spawn() 注入）——书屏外门用（原版 player.Center px，:5356） */
   private playerPx = 0; private playerPy = 0;
+  /** ★G41-A（bj749a D-2）：spawnArea/safeArea 锚 = player.position（顶边左）px
+   *  （spawn() 注入,GetSpawnArea :958-964 position.ToTileCoordinates()）——
+   *  findSpawnTile 消费;与 playerPx/playerPy（Center 锚）分立。 */
+  private areaPxX = 0; private areaPxY = 0;
   private dayTime = true;
   /** 上下文雨旗（原版 Spawner.raining 字段,SetSpawnFlags L1106 `raining = Main.raining`
    *  → :1215-1218 remix 块按落点伪造 false）——spawn() 每轮自 world.weather.raining
@@ -592,13 +629,18 @@ export class VanillaSpawner {
   spawnFaelings(
     px: number, py: number, viewHalfW: number, viewHalfH: number, rng: RNG,
     anyFaeling: () => boolean, spawnAt: (x: number, y: number) => void,
+    /** ★G41-A（bj749a D-2）：GetSpawnArea 锚 = player.position.ToTileCoordinates()
+     *  （顶边左,NPC.cs:958-964）——px/py 仍为 Center（CheckNotSpawningOnScreen
+     *  屏幕矩形中心锚 :5451-5462）,areaX/areaY 单独供 spawnArea/safeArea。缺省
+     *  =px/py（直调测试顶/心同值档零扰动）。 */
+    areaX = px, areaY = py,
   ): void {
     if (anyFaeling()) return;                                    // AnyNPCs(677) :5898-5901
     const num = rng.int(2, 5);                                   // Main.rand.Next(2, 6)
     const st = this.world.store;
     // GetSpawnArea：0.7×全屏半轴 = viewHalf×1.4；safe 0.52×全屏 = ×1.04；
     // 狙击镜扩圈（scopeNum3 由 Game 每帧写入；1254 双持/1299/scope 三档）
-    this.pX = Math.floor(px / TILE); this.pY = Math.floor(py / TILE);
+    this.pX = Math.floor(areaX / TILE); this.pY = Math.floor(areaY / TILE);
     this.viewHalfW = viewHalfW; this.viewHalfH = viewHalfH;
     const sc = this.scopeNum3 > 0 ? Math.floor(viewHalfW / this.scopeNum3) : 0;
     const scY = this.scopeNum3 > 0 ? Math.floor(viewHalfH / this.scopeNum3) : 0;
@@ -633,10 +675,15 @@ export class VanillaSpawner {
     }
   }
 
-  slimeRainSpawns(px: number, py: number, nearbySlots: number, viewW: number, viewH: number, rng: RNG, expert: boolean): Enemy | null {
+  slimeRainSpawns(px: number, py: number, nearbySlots: number, viewW: number, viewH: number, rng: RNG, expert: boolean,
+    /** ★G41-A（bj749a D-2,2026-11-02）：深度门读 player.position.Y（顶边,
+     *  NPC.cs:5910）;落怪窗读 player.Center.X/Y（:5934-5938 num4/minValue/
+     *  maxValue2）——px/py=Center,topYpx=顶边。缺省=py（直调测试顶/心同值
+     *  档零扰动;旧约定单锚中心,顶/心分锚本刀清偿 D-BJ749-2）。 */
+    topYpx = py): Enemy | null {
     const w = this.world;
     const worldSurface = w.groundLevel;
-    if (py > worldSurface * 16 + viewH / 2 || nearbySlots > 15) return null;
+    if (topYpx > worldSurface * 16 + viewH / 2 || nearbySlots > 15) return null;
     const num2 = nearbySlots / 15;
     let num3 = 45 + Math.floor(450 * num2);
     if (expert) num3 = Math.floor(num3 * 0.85);
@@ -836,10 +883,14 @@ export class VanillaSpawner {
     //   史莱姆雨 SlimeRainSpawns 同走此口；δB B12 接线,2026-08-31。微光之灵 SpawnFaelings
     //   走裸 NewNPC :5924 不经此包装,故不出纸屑——本仓 faelings 回调路径同构）：
     //   门 = dualDungeonsSeed && Y > worldSurface×16 && Y < UnderworldLayer×16
-    //   （Y 为像素坐标、严格不等;UnderworldLayer=本仓 world.lavaLine=maxTilesY−200）；
+    //   （Y 为像素坐标、严格不等）。
+    //   ★issue#46 D-C-1 清偿（2026-11-03）：UnderworldLayer = Main.maxTilesY−200
+    //   （Main.cs:2886）≠ World.lavaLine（GenVars 熔岩线，TerrainPass waterLine+
+    //   Next(50,79)）——旧码读 lavaLine 使双地牢世界该粒子带在
+    //   (lavaLine, h−200] 区间整段缺失。单源 World.underworldLine。
     //   PositionInWorld=(X,Y)、MovementVector=(width,height)、UniqueInfoPiece=Type(netId 原值)。
     const w_ = this.world;
-    if (w_.seedFlags?.dualDungeons && y > w_.groundLevel * TILE && y < w_.lavaLine * TILE) {
+    if (w_.seedFlags?.dualDungeons && y > w_.groundLevel * TILE && y < w_.underworldLine * TILE) {
       this.spawnOrchestra?.(ParticleOrchestraType.InScreenDungeonSpawn,
         x, y, e.w, e.h, netId);
     }
@@ -1146,21 +1197,38 @@ export class VanillaSpawner {
   /** GetSpawnRate（L383-668，单机非 remix 分支）：
    *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
+   *  ★G41-A（bj749a D-2,2026-11-02）：playerYpx 语义 = 原版 player.position.Y
+   *  （顶边,:483/:487/:508/:562/:571/:583/:656/:666/:687/:698/:737/:772 全深度带
+   *  亲读核）——Game 侧传 p.y（旧约定传中心 p.cy 恒差半身高 ≈21px 深度带边界
+   *  漂移,pre-existing 登记账 D-BJ749-2 本刀清偿）;唯 :802 deep 门读 Center.Y
+   *  （见 centerYpx 参注）。zone 计数扫描锚保持 Center（SceneMetrics
+   *  BiomeScanCenterPositionInWorld=base.Center,Player.cs:16801——refreshZoneCounts
+   *  传中心,勿随本刀改）。
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed 均已实现（:581-642）；
    *  隐身（buff 10，药水 297）×1.2/×0.8 已接（:611-615）；渔夫套 ×1.3/×0.7 已接（:627-630）。
    *  仙女 isNearFairy 倍率已接（:745-749，×1.2/×0.8——本文件下方 isNearFairy 注入位，
    *  2026-09-03 清偿;旧"未实现"登记过期删除）。clamp（:750-757）先于 getGoodWorld
    *  （:758-761）——次序颠倒曾使 FTW 终值被 clamp 回夹（rate 60/max 15,原版可 48/18）。
-   *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
-  getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
-    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
-    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
-    shadowCandle = false,
-    invis = false, anglerSet = false): { spawnRate: number; maxSpawns: number } {
+   *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似)
+   *  ★issue#46-N01：生产入口改为 getSpawnRateNamed（具名对象）；本处只保留具名
+   *  实现，位置参数版见函数尾 getSpawnRate（@deprecated，仅既有测试兼容）。 */
+  getSpawnRateNamed(opts: SpawnRateOptions): { spawnRate: number; maxSpawns: number } {
+    let {
+      playerYpx, nearbySlots, waterCandle, sHeightPx,
+      playerXpx = this.pX * TILE,
+      peaceCandle = false, sunflower = false, calmed = false, battle = false,
+      townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
+      invisibility = false, anglerSetSpawnReduction = false, zoneShadowCandle = false,
+      /** ★G41-A（bj749a D-2,2026-11-02）：:802 deep 门的 Center.Y 读——原版
+       *  GetSpawnRate 深度带全读 player.position.Y（顶边）,唯 friendly-roll 前置的
+       *  `player.Center.Y/16f > UnderworldLayer`(:802) 读中心;playerYpx=顶边,
+       *  centerYpx=中心（缺省=playerYpx,直调测试顶/心同值档零扰动）。 */
+      centerYpx = playerYpx,
+    } = opts;
     // ZoneWaterCandle 先落字段（SetSpawnFlags L308 语义）：同一值既改刷怪率（:637/:650）
     // 也供 SpawnAnNPC 的 399/87/86 水蜡烛加重支——Game 每帧先 getSpawnRate 后 spawn
     this.zoneWaterCandle = waterCandle;
-    this.shadowCandle = shadowCandle;
+    this.shadowCandle = zoneShadowCandle;
     // 月事件覆盖（L772-778，★IIIII228 原位化+remix 臂）：南瓜月/霜月且
     // （remix || 玩家在地表 Y<worldSurface*16）→ rate=20、max=⌊5×(2+0.3n)⌋（单人 11）。
     // ★原版该覆盖在 clamp/getGood/旅程滑杆【之后】、地牢 rate=10 与 skyblock ÷2
@@ -1260,7 +1328,10 @@ export class VanillaSpawner {
     }
     // Zone 判定现取（原版每次从玩家 SceneMetrics 取，非上次生成残留 flag）：
     // 玩家中心窗口计数（0.5s 缓存近似，见 refreshZoneCounts），本函数每帧被调
-    this.refreshZoneCounts(Math.floor(playerXpx / TILE), Math.floor(playerYpx / TILE));
+    // ★G41-A（bj749a D-2）：扫描锚保持 Center（SceneMetrics
+    //  BiomeScanCenterPositionInWorld=base.Center,Player.cs:16801）——
+    // playerYpx 改顶边语义后此处读 centerYpx,勿随深度带锚漂移。
+    this.refreshZoneCounts(Math.floor(playerXpx / TILE), Math.floor(centerYpx / TILE));
     const zoneCorrupt = this.zoneCounts.evil >= 300;
     const zoneCrimson = this.zoneCounts.blood >= 300;
     const zoneSnow = this.zoneCounts.snow >= 1500;
@@ -1294,6 +1365,15 @@ export class VanillaSpawner {
     const zoneJungle = this.zoneCounts.jungle >= 140;   // 与 setFlagsForChosenTile 同源计数
     const zoneMeteor = this.zoneCounts.meteor >= 75;
     const zoneUndergroundDesert = !!this.world.scene?.zoneUndergroundDesert;
+    // ★issue#46 N01 改判史（2026-11-03 红队定谳）：影子蜡烛三连覆写是**全局**语句，
+    //  不是丛林专属。原版 SetSpawnFlags 在 flags 落位后立刻无条件执行
+    //  `if (ZoneShadowCandle) { noWorms=false; noGroundWorms=false; townNPCs=0; }`
+    //  （NPC.cs:420-427），随后 :610-631 的丛林城镇阶梯与 :765-832 的友好生物
+    //  阶梯**都**读改写后的 townNPCs。旧实现把三连写嵌在 `else if (zoneJungle)` 内
+    //  → ①非丛林点亮影子蜡烛仍保留城镇计数（照出小动物、照置 townNoWorms、
+    //  照走 ×2/×3 阶梯）②丛林内三连写与城镇阶梯互斥（原版两者叠加：改写后
+    //  townNPCs=0 → 吃 :610 ×0.4/×1.5）。
+    if (zoneShadowCandle) { townNPCs = 0; this.noWorms = false; this.noGroundWorms = false; }
     if (this.ZoneDungeon) {
       spawnRate = Math.floor(spawnRate * 0.3);
       maxSpawns = Math.floor(maxSpawns * 1.8);
@@ -1304,10 +1384,9 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.2);
       maxSpawns = Math.floor(maxSpawns * 3);
     } else if (zoneJungle) {
-      // 影子蜡烛覆写（NPC.cs:420-425 三连写 noWorms/noGroundWorms=false + townNPCs=0；
-      // noGroundWorms 已建模——AFK 链 Game 注入,终零波接入）
-      if (shadowCandle) { townNPCs = 0; this.noWorms = false; this.noGroundWorms = false; }
-      else if (townNPCs === 0) {
+      // 影子蜡烛改写已前置到 else-if 链之前（NPC.cs:420-427 全局语句，非丛林专属）：
+      // 此处不再特判——改写后 townNPCs=0 自然落到下面的 0 档（原版 :610-614 同）。
+      if (townNPCs === 0) {
         spawnRate = Math.floor(spawnRate * 0.4);
         maxSpawns = Math.floor(maxSpawns * 1.5);
       } else if (townNPCs === 1) {
@@ -1329,7 +1408,9 @@ export class VanillaSpawner {
     }
     // 神庙（L545-551 独立 if，不参与 else-if 互斥）：×0.8/×1.2（★IIIII228 :645-649
     //  remix 臂再 ×0.4/×1.5）。ZoneLihzhardTemple = 玩家所站格墙 87（SceneMetrics.cs:688）
-    if (this.zoneLihzardTemple(Math.floor(playerXpx / TILE), Math.floor(playerYpx / TILE))) {
+    // ★G41-A（bj749a D-2）：ZoneLihzhardTemple 读 SceneMetrics TileCenter（Center
+    //  锚,SceneMetrics.cs:670/:693 wall==87）——同 zone 扫描族,读 centerYpx。
+    if (this.zoneLihzardTemple(Math.floor(playerXpx / TILE), Math.floor(centerYpx / TILE))) {
       spawnRate = Math.floor(spawnRate * 0.8);
       maxSpawns = Math.floor(maxSpawns * 1.2);
       if (w.seedFlags?.remix) {
@@ -1381,8 +1462,8 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.8);
       maxSpawns *= 2;
     }
-    // L611-615：隐身药水（buff 10）×1.2 / ×0.8
-    if (invis) {
+    // L611-615 = 1457 NPC.cs:703-710：隐身药水 ×1.2 / ×0.8
+    if (invisibility) {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
     }
@@ -1396,8 +1477,8 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
     }
-    // L627-630：渔夫套装（anglerSetSpawnReduction）×1.3 / ×0.7
-    if (anglerSet) {
+    // L627-630 = 1457 NPC.cs:718-721：渔夫套装（anglerSetSpawnReduction）×1.3 / ×0.7
+    if (anglerSetSpawnReduction) {
       spawnRate = Math.floor(spawnRate * 1.3);
       maxSpawns = Math.floor(maxSpawns * 0.7);
     }
@@ -1492,7 +1573,7 @@ export class VanillaSpawner {
     if (!this.invaders && ((!bloodMoon && !this.moonEvent) || dayTime)
       && !(w.clock.eclipse && dayTime) && !zoneEvil && !(this.zoneCounts.meteor >= 75)
       && !this.zoneDD2) {
-      const deep = playerYpx / TILE > w.h - 200;   // :711 player.Center.Y/16 > UnderworldLayer
+      const deep = centerYpx / TILE > w.h - 200;   // :802 player.Center.Y/16 > UnderworldLayer（★G41-A bj749a D-2:Center 读,与深度带顶边读分锚）
       if (deep) {
         // 地狱侧(:713-763)：友好概率低；命中时 maxSpawns×0.5（:724/:741/:757——
         // 削减只在 friendly 命中分支内，未命中只放宽 spawnRate）。
@@ -1566,6 +1647,27 @@ export class VanillaSpawner {
     }
     return { spawnRate, maxSpawns };
   }
+
+  /** @deprecated ★issue#46-N01（2026-11-03）：位置参数版【仅保留给既有测试直调】，
+   *  生产代码一律走 getSpawnRateNamed。历史事故 = 调用方尾部三布尔
+   *  （Invisibility/anglerSet/zoneShadowCandle）与形参
+   *  （shadowCandle/invis/anglerSet）同序错位——三者皆 boolean，tsc 零告警。
+   *  此处按【原签名原顺序】逐一映射到具名对象（映射单点，便于对拍）；
+   *  新代码禁用本方法。 */
+  getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
+    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
+    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
+    shadowCandle = false,
+    invis = false, anglerSet = false,
+    centerYpx = playerYpx): { spawnRate: number; maxSpawns: number } {
+    return this.getSpawnRateNamed({
+      playerYpx, nearbySlots, waterCandle, sHeightPx, playerXpx, peaceCandle, sunflower,
+      calmed, battle, townNPCs, dayTime, zoneEvil, bloodMoon,
+      zoneShadowCandle: shadowCandle, invisibility: invis, anglerSetSpawnReduction: anglerSet,
+      centerYpx,
+    });
+  }
+
   /** friendly 命中（:723/:740/:756/:804/:828）：只置 spawnFriendlyCycle；
    *  maxSpawns 削减（地狱 ×0.5 / 地表 ×0.6，且 town≥3 地表无条件）在分支就地执行 */
   private friendlyHit(): void {
@@ -1584,7 +1686,11 @@ export class VanillaSpawner {
    *  viewHalfW/H = 半屏格数 → 0.7×全屏 = ×1.4 半屏；0.52×全屏 = ×1.04 半屏 */
   private findSpawnTile(rng: RNG, viewHalfW: number, viewHalfH: number): boolean {
     const st = this.world.store;
-    const px = this.pX, py = this.pY;
+    // ★G41-A（bj749a D-2）：区域锚 = position（顶边左）格（GetSpawnArea
+    //  :958-964 position.ToTileCoordinates()）——与 SetSpawnFlags 的 pX/pY
+    //  （Center 格）分锚,勿合并。★R31-F5 勘正:双地牢带门读玩家 zone 旗
+    //  =Center 锚(代码 :1636 读 this.pY 正确,原残句「保持区域锚」系误)。
+    const px = Math.floor(this.areaPxX / TILE), py = Math.floor(this.areaPxY / TILE);
     // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254 狙击枪/1299 步枪镜 或装备 scope
     //  → 生成区与 safe 区各加 viewHalf/num3（num3=1.25 双持/1.5 单件/2.0 纯装备）
     const sc = this.scopeNum3 > 0 ? Math.floor(viewHalfW / this.scopeNum3) : 0;
@@ -1596,8 +1702,10 @@ export class VanillaSpawner {
     // ★IIIII22b：双地牢 safeArea 半化（NPC.cs:964-966 GetSpawnArea 尾支）——
     // dualDungeonsSeed && 玩家不在地表高度带（!ZoneOverworldHeight && !ZoneSkyHeight
     // ≡ tileY > worldSurface）时 safe 区矩形尺寸从 ×2 改为原值（NPC.cs:966），即半宽÷2 →
-    // 敌怪允许刷得更近。vanilla 在狙击镜扩圈之后替换矩形。
-    if (this.world.seedFlags?.dualDungeons && py > this.world.groundLevel) {
+    // 敌怪允许刷得更近。vanilla 在狙击镜扩圈之后替换矩形。★G41-A：带门读玩家
+    // zone 旗（SceneMetrics TileCenter=Center 锚）→ 近似保持 this.pY（Center 格）,
+    // 勿随区域锚（position 格）漂移。
+    if (this.world.seedFlags?.dualDungeons && this.pY > this.world.groundLevel) {
       safeX = Math.max(1, Math.floor(safeX / 2));
       safeY = Math.max(1, Math.floor(safeY / 2));
     }
@@ -1724,10 +1832,12 @@ export class VanillaSpawner {
     return -1;
   }
 
-  /** SpawnHornet（NPC.cs:5189-5255 1:1）：Next(8) 选族——
-   *  case0-4 黄蜂族 231-235（各 1/4 小 -2k/大 -2k+1 变体）；default(case5-7) 蜂刺族 42 */
+  /** SpawnHornet（1457 NPC.cs:5289-5345 1:1）：Next(8) 选族——
+   *  case0-4 黄蜂族 231-235（各 1/4 小 -2k/大 -2k+1 变体）；default(case5-7) 蜂刺族 42
+   *  ★issue#46-N02 同类扩查：原版 `switch (Main.rand.Next(8))` = 0..7；旧写
+   *  int(0,8) 闭区间多出第 9 档（落到 Math.min(v,5) 的 default → 蜂刺概率 4/9≠3/8）。 */
   private spawnHornet(x: number, y: number, rng: RNG): Enemy | null {
-    const v = rng.int(0, 8);
+    const v = rng.int(0, 7);
     const table: Array<[number, number, number]> = [
       [-56, -57, 231], [-58, -59, 232], [-60, -61, 233],
       [-62, -63, 234], [-64, -65, 235],
@@ -2002,10 +2112,13 @@ export class VanillaSpawner {
     // ★IIIII61 WorldGen.Skyblock.lowTiles 两臂（GetZombieSettings :5602/:5615）：
     //   ① 未杀任何困难模式前 Boss 且 style∉{4,5} → 1/3 重掷为 style 4/5（swamp 域）
     //   ② spawnArmedZombies=false（本仓先前恒真——持械僵尸系全部禁刷）
+    // ★issue#46-N02（P2,2026-11-03）：原版 GetZombieSettings（1457 NPC.cs:5602/:5604）
+    // 是 `Main.rand.Next(3) == 0`（1/3）——本仓 rng.int 为闭区间，旧写 int(0,3)
+    // 命中 1/4（重掷率与 style 4/5 比例同时偏移）。改 int(0,2) ≡ Next(3)。
     const sbDownedPreHM = this.downedAnyPreHardmodeBoss();
     if (this.world.skyblockLowTiles && !sbDownedPreHM
-      && this.zombieStyle !== 4 && this.zombieStyle !== 5 && rng.int(0, 3) === 0) {
-      this.zombieStyle = rng.int(0, 3) === 0 ? 4 : 5;
+      && this.zombieStyle !== 4 && this.zombieStyle !== 5 && rng.int(0, 2) === 0) {
+      this.zombieStyle = rng.int(0, 2) === 0 ? 4 : 5;
     }
     this.spawnArmedZombies = !(this.world.skyblockLowTiles && !sbDownedPreHM);
     // GetZombieSettings L5499-5514：torchZombieChance 基础 12；
@@ -2238,13 +2351,20 @@ export class VanillaSpawner {
 
     // ---- 蜘蛛巢（L1568-1587）：(墙 62 || spawnSpider) && CheckToSpawnSpider ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
-    // IIII225：CheckToSpawnSpider（NPC.cs:5790-5800）——NTB×FTW×非十周年世界：
+    // IIII225：CheckToSpawnSpider（1457 NPC.cs:5790-5801）——NTB×FTW×非十周年世界：
     // 地狱层（≥UnderworldLayer=maxTilesY-200）1/5 才放行、其余层恒真；函数 vanilla
     // 尾支恒 true,故仅这类世界有实义（此前整函数缺席=NTB×FTW 地狱蜘蛛超刷）。
+    // ★issue#46-N12（P2,2026-11-03）：旧比较 `spawnTileY >= world.lavaLine` 误把
+    //  世界生成熔岩线（TerrainPass gs.lavaLine = waterLine+Next(50,79)，小世界
+    //  h=1200 时 ≈900）当地狱分层线。原版 UnderworldLayer = maxTilesY-200
+    //  （1457 Main.cs:2886）——h=1200 时 1000。旧写让洞穴层（lavaLine..999）
+    //  提前吃 1/5 放行门（误抑制蜘蛛池，实测洞穴落点走 NPC49 而非墙爬蛛 164）。
+    //  单源 = World.underworldLine（getter h-200；与 NpcDrops 侧同源）。
+    //  消费面=本处唯一（活火块掉落面 Enemy.ts/NpcDrops.ts 另账，不属本刀）。
     const spiderGateOk = !(
       !!this.world.seedFlags?.notTheBees && !!this.world.seedFlags?.getGoodWorld
       && !this.world.seedFlags?.tenthAnniversary
-      && this.spawnTileY >= this.world.lavaLine && !N(5));
+      && this.spawnTileY >= this.world.underworldLine && !N(5));
     if ((wall === 62 || this.spawnSpider) && spiderGateOk) {
       // flag7（L1574-1578）= deeperThanRockLayer && y<h-210（★IIIII228 :1665-1667
       //  theConstant 变体 = 仅 y<h-210,去 deeperThanRockLayer 门——remix 重定义的
@@ -3613,8 +3733,10 @@ export class VanillaSpawner {
       if (!this.dayTime && moonPhase === 0 && hardMode && !N(3)) return D(104);
       // L4538：hard 1/3 → Werewolf 140
       if (!this.dayTime && hardMode && N(3)) return D(140);
-      // L4543：血月 2/5 → Blood Zombie 489 / Drippler 490
-      if (clock.bloodMoon && rng.int(0, 5) < 2) return D(N(2) ? 490 : 489);
+      // L4543 = 1457 NPC.cs:4643：血月 `Main.rand.Next(5) < 2`（2/5）→ Blood Zombie 489 /
+      //  Drippler 490。★issue#46-N02（P2,2026-11-03）：旧写 int(0,5) 闭区间 = Next(6)
+      //  → 2/6=1/3，血僵尸/滴滴怪分支整体偏稀（含 RNG 流上界多一档 5）。
+      if (clock.bloodMoon && rng.int(0, 4) < 2) return D(N(2) ? 490 : 489);
       // L4555：冰系落脚 tile → hard 1/4 Ice Elemental 169 / hard 1/3 Wolf 155 /
       //  专家 1/2 Armed Zombie 431 / else Frozen Zombie 161
       //  （两支 hard 概率均带 !ZoneGraveyard 门 :4557/:4561——墓地里冰面上冰元素/狼不出，
@@ -4170,10 +4292,20 @@ export class VanillaSpawner {
     }
   }
 
-  /** 主入口：Game.trySpawnEnemy 调用 */
-  spawn(playerX: number, playerY: number, rng: RNG, viewHalfW: number, viewHalfH: number): Enemy | null {
+  /** 主入口：Game.trySpawnEnemy 调用。
+   *  ★G41-A（bj749a D-2,2026-11-02）双锚分立：playerX/playerY = player.Center
+   *  像素（SetSpawnFlags pX/pY=(int)Center/16,NPC.cs:367-368——noWorms/skyBehind/
+   *  livingTree/大理石花岗岩扫描/drunk 蜂巢墙/inRemixStartingArea 全 Center 锚;
+   *  playerPx/playerPy 消费面 tileClearOfPlayerScreens 亦 Center 锚
+   *  CheckNotSpawningOnScreen :5451-5462）;areaX/areaY = player.position（顶边左）
+   *  像素——FindSpawnTile→GetSpawnArea :958-964 spawnArea/safeArea 锚
+   *  position.ToTileCoordinates(),与 SetSpawnFlags 分锚。缺省=playerX/Y
+   *  （直调测试顶/心同值档零扰动;旧单锚中心约定,本刀清偿 D-BJ749-2）。 */
+  spawn(playerX: number, playerY: number, rng: RNG, viewHalfW: number, viewHalfH: number,
+    areaX = playerX, areaY = playerY): Enemy | null {
     this.pX = Math.floor(playerX / TILE);
     this.pY = Math.floor(playerY / TILE);
+    this.areaPxX = areaX; this.areaPxY = areaY;
     this.viewHalfW = viewHalfW; this.viewHalfH = viewHalfH;
     this.playerPx = playerX; this.playerPy = playerY;
     this.dayTime = this.world.clock.isDay;
@@ -4212,9 +4344,13 @@ export class VanillaSpawner {
         && (st.liquidType[iUp1] === 3 || st.liquidType[iUp1] === 4)) return null;
     }
     // :943-947 高尔夫草地（477 修剪/492 神圣修剪）：非事件态 1/10 整帧拒绝
-    // （invasionType<=0 用 invaders 近前线代理——高尔夫球场+入侵的交集极罕见）
+    // ★issue#46-N13（P3,2026-11-03）：原版 1457 NPC.cs:1071 用【全局】`Main.invasionType <= 0`——
+    //  旧实现用 `this.invaders`（ShouldSpawnInvasionEnemies 的"玩家在前线 3000px 内地表"
+    //  近前线代理）≠ 全局入侵态：入侵已开但玩家不在前线时，修剪草地仍多吃 10% 拒刷；
+    //  反之 invaders=true（星璇塔 Zone 也会置位）而 invasionType=0 时反而漏拒。
+    //  单源 = world.invasionType（与 spawnAnNPC 火星支 :2122 同源）。 */
     if ((groundType === T.MOWED_GRASS || groundType === T.HALLOW_MOWED_GRASS)
-      && !this.world.clock.bloodMoon && !this.world.clock.eclipse && !this.invaders
+      && !this.world.clock.bloodMoon && !this.world.clock.eclipse && this.world.invasionType <= 0
       && (!this.moonEvent || this.moonEvent.kind === 0) && !this.world.weather.slimeRain
       && Math.random() * 100 < 10) return null;
     this.setFlagsForChosenTile(this.spawnTileX, this.spawnTileY, groundType, rng);

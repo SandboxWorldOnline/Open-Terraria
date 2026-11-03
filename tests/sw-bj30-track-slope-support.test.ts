@@ -330,9 +330,14 @@ describe('SW-BJ30 症状②③：轨道支撑规则矩阵（Minecart.FrameTrack 
     expect(i0).toBeGreaterThan(0);
     const body = src.slice(i0, i0 + 9000);
     const guard = body.indexOf('def.vanilla?.sheet === TRACK_SHEET');
-    const support = body.indexOf('this.hasSupport(');
+    // ★G41 改判史(2026-11-02):通用家具复验调用已重构成 furnitureBandSurvives
+    //   (Check2x2-generic 独立支重构)——旧锁找 this.hasSupport( 已不在函数体内。
+    //   语义不变:轨道早退仍先于家具复验链(guard < furnitureBandSurvives 位)。
+    const support = body.indexOf('this.hasSupport(') >= 0
+      ? body.indexOf('this.hasSupport(')
+      : body.indexOf('this.furnitureBandSurvives(');
     expect(guard, 'SW-BJ30 轨道早退分支丢失').toBeGreaterThan(0);
-    expect(support).toBeGreaterThan(guard);
+    expect(support, '家具复验链(furnitureBandSurvives/hasSupport)须在轨道早退后').toBeGreaterThan(guard);
     expect(body).toContain('frameTrack(st, x, y, false)');
   });
 });

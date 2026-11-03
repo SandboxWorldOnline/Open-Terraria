@@ -236,11 +236,50 @@ export function splashDecision(b: NpcLiquidHost, entry: boolean, lava: boolean):
   return quiet || ng ? null : file;
 }
 
+/** NPC.TryRemovingWaterPerishableEffects 1:1（NPC.cs:94420-94444）：
+ *  `(onFire||onFire3) && !isInLava` → DelBuff 24/323；`stinky` 无液体门一律 DelBuff 120。
+ *  两个消费面：①UpdateCollision 内（本文件 updateNpcLiquid 步骤 4/尾段）②**穿墙支**
+ *  （NPC.cs:91614-91617 直积分后 WetCollision → 本函数(isInLava:false)）。 */
+export function tryRemovingWaterPerishableEffects(b: NpcLiquidHost, isInLava: boolean): void {
+  if ((b.onFireT > 0 || b.onFire3T > 0) && !isInLava) {
+    b.onFireT = 0;
+    b.onFire3T = 0;
+  }
+  if ((b.stinkyT ?? 0) > 0) b.stinkyT = 0;
+}
+
 /** NPC.UpdateCollision 液体段 1:1（:93712-93805 + :94513-94560）。
  *  顺序照原版：岩浆判定（受伤）→ 水湿判定（wet/蜂蜜/微光/去抖溅落）→ !wet 清岩浆态 →
- *  熄火 → wetCount 递减 → liqFactor 供本帧之后的移动积分消费 */
-export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore): void {
+ *  熄火 → wetCount 递减 → liqFactor 供本帧之后的移动积分消费
+ *
+ *  ★issue#46 N04（2026-11-03）：**穿墙分支分流**。原版 UpdateNPC :91605-91618
+ *  `if (!noTileCollide) UpdateCollision(); else { position += velocity;
+ *  if (Collision.WetCollision(...)) TryRemovingWaterPerishableEffects(false); }`
+ *  —— UpdateCollision 整块（岩浆直伤/湿身/去抖溅落/wetCount/liqFactor/wet 落速帽）
+ *  对 noTileCollide 族【一次都不跑】，穿墙支只做可水灭效果清除。旧实现无条件全跑 =
+ *  穿墙族被湿身限速 + 岩浆直伤（猪鲨 370 水中冲刺 vy 16→7、岩浆掉血，实报）。
+ *  注意：原版直积分本身正确，**不是**把直积分改成液体减速，而是让它根本不进液体逻辑。
+ *  同族 `:91580-91587` 重力/落速帽只受 !noGravity 限定（与 noTileCollide 无关）——
+ *  故本函数不承担重力，重力侧仍由 applyGravity 统一（穿墙族照样吃重力）。 */
+export function updateNpcLiquid(
+  b: NpcLiquidHost, game: GameHooks, st: TileStore, noTileCollide = false,
+): void {
   const player = (game as unknown as { player: Player }).player;
+  // ---- 0. 穿墙支（NPC.cs:91609-91618）----
+  // ①不跑 UpdateCollision：wet/lavaWet/honeyWet/shimmerWet/wetCount 一律不更新
+  //   （vanilla 该支不写 wet 字段；AI 侧需要时自清，如 AI_126 :43902-43905）。
+  // ②WetCollision 命中（原版静态 Collision.WetCollision，**不走**永不沾水族豁免）
+  //   → 可水灭效果（OnFire/OnFire3/stinky），isInLava 恒 false（原版字面）。
+  // ③liqFactor=1：没有 Collision_MoveWhileWet 就没有位移缩放——AIs 里走
+  //   moveAndCollide 的穿墙分支据此全速直积分。
+  if (noTileCollide) {
+    if (wetCollision(st, b.x, b.y, b.w, b.h).wet) {
+      tryRemovingWaterPerishableEffects(b, false);
+    }
+    b.liqFactor = 1;
+    b.inWater = b.wet;
+    return;
+  }
   // ---- 1. 岩浆（Collision_LavaCollision :94513）----
   if (b.lavaCd > 0) b.lavaCd--;
   let lava = liquidCollision(st, b.x, b.y, b.w, b.h, 2);
@@ -326,15 +365,9 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     b.honeyWet = false;
     b.shimmerWet = false;
   }
-  // ---- 4. 入水熄火（TryRemovingWaterPerishableEffects :94537，门 = flag 且非岩浆）----
-  if (flag && !lava) {
-    b.onFireT = 0;                                        // DelBuff(24)
-    b.onFire3T = 0;                                       // DelBuff(323)
-  }
-  // stinky(120) 液体即除（TryRemovingWaterPerishableEffects 尾段 :94433-94441：
-  // `if (!stinky||netMode==1) return;` 后逐 buff 扫 120 → DelBuff——无 isInLava 门,
-  // 水/岩浆/蜂蜜/微光浸体一律去除;2026-08-31 stinky 清偿补）
-  if (flag && (b.stinkyT ?? 0) > 0) b.stinkyT = 0;
+  // ---- 4. 入水熄火（TryRemovingWaterPerishableEffects :94420-94444，门 = flag）----
+  // ★issue#46 N04：与穿墙支共用单源（onFire/onFire3 受 !isInLava 门、stinky 无门）。
+  if (flag) tryRemovingWaterPerishableEffects(b, lava);
   if (b.wetCount > 0) b.wetCount--;                       // :93734
   b.inWater = b.wet;                                      // 兼容旧字段
   // ---- 5. 移动积分因子（:93748-93762 优先级链）----

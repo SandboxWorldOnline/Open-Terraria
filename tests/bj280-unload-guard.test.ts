@@ -88,9 +88,15 @@ describe('BJ280 行为面：beforeunload 处理器（preventDefault + returnValu
 });
 
 describe('BJ280 行为面：visibilitychange hidden 兜底判定', () => {
-  const base = { dirty: true, quitting: false, hasGame: true, saveInFlight: false };
+  const base = { dirty: true, quitting: false, hasGame: true, saveInFlight: false, autoSaveEnabled: true, mpClient: false };
   it('dirty 会话切后台 → 触发静默自动保存', () => {
     expect(hiddenBackstopShouldSave(base)).toBe(true);
+  });
+  it('★2026-11-02 用户实报改判：autoSave 关闭 → 兜底不触发（关 tab 不再静默保存）', () => {
+    expect(hiddenBackstopShouldSave({ ...base, autoSaveEnabled: false })).toBe(false);
+  });
+  it('★同刀同族：MP 客户端会话 → 兜底不触发（同步快照勿写本地档;房主照常,原版 netMode==1 永不存世界）', () => {
+    expect(hiddenBackstopShouldSave({ ...base, mpClient: true })).toBe(false);
   });
   it('退出保存中（quitting）→ 不并发第二链（BJ144 互斥）', () => {
     expect(hiddenBackstopShouldSave({ ...base, quitting: true })).toBe(false);
@@ -131,10 +137,10 @@ describe('BJ280 结构锁：mainFlow 装配面（变异靶：摘 dirty 置位/�
     expect(sar).toContain('doSave(true)');
   });
 
-  it('隐藏兜底：visibilitychange hidden → hiddenBackstopShouldSave 门 → 静默 doSave(true)', () => {
+  it('隐藏兜底：visibilitychange hidden → hiddenBackstopShouldSave 门（含 autoSaveEnabled/mpClient 实参）→ 静默 doSave(true)', () => {
     expect(flow).toMatch(/document\.addEventListener\('visibilitychange'/);
     // 精确序列锚（mainFlow 另有 157 行失焦暂停 visibilitychange,勿误配）
-    expect(flow).toMatch(/if \(!hiddenBackstopShouldSave\(\{ dirty: worldDirty, quitting, hasGame: !!game, saveInFlight \}\)\) return;\s*void doSave\(true\);/);
+    expect(flow).toMatch(/if \(!hiddenBackstopShouldSave\(\{ dirty: worldDirty, quitting, hasGame: !!game, saveInFlight, autoSaveEnabled: options\.data\.autoSave, mpClient: !!game && !!game\.net\?\.active && !game\.net\.policy\.isHost \}\)\) return;\s*void doSave\(true\);/);
   });
 
   it('在途互斥：doSave 置 saveInFlight,finally 解除（成败皆清）', () => {

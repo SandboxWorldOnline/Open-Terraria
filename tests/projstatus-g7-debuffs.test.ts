@@ -122,18 +122,22 @@ describe('G7 16 debuff 字段 DoT(NPC.cs UpdateNPC_BuffApplyDOTs :92577+)', () =
     expect(1000 - e2.hp).toBe(0);
   });
   it('204 Oiled 多火系并存只叠一次(单块语义,不按系重复)', () => {
+    // ★issue#46 N06（2026-11-03 改判史）：旧期望 65 = 逐效果浮点累加器的 1 秒均值。
+    // 原版统一批次（NPC.cs:92821-92878）：onFire3(30,5)+frostburn2(50,10)+oiled(50,10)
+    // → loss=130/t、batch=max(5,10,10)=10、门槛 1200 → dt=1（60tick）跨 6 批 = 60，
+    // 残账 −600 结转。按系重复叠 Oiled 会得 loss 180 → 8 批 = 80，判别力保留。
     const e = new Enemy('zombie', 10 * 16, 10 * 16);
     e.iframes = 0; e.hp = 1000; e.hpBarT = 0;
     e.onFire3T = 1; e.frostburn2T = 1; e.oiledT = 1;
     e.fixedUpdate(1, makeHooks() as never);
-    // 15 + 25 + 25(Oiled 仅一次)= 65;按系重复会得 90
-    expect(1000 - e.hp).toBe(65);
+    expect(1000 - e.hp).toBe(60);
   });
   it('323 OnFire3 = 15 HP/s(:92632-92644 lifeRegen-30)', () => {
     expect(dotLoss('onFire3T')).toBe(15);
   });
   it('324 Frostburn2 = 25 HP/s(:92668-92680 lifeRegen-50)', () => {
-    expect(dotLoss('frostburn2T')).toBe(25);
+    // ★issue#46 N06：50/t + batch 10（门槛 1200）→ 60 帧跨 2 批 = 20（残账 −600）
+    expect(dotLoss('frostburn2T')).toBe(20);
   });
   it('337 TentacleSpike = 单层 3 HP/s(:92761-92779 num4×6)', () => {
     expect(dotLoss('spikeT')).toBe(3);
@@ -142,7 +146,8 @@ describe('G7 16 debuff 字段 DoT(NPC.cs UpdateNPC_BuffApplyDOTs :92577+)', () =
     expect(dotLoss('butcherT')).toBe(4);
   });
   it('375 Hemorrhage = 100 HP/s(:92604-92611 lifeRegen-200)', () => {
-    expect(dotLoss('hemorrhageT')).toBe(100);
+    // ★issue#46 N06：200/t + batch 40（门槛 4800）→ 60 帧跨 2 批 = 80（残账 −2400）
+    expect(dotLoss('hemorrhageT')).toBe(80);
   });
 });
 

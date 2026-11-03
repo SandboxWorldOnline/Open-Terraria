@@ -10101,8 +10101,18 @@ export class Player extends Entity {
           // ★BJ-C2/F11（2026-10-06）：原版掷面 = meleeCrit 字段值（:21260 `Main.rand.Next
           //  (100) < meleeCrit`）——含基 4（:2413 字段初值）与 :25712-14 逐帧链入的持械
           //  item.crit+crt；this.critChance('melee') 只载装备/buff 面 ⇒ 补 4+heldItemCritBonus。
-          const crit = Math.random() * 100 < 4 + this.critChance('melee')
+          // ★G41-A（g39a D-G39-②,2026-11-02）::21262-21264 类掷后【紧跟】
+          //   TryConsumingTimerCrit(Rectangle.Intersect(rectangle, npcRect), ref crit)
+          //   ——与日曜冲撞 R25-2 同族（g39a 台账点名本站）;两掷各自独立求值后 ||
+          //   （懒惰链双病判例 G37:已掷中 crit 也照消费,charge 置 −15+NightsEdge
+          //   编排照发——短路形会吞消费面）。victim 盒=冲撞盒∩敌盒真相交矩形。
+          const critRolled = Math.random() * 100 < 4 + this.critChance('melee')
             + heldItemCritBonus(this.inv.heldItem());   // :20811-20813
+          const critTimer = this.tryConsumingTimerCrit(game,
+            Math.max(bhx, ex), Math.max(bhy, ey),
+            Math.min(bhx + bhw, ex + ew) - Math.max(bhx, ex),
+            Math.min(bhy + bhh, ey + eh) - Math.max(bhy, ey));   // :21264 相交矩形
+          const crit = critRolled || critTimer;
           const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')));
           // ★S02(BJ723-B):克盾冲撞 crit 直传（原版 :21258-21267 ApplyDamageToNPC(…,
           //  crit,3097) 单布尔,×2 在 StrikeNPC_Inner 防后 NPC.cs:82067=Enemy.hurt 承载）
@@ -10407,13 +10417,18 @@ export class Player extends Entity {
         //  meleeCrit` 含基 4+:25712-14 持械折入,补 4+heldItemCritBonus（F11 同式）。
         // ★R25-2（红蓝定谳,2026-11-02）::21328-21332 类掷后【紧跟】TryConsumingTimerCrit
         //   (相交矩形,消费先于直击结算;旧缺=满蓄 6170 直击不强暴/charge 不置 −15)。
-        const crit3 = Math.random() * 100 < 4 + this.critChance('melee')
-          + heldItemCritBonus(this.inv.heldItem())
-          || ((game.player as unknown as
-            { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)
-            ?.tryConsumingTimerCrit?.(game,
-              Math.min(this.cx, en.cx), Math.min(this.cy, en.cy),
-              Math.abs(this.cx - en.cx) + 16, Math.abs(this.cy - en.cy) + 16) ?? false);
+        // ★G41-A 改判（懒惰链双病,G37 判例）:R25-2 首版 `roll || consume` 短路形在
+        //   类掷已中时吞掉消费面（charge 不置 −15+NightsEdge 编排不发）——原版
+        //   TryConsumingTimerCrit 无条件调用。两掷独立求值后 ||（克盾站同式）;
+        //   相交矩形=冲撞盒 bhx3/bhy3/bhw3/bhh3 ∩ 敌盒（R25-2 旧近似
+        //   min/abs+16 假设 16×16 同尺寸,一并勘正）。
+        const crit3Rolled = Math.random() * 100 < 4 + this.critChance('melee')
+          + heldItemCritBonus(this.inv.heldItem());
+        const crit3Timer = this.tryConsumingTimerCrit(game,
+          Math.max(bhx3, ex3), Math.max(bhy3, ey3),
+          Math.min(bhx3 + bhw3, ex3 + ew3) - Math.max(bhx3, ex3),
+          Math.min(bhy3 + bhh3, ey3 + eh3) - Math.max(bhy3, ey3));
+        const crit3 = crit3Rolled || crit3Timer;
         // ★BJ746 A22①（issue#35,2026-11-01）：(int) 截断非 round——原版 :21317/21344
         //  `float num5 = 150f × meleeDamage` 直传 ApplyDamageToNPC/NewProjectile 双面
         //  均 (int)（1.25 档 187.5 → 187,旧 round 188）。hurt 内 max(1,) 保底承担。

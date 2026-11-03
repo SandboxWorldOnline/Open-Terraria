@@ -674,8 +674,8 @@ function makeGame(): Game {
       onBuffsFrame: () => ui.tickBuffLive(),
       // ★SW-BJ157 stackSplit 计时面（RightClick 取件臂按住连取的 60Hz 驱动）
       onStackSplitTick: () => ui.tickStackSplitMain(),
-      // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
-      // silent=原版自动保存全程静默（:19594 无任何 UI/音效）；手动/退出保存仍提示
+      // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave 1457 :19920（1456 :19589）saveAndPlay）
+      // silent=原版自动保存全程静默（1457 :19920-19953 无任何 UI/音效）；手动/退出保存仍提示
       onAutoSave: () => doSave(true),
       // 配装热键切换白闪（GetColorByLoadout :2554-2559；背包按钮同款）
       onLoadoutSwitched: () => ui.flashLoadoutSwitch(),
@@ -2127,9 +2127,15 @@ function makeGame(): Game {
   //  过晚不可靠,取 visibilitychange hidden——页面仍存活,worker 序列化+IDB 落盘可
   //  继续完成）：切后台即静默自动保存一次,补 beforeunload 不可靠面（移动端/OS 级
   //  杀页）。静默档不清 dirty;退出链/在途链互斥（hiddenBackstopShouldSave）。
+  //  ★2026-11-02（用户实报改判）：门加 autoSaveEnabled——关闭自动保存=用户明示
+  //  不要任何自动存档点,兜底随关（原版 autoSave 1457 Main.cs:1214 只门周期档
+  //  DoUpdate_AutoSave :19920;卸载拦截 beforeunload 独立不受影响,关 tab 仍有
+  //  原生确认）。同刀补 mpClient 门（联机加入也置 dirty,而 doSave 无 MP 客户端
+  //  守卫——同步快照勿写本地档,与周期档 Game.ts :9465/:9641 同门;房主照常）。
+  //  判语细节见 UnloadGuard.hiddenBackstopShouldSave 注。
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') return;
-    if (!hiddenBackstopShouldSave({ dirty: worldDirty, quitting, hasGame: !!game, saveInFlight })) return;
+    if (!hiddenBackstopShouldSave({ dirty: worldDirty, quitting, hasGame: !!game, saveInFlight, autoSaveEnabled: options.data.autoSave, mpClient: !!game && !!game.net?.active && !game.net.policy.isHost })) return;
     void doSave(true);
   });
   async function quitToMenu() {

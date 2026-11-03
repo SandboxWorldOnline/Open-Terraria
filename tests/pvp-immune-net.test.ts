@@ -102,9 +102,11 @@ function seedPeer(net: ClientNet, slot: number): RemotePlayerState {
     up: false, down: false, left: false, right: false, jump: false, useItem: false,
     dash: false,   // ★BJ742-A R22-⑦：RemotePlayerState 新字段（ctrlBits[7]）
     facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
+    ghostPhase: false,   // ★G43 D-N15：msg13 flagBits[1] 独立硬核幽灵位（缺省不计）
     hostile: true, team: 0, hp: 100, maxHp: 100, sleeping: false,
     deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
     camTarget: null, sitting: false, porAnchors: null,   // G36-A D3 新字段
+    buffTypes: new Array(44).fill(0),   // ★BJ755-A T1：msg50 镜像（SW 原生协议恒零）
   };
   net.players.set(slot, p);
   return p;

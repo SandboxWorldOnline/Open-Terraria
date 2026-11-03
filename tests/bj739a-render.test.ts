@@ -120,10 +120,20 @@ describe('BJ739 B13 群系视觉三色集', () => {
   });
 });
 
-// ============ B12：狩猎双色 + lifeMax 门（NPC.cs:92230-92258） ============
+// ============ B12：狩猎真着色面（★BJ756 2026-11-02 收编——红/绿框近似层退役,
+// 谓词单源 Renderer.hunterPotionAppearsFriendly;行为锁迁 tests/bj756a-hunter-tint-floor.test.ts） ============
 
-describe('BJ739 B12 狩猎双色与 lifeMax 门', () => {
-  const draw = (entities: unknown[]): StrokeRec[] => {
+describe('BJ739 B12 狩猎谓词（BJ756 收编后单源复核）', () => {
+  it('友好/敌对/catchItem/5 血零伤/689 覆写五臂（NPC.cs:92126-92135）', () => {
+    const f = Renderer.hunterPotionAppearsFriendly;
+    expect(f({ vanillaId: -1, maxHp: 250, def: { friendly: true, damage: 10 } })).toBe(true);
+    expect(f({ vanillaId: -1, maxHp: 250, def: { friendly: false, damage: 20 } })).toBe(false);
+    expect(f({ vanillaId: 46, maxHp: 5, def: { friendly: false, damage: 0 } })).toBe(true);
+    expect(f({ vanillaId: -1, maxHp: 5, def: { friendly: false, damage: 0 } })).toBe(true);
+    expect(f({ vanillaId: 689, maxHp: 5, def: { friendly: true, damage: 0 } })).toBe(false);
+    expect(f({ vanillaId: -1, maxHp: 1, def: { friendly: false, damage: 0 } })).toBe(false);
+  });
+  it('★BJ756 近似层退役:drawBuffHighlights hunter-only 态零框（近似层销账复核）', () => {
     const rects: Rec[] = [];
     const ctx = makeCtx(rects);
     const w = new World(80, 80, 42, 'bj739a-r12');
@@ -132,45 +142,11 @@ describe('BJ739 B12 狩猎双色与 lifeMax 门', () => {
     const r = new Renderer(null as never);
     const fn = (r as unknown as { drawBuffHighlights(...args: unknown[]): void }).drawBuffHighlights;
     fn.call(r, ctx, w, p, { x: 40 * 16, y: 40 * 16 } as never,
-      640, 480, 1, 16, entities as never);
-    return rects.filter((r2) => 'stroke' in r2) as StrokeRec[];
-  };
-  it('友好绿框与敌对红框双色（50,255,50 与 255,50,50）', () => {
-    const mk = (over: Rec): Rec => ({ x: 600, y: 600, w: 20, h: 30, dead: false, maxHp: 250, vanillaId: -1, ...over });
-    const strokes = draw([
-      mk({ def: { friendly: true, damage: 10 } }),
-      mk({ def: { friendly: false, damage: 20 } }),
-    ]);
-    expect(strokes).toHaveLength(2);
-    expect(strokes[0].stroke).toBe('#32FF32');
-    expect(strokes[1].stroke).toBe('#FF3232');
-  });
-  it('可捕获小动物（catchItem 面,vanilla 46 兔）判绿', () => {
-    const strokes = draw([
-      { x: 600, y: 600, w: 10, h: 10, dead: false, maxHp: 5, vanillaId: 46, def: { friendly: false, damage: 0 } },
-    ]);
-    expect(strokes).toHaveLength(1);
-    expect(strokes[0].stroke).toBe('#32FF32');
-  });
-  it('无伤 5 血小动物第三臂判绿;lifeMax 为 1 不画框', () => {
-    const strokes = draw([
-      { x: 600, y: 600, w: 10, h: 10, dead: false, maxHp: 5, vanillaId: -1, def: { friendly: false, damage: 0 } },
-      { x: 700, y: 600, w: 10, h: 10, dead: false, maxHp: 1, vanillaId: -1, def: { friendly: false, damage: 0 } },
-    ]);
-    expect(strokes).toHaveLength(1);
-    expect(strokes[0].stroke).toBe('#32FF32');
-  });
-  it('vanilla 689 覆写强制红（HunterPotionFriendlyOverride）', () => {
-    const strokes = draw([
-      { x: 600, y: 600, w: 10, h: 10, dead: false, maxHp: 5, vanillaId: 689, def: { friendly: true, damage: 0 } },
-    ]);
-    expect(strokes[0].stroke).toBe('#FF3232');
-  });
-  it('无 maxHp 的非 NPC 实体（掉落物/弹幕形）不画框', () => {
-    const strokes = draw([
-      { x: 600, y: 600, w: 12, h: 12, dead: false },
-    ]);
-    expect(strokes).toHaveLength(0);
+      640, 480, 1, 16, [
+        { x: 600, y: 600, w: 20, h: 30, dead: false, maxHp: 250, vanillaId: -1, def: { friendly: true, damage: 10 } },
+      ] as never);
+    expect(rects.filter((r2) => 'stroke' in r2)).toHaveLength(0);
+    expect(rects.filter((r2) => 'fill' in r2)).toHaveLength(0);   // tile 高亮三旗全关=零绘制
   });
 });
 
@@ -188,9 +164,11 @@ describe('BJ739 渲染结构锁', () => {
     expect(rendererSrc).toContain("ctx.fillStyle = '#FF6464';   // (255,100,100) 猩红");
     expect(rendererSrc).toContain("ctx.fillStyle = '#FFA0F0';   // (255,160,240) 神圣");
   });
-  it('B12 双色字面量与 lifeMax 门', () => {
-    expect(rendererSrc).toContain("ctx.strokeStyle = friendly ? '#32FF32' : '#FF3232';");
-    expect(rendererSrc).toContain('e.maxHp <= 1) continue;   // :92230 lifeMax>1 门');
+  it('B12 近似层退役锁（★BJ756）:框字面量绝迹,谓词/钳底单源在位', () => {
+    expect(rendererSrc).not.toContain("ctx.strokeStyle = friendly ? '#32FF32' : '#FF3232';");
+    expect(rendererSrc).toContain('static hunterPotionAppearsFriendly(');
+    expect(rendererSrc).toContain(
+      'floor: Renderer.hunterPotionAppearsFriendly(e) ? [50, 255, 50] : [255, 50, 50],');
   });
 });
 
@@ -212,11 +190,11 @@ describe('BJ739 变异恰红 render 面', () => {
   };
   const RENDERER = join(process.cwd(), 'src', 'render', 'Renderer.ts');
 
-  it('M12 B12：双色回单色 → 双色夹具红', () => {
+  it('M12 B12（★BJ756 收编后重锚）:谓词 689 覆写臂摘除 → 覆写夹具红', () => {
     mutate(RENDERER,
-      "ctx.strokeStyle = friendly ? '#32FF32' : '#FF3232';   // (50,255,50)/(255,50,50)",
-      "ctx.strokeStyle = '#FF6060'; /* BJ739A-M12 变异 */",
-      '友好绿框');
+      '    if (e.vanillaId === 689) return false;                    // HunterPotionFriendlyOverride（NPCID.cs:4462）',
+      '    if (e.vanillaId === -12345) return false; /* BJ739A-M12 变异 */',
+      '五臂');
   });
 
   it('M13 B13：猩红回统一紫 → 三色夹具红', () => {

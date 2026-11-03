@@ -190,8 +190,9 @@ export interface OptionsData {
    *  true=AllowDoubleTap（缺省）/false=OnlyThroughHotkeys（只认热键） */
   doubleTapDash: boolean;
   // ---- S 级：自动保存/自动暂停（IngameOptions.cs:619/628）----
-  /** 自动保存（Main.autoSave，Main.cs:1196 默认 true）——DoUpdate_AutoSave :19589
-   *  墙钟 600000ms 触发 WorldGen.saveAndPlay */
+  /** 自动保存（Main.autoSave，1457 Main.cs:1214 默认 true，1456 :1196）——
+   *  DoUpdate_AutoSave 1457 :19920（1456 :19589）墙钟 600000ms 触发
+   *  WorldGen.saveAndPlay */
   autoSave: boolean;
   /** 自动保存间隔（分钟；原版恒 10 分钟不可调，此处为任务要求的 Web 便利扩展档） */
   autoSaveIntervalMin: number;

@@ -256,8 +256,17 @@ export class World {
    *  fallback 不受 ≥250 分离门约束，合法可与他点相邻近；测试据此放宽哨兵） */
   extraSpawnMeta?: Array<'found' | 'fallback'>;
   groundLevel = 0; rockLevel = 0;   // tile 坐标
-  /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
+  /** GenVars.lavaLine（世界生成期的熔岩线 ≈ waterLine+50..79 ≈ h-340±）——**不是**原版
+   *  地狱分层线。★issue#46 N12 勘误：旧注「地狱顶（UnderworldLayer = maxTilesY-200）」
+   *  系把生成器局部变量当 Main 静态量（生成器侧 CaveWalls/BuriedChests 消费 lavaLine
+   *  本身正确，勿动）；地狱分层消费一律走下方 underworldLine。 */
   lavaLine = 0;
+  /** Main.UnderworldLayer（1457 Main.cs:2886 `public static int UnderworldLayer =>
+   *  maxTilesY - 200`）——只读派生，随世界高度唯一确定。
+   *  ★issue#46 N12：活火块掉落（Conditions.cs:939 `npc.position.Y / 16f >
+   *  Main.UnderworldLayer`，**严格 >**）与蜘蛛池（NPC.cs:5848-5858 `Y >= h-200`）等
+   *  "地狱分层"判定源；lavaLine 与之可能相差上百格，不可替代。 */
+  get underworldLine(): number { return this.h - 200; }
   /** NPC.Spawner.fairyLog（MysticLogFairiesEvent.cs:181-183 扫倒木置位）——运行时位
    *  不落盘（StartWorld/StartNight 每次重扫回填）；地下仙女链（NPC.cs:5730）消费门 */
   fairyLog = false;
@@ -315,6 +324,11 @@ export class World {
   skyblockNoHellstone = false;
   skyblockNoFossils = false;
   skyblockNoLifeCrystals = false;
+  /** 全图无地狱熔炉（Calculate :3160-3177 hasTile[77]/[133]）。
+   *  ★issue#46 N16：此前 SK 八旗中唯一未投影到 World 的一项——骷髅王(35) 缺熔炉
+   *  补偿掉落（NPC.cs:79699/:80430-80434 NPCLoot_DropHellforge：221 + 清旗）消费端
+   *  需要与 noAltars/noDungeon/noTemple 同源的投影值。 */
+  skyblockNoHellforge = false;
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307 随存档持久化）：
    *  每档矿种全世界二选一固定——钴 107/钯 221、秘银 108/山铜 222、精金 111/钛 223。
    *  -1 = 尚未砸过该档（SmashAltar 首砸 roll 一次并锁定）；存 sheet id */

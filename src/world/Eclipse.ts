@@ -2,10 +2,10 @@
 // 状态挂 World.clock.eclipse（Main.eclipse）。
 //
 // 源码锚点：
-// - 自然触发（黎明 roll）           Main.cs:64899-64920（UpdateTime_StartDay 尾段）
-// - stopEvents 门槛（黎明整段压掉）  Main.cs:64895-64898
-// - 入夜清除 + 成就 3（挺过日食）    Main.cs:64721-64725（UpdateTime_StartNight）
-// - 日耀碑牌 2767 使用/可用性门      Player.cs:43308-43328（使用体）/ 51431-51434（可用性门）
+// - 自然触发（黎明 roll）           1457 Main.cs:66399-66420（UpdateTime_StartDay 尾段；1456 :64899-64920）
+// - stopEvents 门槛（黎明整段压掉）  1457 Main.cs:66395-66398（1456 :64895-64898）
+// - 入夜清除 + 成就 3（挺过日食）    1457 Main.cs:66221-66225（UpdateTime_StartNight；1456 :64721-64725）
+// - 日耀碑牌 2767 使用/可用性门      1457 Player.cs:44330-44350（使用体）/ 52908-52911（可用性门；1456 :43308-43328/:51431-51434）
 // - 专属怪出怪表（else-if 全表）     NPC.cs:3552-3614（SpawnAnNPC 内，先于蘑菇地/天空怪段；BJ591 重锚）
 // - 出怪段门（地表 && 白天 && 日食）  NPC.cs:3552-3554
 // - 专属掉落注册                    ItemDropDatabase.cs:185-221（RegisterEclipse）
@@ -27,7 +27,7 @@ export const ECLIPSE_ANNOUNCE_COLOR = [50, 255, 130] as const;
 export interface EclipseHost {
   /** ChatHelper.BroadcastChatMessage(Lang.misc[20], ChatColors.World) */
   broadcast(text: string, r: number, g: number, b: number): void;
-  /** AchievementsHelper.NotifyProgressionEvent：2=日食开始 / 3=挺过日食（:64904/:64723） */
+  /** AchievementsHelper.NotifyProgressionEvent：2=日食开始 / 3=挺过日食（1457 :66404/:66223；1456 :64904/:64723——R31-F1 重锚） */
   notifyProgressionEvent(n: number): void;
 }
 
@@ -101,14 +101,15 @@ export function useSolarTablet(w: World, host: EclipseHost): boolean {
 }
 
 /**
- * 入夜清除（Main.cs:64721-64725，UpdateTime_StartNight）：日食只持续一个白天，
- * 入夜即结束。成就 3（挺过日食）在清除**前**求值（:64722-64724 if eclipse →
- * NotifyProgressionEvent(3)），随后 eclipse=false（:64725）。返回是否发生了清除。
+ * 入夜清除（1457 Main.cs:66221-66225，UpdateTime_StartNight :66189 起；1456 同段
+ * :64721-64725——R31-F1 重锚）：日食只持续一个白天，入夜即结束。成就 3（挺过
+ * 日食）在清除**前**求值（1457 :66222-66224 if eclipse →
+ * NotifyProgressionEvent(3)），随后 eclipse=false（:66225）。返回是否发生了清除。
  */
 export function endEclipseAtDusk(w: World, host: EclipseHost): boolean {
   if (!w.clock.eclipse) return false;
-  host.notifyProgressionEvent(3);            // :64722-64724
-  w.clock.eclipse = false;                   // :64725
+  host.notifyProgressionEvent(3);            // 1457 :66222-66224（1456 :64722-64724）
+  w.clock.eclipse = false;                   // 1457 :66225（1456 :64725）
   return true;
 }
 

@@ -22,8 +22,19 @@ describe('自然 Boss 召唤旗生命周期（crossed(DUSK) 块内清零）', ()
     );
   });
   it('消费端仍为 nightTicks>4860 门 + 无条件清旗（原版 :64596 同款）', () => {
+    // ★G42-A R30 P3-2（2026-11-02）随刀更新：EoC 分支补旅程滑杆关停拒
+    //  （CanSpawnEnemiesNear NPC.cs:352-358）——滑杆==0 时玩家门失=旗保留
+    //  （原版 :66053 清旗仅在 SpawnOnPlayer 后）;机械门=清旗无条件（:66093）
+    //  + 召唤补滑杆拒。
     expect(src).toMatch(
-      /if \(nightTicks > 4860 && surfaceOk && !nearMoonLord\) \{[\s\S]{0,600}?if \(this\.spawnEyePending\) \{\s*\n\s*this\.spawnEyePending = false;/,
+      /if \(nightTicks > 4860 && surfaceOk && !nearMoonLord\) \{[\s\S]{0,700}?if \(this\.spawnEyePending && !spawnSliderOff\) \{\s*\n\s*this\.spawnEyePending = false;/,
     );
+  });
+  it('★G42-A R30 P3-2：滑杆关停拒三门在位（EoC 旗保留/机械窗耗/鹿角怪拒）', () => {
+    expect(src).toMatch(
+      /const spawnSliderOff = w\.isJourney && shouldDisableSpawns\(w\.journeyPowers\.spawnRateSlider\);/,
+    );
+    expect(src).toMatch(/if \(!this\.boss && !spawnSliderOff\) \{/);
+    expect(src).toMatch(/&& !nearMoonLord && !spawnSliderOff\s*\n\s*&& !\(w\.lunarEvent\.moonLordCountdown > 0/);
   });
 });

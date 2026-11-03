@@ -435,9 +435,13 @@ describe('BJ722-A BJ720 残项销案：npcSlots（per-TYPE 值有承载,-N 乘�
     expect(vanillaNpc(1)?.npcSlots ?? 1).toBe(1); // 蓝史莱姆（-1/-2 分裂/气球 -4/-5/-7 基型）
   });
 
-  it('消费面结构锁：4 站读 en.vanilla?.npcSlots（史莱姆雨/月事件 boss 槽/近场刷怪帽×2）', () => {
-    expect((gameSrc.match(/vanilla\?\.npcSlots \?\? 1/g) ?? []).length).toBe(3);
+  it('消费面结构锁：npcSlots 读位（史莱姆雨/月事件 boss 槽/近场帽单源）', () => {
+    // ★BJ749-⑦ 改判史(2026-11-02):近场帽×2 收编 nearbyActiveNpcSlots() 单源后
+    //   Game.ts 顶层形剩 2(雨 :39149+月 boss :39240)+单源内 1(局部 lambda
+    //   npcSlotsInActiveRange :39149 上一段)=3;旧锁「恰 3 处顶层形」在收编后漂移。
+    expect((gameSrc.match(/vanilla\?\.npcSlots \?\? 1/g) ?? []).length).toBe(2);
     expect(gameSrc).toContain('const slots = en.vanilla?.npcSlots ?? 1;');
+    expect(gameSrc).toContain('nearbyActiveNpcSlots');   // 帽消费单源在位
   });
 
   it('销案边界注：-N 变体乘子（case -11..-16 `npcSlots *= scale`）仓内唯一可达=-12（GTW/remix EoW 分裂）,仅刷怪帽记账差 ×1.15,无战斗/掉落消费', () => {

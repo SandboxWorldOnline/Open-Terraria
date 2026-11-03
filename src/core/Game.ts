@@ -462,7 +462,7 @@ import {
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { PlayerHurtFlags } from '../net/protocol';
 import { bindGhostBudgetHost, projPveNumHits } from '../entities/SpectreSoulProj';
-import { BuffType, BUFF_DEFS, wetFromBubbleContact, buffTypeByVanilla } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, wetFromBubbleContact, buffTypeByVanilla, applyRemoteBuffMirror } from '../stats/Buffs';   // ★BJ755-A T1：applyRemoteBuffMirror=msg50 代理镜像
 import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
@@ -472,7 +472,7 @@ import { bindsOf, isBound, keybindCodeLabel, hotbarSlotOfCode, type KeybindActio
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
-import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
+import { SmartCursor, smartCursorArrowAllowed, smartCursorControlSmart, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
 import { IntentionGuesser, GuessedPlayerIntention } from '../player/IntentionGuesser';   // ★BJ433 捣蛋猫帮工意图推断（PlayerIntentionGuesser.cs 1:1）
 import { scanSmartInteractTiles, shouldBlockSmartInteract, clearSmartInteractTileFrame, smartInteractTileFrame } from './SmartInteractTiles';   // ★SW-BJ54：智能交互 tile 候选（TileSmartInteractCandidateProvider 1:1）
 import { placePreviewFrame, clearPlacePreviewFrame, updatePlacePreviewFrame } from './PlacePreview';   // ★BJ557：放置预览幽灵状态面（TileObject.objectPreview 1:1）
@@ -606,7 +606,7 @@ import { AshBallProj } from '../entities/AshBallProj';     // FTW 灰烬连锁�
 import { MagicProj } from '../entities/MagicProj';
 import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
-import { type DropExtras, npcValueOf, dropVelocity, rollCoins } from '../drops/NpcDrops';
+import { type DropExtras, npcValueOf, dropVelocity, rollCoins, rollSkyblockCompensation, windyEnoughForKiteDrops } from '../drops/NpcDrops';
 import { holidayPickupSubstitute } from '../drops/SeasonalPickups';   // ★SW-BJ55 Item.cs:49670-49720
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
@@ -3362,8 +3362,8 @@ export interface GameCallbacks {
   /** 造型师理发窗（Main.OpenHairWindow Main.cs:43073）：报价/购买走
    *  Game.hairRestylePrice / Game.buyHairRestyle，流程层接 UI.showHairWindow */
   onHairWindow?: () => void;
-  /** 自动保存触发（Main.autoSave 墙钟到点，DoUpdate_AutoSave Main.cs:19589-19613
-   *  600000ms → WorldGen.saveAndPlay）——流程层接 doSave */
+  /** 自动保存触发（Main.autoSave 墙钟到点，DoUpdate_AutoSave 1457 Main.cs:19920-19944
+   *  （1456 :19589-19613）600000ms → WorldGen.saveAndPlay）——流程层接 doSave */
   onAutoSave?: () => void;
   /** 配装热键切换（Loadout1/2/3）——UI 侧播切套白闪（GetColorByLoadout :2554） */
   onLoadoutSwitched?: (k: 0 | 1 | 2) => void;
@@ -7662,6 +7662,32 @@ export class Game implements GameHooks {
     (globalThis as unknown as { __swRenderLog?: typeof h }).__swRenderLog = h;
   }
 
+  /** NPC.GetActivePlayerCount 的运行时投影（★issue#46 N15；1457 NPC.cs:18528-18543）：
+   *    netMode == 0            → 1（单机恒 1，原版同位）
+   *    netMode != 0（联机）    → 统计 active && !ghost 的玩家槽
+   *  本仓槽面 = 本地玩家（槽 net.mySlot）+ net.players 其余 active 代理。
+   *  原版 `!Main.player[i].ghost` = 硬核幽灵（普通死亡仍计）；本地侧经
+   *  Player.isGhostPhase 1:1 判定（Player.cs:16894-16901/:17161 全门），远端代理
+   *  读 ghostPhase（★G43 D-N15 清偿：msg13 flagBits[1] 独立位——[6] 仍是 dead∪ghost
+   *  并集，BJ742-A R22 锁不动；原版服直连由 VanillaClient 映射 c2[6]）。
+   *  玩家数只在 difficulty>=Expert 的 ScaleStats_ByPlayerCount 档位被消费
+   *  （经典档零影响）。 */
+  activePlayerCountForScale(): number {
+    const net = this.net;
+    if (!net?.active) return 1;                       // Main.netMode == 0（:18530-18532）
+    // 本地槽：在场即 active（本仓无 Main.player[i].active 字段语义）；硬核幽灵相不计。
+    // afterWorldLoad 早期若尚未构造玩家 → 保守计 1（原版无玩家时 GetActivePlayerCount
+    // 仍按槽 active 统计，本仓无该态）。
+    let n = !this.player || !this.player.isGhostPhase(this.world) ? 1 : 0;
+    for (const [slot, rp] of net.players) {
+      if (!rp.active) continue;
+      if (slot === net.mySlot) continue;              // 本槽已计入（防双计）
+      if (rp.ghostPhase) continue;                    // ★G43 D-N15：硬核幽灵不计（普通死亡照计）
+      n++;
+    }
+    return n;
+  }
+
   private afterWorldLoad() {
     // ★调度面修复刃(2026-09-28):节拍机采样面复位——世界生成/读档期的重载帧成本
     //  (生成页/烘焙尖峰)不得滞留成本窗污染进图后的容量判断(实测:开机样本滞留
@@ -7723,6 +7749,7 @@ export class Game implements GameHooks {
     w.skyblockNoHellstone = sbf.noHellstone;
     w.skyblockNoFossils = sbf.noFossils;
     w.skyblockNoLifeCrystals = sbf.noLifeCrystals;
+    w.skyblockNoHellforge = sbf.noHellforge;   // ★issue#46 N16：八旗中唯一漏投影项
     this._worldNoAltars = sbf.noAltars;
     this.sbCensusFrameAcc = 0;
     // chunk 上限恢复(2026-08-18 泄漏 review:曾砍到 64 无恢复点=永远 64;
@@ -7823,8 +7850,12 @@ export class Game implements GameHooks {
     // src/stats/ScaleStats.ts；newWorld worker/主线程两路与 loadWorld 都汇到此处）。
     // 存档不持久化缩放值（WorldFile.SaveNPCs :1703-1746 只存城镇 NPC 的
     // active/netID/position），每次 fromVanilla 现场重算——绑对象引用即可读最新档
+    // ★issue#46 N03/N15：绑定对象内 hardMode/downedPlantBoss/activePlayerCount 均为
+    //   live getter（原版 NPC.cs:18183/:18578/:18190 每次缩放现场读取）——世界进度
+    //   变化与联机人数变化无需重绑；玩家数注入源 = GetActivePlayerCount 1:1 计数。
     bindScaleStatsWorld(scaleStatsWorldOf(w, (type) => this.entities.enemies.some(
-      (en) => { const e2 = en as Enemy; return !e2.dead && e2.vanillaId === type; })));
+      (en) => { const e2 = en as Enemy; return !e2.dead && e2.vanillaId === type; }),
+      () => this.activePlayerCountForScale()));
     // 敌怪受击/死亡 wav 随生成预热（Enemy.fromVanilla/Transform 构造点回调）——
     // 原版 LoadAll 全量预载;懒加载在途首击会回退合成 hit 方波(音色不对)
     bindEnemySoundPrewarm((files) => this.sfx.preloadFiles(files));
@@ -9089,6 +9120,7 @@ export class Game implements GameHooks {
     this.net = null;
     this.remotePlayerProxies = [];
     entityNet.reportStrike = null; // v3 实体钩子随生命周期摘除
+    entityNet.reportHeal = null;   // ★BJ755-A T2：治疗上报钩同生命周期摘除（防跨世界残留指向旧 vc）
     this.running = false;
     // 天气：雨声层静音 + 环境循环轨停拆 + 渲染器 detach（防下个世界复用旧状态）
     this.stopWeatherLoops();
@@ -9459,7 +9491,7 @@ export class Game implements GameHooks {
         this.audioAcc -= FIXED_DT;
         asteps++;
       }
-      // 自动保存墙钟（frame() 同款语义;DoUpdate_AutoSave Main.cs:19589 暂停不停表
+      // 自动保存墙钟（frame() 同款语义;DoUpdate_AutoSave 1457 Main.cs:19920 暂停不停表
       // ——后台挂机长会话不丢进度;BJ280 隐藏兜底已实证隐藏态存档全链可完成）
       const mpClient = !!this.net?.active && !this.net.policy.isHost;
       if (this.cb.onAutoSave && options.data.autoSave && !mpClient) {
@@ -9628,13 +9660,14 @@ export class Game implements GameHooks {
     if (this.frameDts.length > 60) this.frameDts.shift();
     const elapsed = Math.min(dtMs / 1000, 0.25);
     this.lastTime = now;
-    // 自动保存（Main.autoSave，DoUpdate_AutoSave Main.cs:19589-19613：墙钟
+    // 自动保存（Main.autoSave，DoUpdate_AutoSave 1457 Main.cs:19920-19944（1456
+    // :19589-19613）：墙钟
     // Stopwatch > 600000ms → saveAndPlay；间隔档为任务要求的 Web 扩展，默认 10min=
     // 原版恒值。暂停不停表（原版 Stopwatch 语义）；onAutoSave 由流程层接 doSave）。
-    // 关开关 → 锚点清零（:19617-19619 saveTime.Stop()——重开后从头计满间隔,
+    // 关开关 → 锚点清零（1457 :19950-19953 saveTime.Stop()——重开后从头计满间隔,
     // 曾缺=关→开立即用旧锚触发一次保存）。
-    // ★MP 客户端门（:19601 `autoSave || netMode==2` 的反面——原版 netMode==1 客户端
-    //   走 :19595 5 分钟分支【只存玩家,永不存世界】,世界权威在服务器）：本仓房间制
+    // ★MP 客户端门（1457 :19934 `autoSave || netMode==2` 的反面——原版 netMode==1 客户端
+    //   走 1457 :19928 5 分钟分支【只存玩家,永不存世界】,世界权威在服务器）：本仓房间制
     //   同为服务器权威,客户端 this.net 存活时跳过世界自动存（写本地 quick save 会用
     //   同步快照覆盖单人档;玩家态本就实时上报 host,无需客户端侧玩家存档）
     const mpClient = !!this.net?.active && !this.net.policy.isHost;
@@ -10312,7 +10345,13 @@ export class Game implements GameHooks {
       // 全图存活数会让 46/47 城镇曲盖住一切群系 BGM
       const townNPCCount = this.entities.npcs.filter((n) => {
         const tn = n as TownNPC;
-        return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
+        // ★G41-A（bj749a D-3,2026-11-02）：只计 nPC.townNPC（ScanNPCPositions
+        //  SceneMetrics.cs:746）——绑缚体（105/106/123/354/589/685 SetDefaults 无
+        //  townNPC=true）与骷髅商 453（:14427 同无）不入数。刷怪侧计数（BJ749-②
+        //  trySpawnEnemy reduce）早已排除;scene/BGM 侧漏同款（绑缚救援点曾被当
+        //  城镇 → BGM 切城镇曲）,本刀补齐两口径一致。
+        return tn instanceof TownNPC && !tn.dead && !tn.bound && tn.npcKey !== 'skeleton_merchant'
+          && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount,
         partyIsUp(this.partyState), this.partyState.genuineParty);
@@ -10978,6 +11017,7 @@ export class Game implements GameHooks {
         this.world.skyblockNoHellstone = f.noHellstone;
         this.world.skyblockNoFossils = f.noFossils;
         this.world.skyblockNoLifeCrystals = f.noLifeCrystals;
+        this.world.skyblockNoHellforge = f.noHellforge;   // ★issue#46 N16（八旗补投影）
       }
     }
     // ★IIIII61 The Constant 黑暗伤害（DontStarveDarknessDamageDealer.Update :24550-24552
@@ -11885,7 +11925,8 @@ export class Game implements GameHooks {
           && !(ml && Math.hypot(ml.cx - player.cx, ml.cy - player.cy) < 4500)) {
         const slime = sp.slimeRainSpawns(player.cx, player.cy,
           this.nearbyActiveNpcSlots(),
-          vw, vh, new RNG((Math.random() * 1e9) | 0), this.world.isExpert); // NPC.cs:5829 expertMode（曾硬编码 false）
+          vw, vh, new RNG((Math.random() * 1e9) | 0), this.world.isExpert,
+          player.y);   // ★G41-A（bj749a D-2）：深度门 :5910 读 position.Y 顶边;窗口 :5934-38 仍 Center（px/py）
         if (slime) {
           slime.id = this.entities.nextId++;
           this.entities.enemies.push(slime);
@@ -11922,6 +11963,9 @@ export class Game implements GameHooks {
           const e = this.spawnNpcByVanilla(677, x, y);
           if (e) e.y = y - e.h;
         },
+        // ★G41-A（bj749a D-2）：spawnArea/safeArea 锚 = position 顶边左
+        //  （GetSpawnArea :958）;px/py 仍 Center（屏外检查 :5451 Center 锚）
+        player.x, player.y,
       );
     }
     this._wasInShimmerZone = !!this.scene?.zoneShimmer;
@@ -12466,12 +12510,17 @@ export class Game implements GameHooks {
         // 月晷冷却 -1（:64695-64697，使用时置 8 → 8 个夜晚后归零可再用）
         if (w.fastForwardTimeToDusk) w.fastForwardTimeToDusk = false;
         if (w.moondialCooldown > 0) w.moondialCooldown--;
-        // StartNight 头部其余杂项处置（:64699-64712，逐一核实）：
-        // · :64699-64702 !isThereAWorldSurface → spawnMeteor=false——isThereAWorldSurface
-        //   = worldSurface>50（Main.cs:2861），本仓生成器恒有地表（lanternCtx 旁
+        // StartNight 头部其余杂项处置（1456 :64699-64712；R31-F1 重锚 2026-11-02：1457
+        //   段内重排=清零集 :66199-66208 → 陨石 roll :66209-66212 → 地表门 :66213-66216，
+        //   逐项 1457 亲核）：
+        // · 地表门 !isThereAWorldSurface → spawnMeteor=false（1456 :64699-64702 / 1457
+        //   :66213-66216）——isThereAWorldSurface
+        //   = worldSurface>50（Main.cs:2861，1457 :2884），本仓生成器恒有地表（lanternCtx 旁
         //   hasWorldSurface 同式判 groundLevel>50），守卫永不触发 → 跳过
-        // · :64703 ResetBadgerHatTime（NPC.cs:79740-79744）= EoCKilledToday/WoFKilledToday
-        //   清零（同日双杀 EoC+WoF 掉 Badger's Hat 5004，NPC.cs:79800-79814；记账在
+        // · ResetBadgerHatTime（1456 :64703 / 1457 :66200；NPC.cs:79740-79744，1457
+        //   :79755-79759）= EoCKilledToday/WoFKilledToday
+        //   清零（同日双杀 EoC+WoF 掉 Badger's Hat 5004，NPC.cs:79800-79814，1457
+        //   :79815-79829；记账在
         //   Boss 逻辑块，双杀即掷）——已接
         this.eocKilledToday = false;
         this.wofKilledToday = false;
@@ -12489,17 +12538,18 @@ export class Game implements GameHooks {
         // · :64711-64712 prioritizedTownNPCType=0/checkForSpawns=0——本仓入驻走
         //   tickCount %7200 模型（上方注），无计数器可清 → 不适用
         //   ★★对抗修复批②2026-09-01（B-6 字面核实）：StartNight 对 homelessSpawnTimeout
-        //   与 LastFoundHouse 均不触碰（:64699-64712 全段穷举无此二位）——前者由
+        //   与 LastFoundHouse 均不触碰（1456 :64699-64712；1457 :66189-66342 全函数
+        //   ——R31-F1 重锚日亲证 0 命中）——前者由
         //   UpdateWorld 每 tick 自减自然流逝，后者是缓存非节流，夜切保留。本仓同字面
         //   （crossed(DUSK) 段不清二位；仅 clearWorld cs:6975-6976 归零）。
         //   ★SW-BO1 2026-09-07（BJ2 债①清偿）：prioritizedTownNPCType 入夜清零已接
         //   （下方一行;Main.cs:66207）——旧注「无跨帧锁型字段无从清」随锁移植作废。
         this.prioritizedTownNPCType = 0;
-        // 夜幕：日食清除（Main.cs:64721-64725——日食全天持续，入夜即结束；
+        // 夜幕：日食清除（1457 Main.cs:66221-66225，1456 :64721-64725——日食全天持续，入夜即结束；
         // 实现在 world/Eclipse.ts endEclipseAtDusk，位于血月 roll 之前）；
-        // 成就：挺过日食（event 3，旗在清除前求值 :64722-64724）
+        // 成就：挺过日食（event 3，旗在清除前求值 1457 :66222-66224）
         endEclipseAtDusk(w, this.eclipseHost());
-        // 灯笼夜入夜兑现（Main.cs:64709 = LanternNight.CheckNight → NaturalAttempt）：
+        // 灯笼夜入夜兑现（1457 :66205 = LanternNight.CheckNight → NaturalAttempt；1456 :64709）：
         // 首胜预约 NextNightIsLanternNight 或月总已杀后的 1/14 自然 roll（冷却 5-10 夜）
         LanternNight.checkNight(this.lanternCtx());
         // 派对入夜结算（BirthdayParty.CheckNight :40-53）：进行中则结束 + 粉字广播 misc[99]
@@ -12866,17 +12916,22 @@ export class Game implements GameHooks {
           && Math.hypot(en.cx - player.cx, en.cy - player.cy) < 4500;
       });
       const surfaceOk = player.y < w.groundLevel * TILE || w.spawnY > w.groundLevel;
+      // ★G42-A R30 P3-2（2026-11-02）：CanSpawnEnemiesNear 旅程滑杆关停拒（NPC.cs:352-358
+      //  IsJourneyMode ∧ SpawnRateSliderPerPlayerPower.GetShouldDisableSpawnsFor——滑杆==0
+      //  拒刷怪）——EoC/机械/鹿角怪三门共用该谓词（Main.cs:66050/:66072/:66107）。
+      //  GetIsUnlocked 未建模=其余三消费位（:11868/:23245/:26067）同口径。
+      const spawnSliderOff = w.isJourney && shouldDisableSpawns(w.journeyPowers.spawnRateSlider);
       if (nightTicks > 4860 && surfaceOk && !nearMoonLord) {
         const offCols = Math.ceil((this.camera.viewW / this.camera.zoom / 2 + 300) / TILE);
         const offTx = Math.floor(player.cx / TILE) + (Math.random() < 0.5 ? -1 : 1) * offCols;
-        if (this.spawnEyePending) {
-          this.spawnEyePending = false; // 清旗无条件（:64553-64555）
+        if (this.spawnEyePending && !spawnSliderOff) {
+          this.spawnEyePending = false; // 清旗无条件（:64553-64555；滑杆拒=玩家门失→旗保留待滑杆回抬）
           // 自然生成无声（Main.cs:64550 SpawnOnPlayer 直调，无 PlaySound）——只公告
           this.summonBossAtTx('eye_of_cthulhu', offTx, false);
         } else if (this.spawnHardBossPending > 0) {
           const n = this.spawnHardBossPending;
-          this.spawnHardBossPending = 0; // 一次性机会：无论成败清零（:64596）
-          if (!this.boss) {
+          this.spawnHardBossPending = 0; // 一次性机会：无论成败清零（:64596/:66093——滑杆拒也耗窗）
+          if (!this.boss && !spawnSliderOff) {
             // Mechdusa 世界（SpecialSeedFeatures.Mechdusa,Main.cs:64575-64577）：
             // 机械 Boss 自然 roll 一律改召合体（SpawnMechQueen 走玩家位召唤链）
             const sf = this.world.seedFlags ?? {};
@@ -12909,7 +12964,7 @@ export class Game implements GameHooks {
             && Math.abs(tn.cx - player.cx) < 120 * TILE && Math.abs(tn.cy - player.cy) < 75 * TILE;
         })
         && (player.maxHp >= 200 || player.defense >= 9)
-        && !nearMoonLord
+        && !nearMoonLord && !spawnSliderOff
         && !(w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0 || moonEventActive(w)
           || w.oldOnesArmy.ongoing || this.boss)) {
         this.spawnDeerclopsOnPlayer();
@@ -14974,7 +15029,27 @@ export class Game implements GameHooks {
     const sc = this.smartCursor;
     const s = this.smartSettings();
     // SmartCursor action（默认 LeftControl/RightControl；M5 经键位表）
-    const controlSmart = inp.downAction('SmartCursor');
+    // ★issue#44-8（红队勘正 2026-11-03）：原版电平 TriggersSet.cs:783-796 无界面门；
+    //  界面门只挂在切换调用上 Player.cs:25057
+    //  `UsingGamepad || !mouseInterface || !ItemSlot.Options.DisableLeftShiftTrashCan`。
+    //  ★`DisableLeftShiftTrashCan` 默认是 **true**（ItemSlot.cs:28；旧注「默认 false
+    //  ⇒ 恒真」系误读）→ 桌面档门 = `!mouseInterface`：**光标悬停 UI 时不切换**，
+    //  与「面板是否打开」无关。全屏地图另清零 controlSmart（Player.cs:24998）。
+    //  本仓 downAction 首行 `if (uiBlocking) return false` → 模态界面内电平恒 false
+    //  （旧实现的两向偏差：面板开着时**任何位置**都切不了，原版只要鼠标在世界一侧
+    //  就照切）。修法=补物理/触摸键裸电平（不含虚拟 action 通道——登记债 D-A-2）。
+    // 裸键通道仅在 uiBlocking 帧求值（生产 Input 恒有 keys/touchKeys；测试桩
+    // sw-bj29/sw-bj49 只桩 downAction，故此处按需取值 + 可选链兜底）。
+    // ★overUi 是本仓 mouseInterface 等价面（同下方 controlUseItem 的既有口径：
+    //  时间条/天气伞是 canvas UI，另两枚 hover 旗；DOM 面板走 inpOverDomUi）。
+    const overUi = this.inpOverDomUi() || this.renderer.timeUiHover || this.renderer.weatherUiHover;
+    const rawSmartDown = !!inp.uiBlocking && !this.renderer.fullMap.open && !overUi
+      && bindsOf('SmartCursor').some((c) => inp.keys?.has(c) || inp.touchKeys?.has(c));
+    const controlSmart = smartCursorControlSmart(
+      inp.downAction('SmartCursor'),
+      rawSmartDown,
+      this.renderer.fullMap.open,
+    );
     // SW-RB8a 2026-09-08：controlUseItem 是【电平】——TriggersSet.cs:835-841 每帧
     // `if (MouseLeft){ if (!Main.blockMouse && !p.mouseInterface) p.controlUseItem=true }`
     // （帧头 Player.cs:29291 先置 false）。旧传 inp.mouseDown=边沿消费量,按住期
@@ -14985,7 +15060,11 @@ export class Game implements GameHooks {
     // ★R4-22 电平化：同吃 TriggersSet.cs:853-859 delayUseItem 压制（旗存续期强制 false）
     const controlUseItem = !!inp.mouseHeld && !inp.blockMouse && !inp.delayUseItem
       && !inp.uiBlocking && !this.inpOverDomUi();
-    if (sc.updateWanted(controlSmart, controlUseItem, s)) this.sfx.play('menuTick');
+    // ★issue#44-8 红队勘正：门关（光标悬停 UI）时原版**整段不调用**
+    //  TryToToggleSmartCursor（Player.cs:25056-25071）——不是把某一支置 false。
+    //  updateWanted 的 gateOpen 保此语义：wanted 冻结、prevSmart 仍跟随
+    //  （releaseSmart 的更新在门外 :25072-25079）。
+    if (sc.updateWanted(controlSmart, controlUseItem, s, !overUi)) this.sfx.play('menuTick');
     // ★SW-BJ49 2026-09-09：blocked 表摘除 `!!this.minecart`——原版 SmartCursorLookup
     //  调用点（Player.cs:25640-25645）只有 whoAmI/IsCameraTrackingObject 两门,乘矿车
     //  不豁免（矿车也不拦使用链,本文件 :11831 注）→ 曾在车帧整支跳过 lookup,智能开
@@ -15017,18 +15096,32 @@ export class Game implements GameHooks {
     const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
     const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     const p = this.player;
-    // 放置物才有 blockRange（原版 SmartCursorLookup :95-98 createWall/createTile 才加）；
-    // 工具 tileBoost=0
-    const placing = heldDef?.tile != null || heldDef?.wallId != null;
-    const tb = placing
-      ? this.blockRange()
-      : 0;
+    // ★issue#44-5 改判史（原版 SmartCursorHelper.cs:94-99）：
+    //   `int num2 = item.tileBoost; if (createWall>0 || createTile>0 || tileWand>0)
+    //    num2 += player.blockRange;`
+    // ① tileBoost 是【无条件】首项（钻头/链锯族 -1 也生效），旧版整项丢失
+    //    → 扳手/剪线钳/致动魔杖（TILE_BOOST_BY_VID=20）智能光标射程从 ≈25×23 缩到
+    //    5×3 =「续接线头」几乎失效；钻头族反而多 1 格。
+    // ② blockRange 门 = createWall>0 || createTile>0 || tileWand>0；旧版 `tile != null`
+    //    把泥土（createTile=0）也算放置物。此处按分辨率后的 createTile sheet > 0 判。
+    // ③ tileWand>0 六件（832/932/933/1129/3360/3361）本仓未实装放置链，未纳入本门
+    //    ——登记债（表在 ui/modernCrafting.ts TILE_WAND_ITEMS，core→ui 不引）。
+    const createTileSheet = heldDef?.tile != null ? sheetOf(TILE_BY_KEY[heldDef.tile] ?? -1) : -1;
+    const placing = createTileSheet > 0 || (heldDef?.wallId ?? 0) > 0;
+    const tb = tileBoostOfVid(heldDef?.vid ?? -1) + (placing ? this.blockRange() : 0);
     // EmptyTile 的占位实体（玩家 + 敌怪 + 城镇 NPC）
     const occupants: Array<{ x: number; y: number; w: number; h: number }> = [
       { x: p.x, y: p.y, w: p.w, h: p.h },
     ];
     for (const e of this.entities.enemies) occupants.push({ x: e.x, y: e.y, w: e.w, h: e.h });
     for (const e of this.entities.npcs) occupants.push({ x: e.x, y: e.y, w: e.w, h: e.h });
+    // ★issue#44-4：GetRanges 基础射程（含射程配饰 +3/+2、工具箱 +1、旅程远置
+    //  ×2+8，并钳 ≤20）。
+    //  SmartCursor.tileRegion 在钳【后】再加 tb（GetTileRegion :55-57 原序）。
+    // ★改判史 D-A-5（2026-11-03）：曾因旅程 ×2+8 与配饰/工具箱先后反序而
+    //  与原版不同式（竖程最多多 3 格）；当日已按原版序重排 `tileReach`，
+    //  现与 Player.cs:18931-18941/:13138-13142/:15068-15072 1:1。
+    const reach0 = this.tileReach(0);
     sc.lookup({
       st: this.world.store,
       mouse: { x: mx, y: my },
@@ -15036,6 +15129,15 @@ export class Game implements GameHooks {
       held: { def: heldDef, tool: tool ? { type: tool.type, power: tool.power ?? 0 } : null },
       settings: s,
       tileBoost: tb,
+      // ★issue#44-4：基础射程实况（配饰/工具箱/旅程）；旧版 SmartCursor 硬编码 5/3。
+      reachX: reach0.x,
+      reachY: reach0.y,
+      // ★issue#44-6：WorldGen.CanKillTile 全式（含 hardMode + 宝箱内容 ctx）。
+      //  SmartCursor 的两消费点（ForceCursor :2259 / MineSolids :2502）改按坐标读。
+      canKillTile: (x, y) => this.canKillTile(x, y),
+      // ★issue#44-3：Main.tileCut 内部 id 域镜像（TILE_CUT = TILE_CUT_SHEETS 经
+      //  TILE_DEFS 平移，本文件 :1609）。IDG-T2 禁 player 面直查 sheet 表。
+      tileCut: (t) => TILE_CUT.has(t),
       wireToolMode: this.wireToolMode,
       occupants,
       // ★F5（2026-09-04 蓝队 M24 补遗）：Step_Boulders :936-949 玩家命中盒净空消费面
@@ -15139,10 +15241,10 @@ export class Game implements GameHooks {
       // ★SW-RB4a 2026-09-06：光标持物伪选中在显（PickItemSelectionOverride
       // Player.cs:17528-17532 先于 SmartSelectLookup 短路——syncCursorMirror 已前置）
       mouseItemHeld: !!p.inv.cursorMirror,
-      // IsInTileInteractionRange（Player.cs:31548，Simple 档 = Player.tileRangeX/Y + TB）。
+      // IsInTileInteractionRange（Player.cs:32264（1457；1456:31548），Simple 档 = Player.tileRangeX/Y + TB）。
       // ★红蓝对抗 A-F2 反证存照：Simple.GetRanges 读的是 per-player tileRangeX/Y——
-      // 原版该字段有配件/道具/旅程写点（equippedAnyTileRangeAcc +3/+2 :13140-13143、
-      // 持 1923 工具箱 +1 :15068-15072、旅程远置 ×2+8 :18938-18944，每帧复位 5/3
+      // 原版该字段有配件/道具/旅程写点（equippedAnyTileRangeAcc +3/+2 :13138-13142、
+      // 持 1923 工具箱 +1 :15068-15072、旅程远置 ×2+8 :18938-18941，每帧复位 5/3
       // :18931-18932），与 tileReach(0) 同构，非"纯 5/3"。
       inRange: (tx, ty, tb) => this.inTileRange(tx, ty, tb),
     };
@@ -20332,13 +20434,23 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     const critTotal = 0.04 + (itemCombat(critVid)?.crit ?? 0) / 100
       + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100
       + (ps?.crt ?? 0) / 100; // ⑧ 词缀 crt（I:566 crit+=crt）
-    // 成就：蜜蜂套装持蜂枪使用（Player.cs:16060-16069 → event 3 NOT_THE_BEES：
-    // head 160 + body 168 + legs 103 且 itemAnimation 中挥动 1121 BeeGun）
+    // 成就：蜜蜂套装持蜂枪使用 → special event 3 NOT_THE_BEES（★G41-A 定谳勘正
+    // 2026-11-02：原版真锚 = ArmorSetBonuses.Benefits.Bee（ArmorSetBonuses.cs:19-30）
+    // ——套装加成应用期 `itemAnimation>0 && inventory[selectedItem].type==1121` →
+    // HandleSpecialEvent(player, 3)「Bee set + Bee Gun 挥动」正是 vanilla 唯一触发,
+    // G39 台账「自造条件/唯一触发=入夜 eclipse」系【双通道混淆】定谳错误——入夜的
+    // NotifyProgressionEvent(3)（Main.cs:66221-24,progression 通道）只点 KILL_THE_SUN
+    // prog(3),与本 HandleSpecialEvent(3)（special 通道）分属两张表,数字撞号而已;
+    // eclipse 夜面早已接线（world/Eclipse.ts endEclipseAtDusk → notifyProgression
+    // Event(3),10-09 起在盘）。本刀只把套装读归位 effective（原版 set 匹配读
+    // GetEffectiveArmor 三槽,ArmorSetBonus.QueryContext :20-24 = BJ745 A07 同族;
+    // 旧裸 inv.armor[0-2] 读 = 共享配装收藏的蜜蜂套漏触发）。
     if (critVid === 1121) {
-      const b0 = this.player.inv.armor[0], b1 = this.player.inv.armor[1], b2 = this.player.inv.armor[2];
+      const b0 = statOfInternal(this.player.inv.getEffectiveArmor(0)?.id ?? -1);
+      const b1 = statOfInternal(this.player.inv.getEffectiveArmor(1)?.id ?? -1);
+      const b2 = statOfInternal(this.player.inv.getEffectiveArmor(2)?.id ?? -1);
       if (b0 && b1 && b2
-        && statOfInternal(b0.id)?.hs === 160 && statOfInternal(b1.id)?.bs === 168
-        && statOfInternal(b2.id)?.ls === 103) {
+        && b0.hs === 160 && b1.bs === 168 && b2.ls === 103) {
         this.achievements.handleSpecialEvent(3,
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
@@ -23059,19 +23171,26 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     return false;
   }
 
-  /** 原版 IsInTileInteractionRange（Player.cs:31548）+ GetTileRegion
+  /** 原版 IsInTileInteractionRange（Player.cs:32264（1457；1456:31548））+ GetTileRegion
    * （TileReachCheckSettings.cs:53）1:1：玩家盒外扩 tileRangeX=5 / tileRangeY=3
    * （+tileBoost）的【矩形】判定（Simple 档 multiplier=1/上限 20）。非圆形距离。
-   * 旅程扩大放置范围（FarPlacementRangePower，Player.cs:18636-18645 每 tick 重算
+   * 旅程扩大放置范围（FarPlacementRangePower，Player.cs:18931-18941 每 tick 重算
    * tileRangeX/Y：×2+8 → 18/14——Main.IsJourneyMode 门）在基础半扩上 +13/+11 */
   /** Simple 档射程 XY(IsInTileInteractionRange 链):tileRangeX/Y 默认 5/3
-   *  (:2360-2364)→ 任一射程配饰【布尔门】X+3/Y+2(ApplyEquipFunctional
-   *  :12619-12622,非逐件叠加;★Y 轴是 +2 非 +3——曾两轴同 +3,竖向多够 1 格)→
-   *  旅程远置 = 现值×2+8(:18636-18643,含配饰加成后乘)→ GetRanges 钳 ≤20 →
-   *  item.tileBoost+blockRange(TB)在钳【后】加(GetTileRegion)。FAR_*_RANGE
-   *  常量(18/14)仅基座无配饰态的等价值,按公式重算覆盖配饰/远置组合 */
-  /** Player.blockRange（:2604 基 0;源全集仅两处 ++）：Builder 药水 +1（:9844）/
-   *  工具腰带 407 装备 +1（:14873-14876）。GetTileRegion 在钳 20 后统一并入——
+   *  (Player.cs:2475-2481)→ 任一射程配饰【布尔门】X+3/Y+2(UpdateEquips
+   *  :13138-13142,非逐件叠加;★Y 轴是 +2 非 +3——曾两轴同 +3,竖向多够 1 格)→
+   *  GetRanges 钳 ≤20 → item.tileBoost+blockRange(TB)在钳【后】加(GetTileRegion)。
+   *
+   *  ★改判史 **D-A-5**（2026-11-03 红队定谳 → 2026-11-03 清偿）：曾按
+   *  `(base+acc+toolbox)×2+8` 计算，乘区序与原版相反。原版序 = ResetEffects 先
+   *  `tileRangeX/Y = 5/3`（Player.cs:18931-18932）→ 旅程 ×2、+8（:18938-18941）
+   *  → UpdateEquips 槽循环内 ApplyEquipFunctional 的工具箱 1923 +1/+1（:15068-15072）
+   *  → 循环后 equippedAnyTileRangeAcc 任一射程配饰 +3/+2（:13138-13142；加法可交换）
+   *  → GetRanges 钳 ≤20（TileReachCheckSettings.cs:28-42,
+   *  Simple :15-20）→ GetTileRegion 钳【后】+TB（:53-56）。旧序在旅程+配件时
+   *  竖程 18/20 vs 原版 16/17（x 轴因钳 20 多数被掩盖）；现按原版序重排。 */
+  /** Player.blockRange（:2721 基 0;源全集仅两处 ++）：Builder 药水 +1（:10250）/
+   *  工具腰带 407 装备 +1（:15541）。GetTileRegion 在钳 20 后统一并入——
    *  tileReach 内联（各调用点 tb 实参只传 item.tileBoost 份） */
   private blockRange(): number {
     return (this.player.buffs.has(BuffType.Builder) ? 1 : 0)
@@ -23083,9 +23202,12 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
    *  (:38939/:39058/:41154);QuickMinecart 直调 GetTileRegion 不传 TB=0(:5798) */
   private tileReach(tb = 0): { x: number; y: number } {
     const eqTR = this.player.equipStats;   // ★IIIII250 快照(4 直读→1)
-    let x = 5 + (eqTR.tileRange ? 3 : 0) + (eqTR.toolboxRange || 0);
-    let y = 3 + (eqTR.tileRange ? 2 : 0) + (eqTR.toolboxRange || 0);
+    // ★D-A-5 清偿：乘区序 1:1 原版（旅程 ×2+8 在配饰/工具箱之前；钳 20 在最后，
+    //  TB 在钳后）——锚见上方 doc 块与 Player.cs:18931-18941 / :13138-13142 / :15068-15072
+    let x = 5, y = 3;
     if (this.world?.isJourney && journeyPowers().farPlacementRange) { x = x * 2 + 8; y = y * 2 + 8; }
+    x += (eqTR.tileRange ? 3 : 0) + (eqTR.toolboxRange || 0);
+    y += (eqTR.tileRange ? 2 : 0) + (eqTR.toolboxRange || 0);
     return { x: Math.min(20, x) + tb, y: Math.min(20, y) + tb };
   }
 
@@ -24572,7 +24694,13 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
    *  CheckTileBreakability==2 门）——breakTile 头门改挂 checkTileBreakabilityAt 全式
    *  （Mounts.ts,与 canKillTileAt 同域同源集）,挖掘门（本函数）与破坏门（breakTile）
    *  两面分离保持原版 CanKillTile/CheckTileBreakability 双函数结构。 */
-  private canKillTile(x: number, y: number, blockDamagedOut?: { value: boolean }): boolean {
+  /** WorldGen.CanKillTile 全式（1457 WorldGen.cs:62716-62832）；ctx = 世界态
+   *  （hardMode 旗 + 宝箱内容表），与原版读 `Main.hardMode` / `Main.tile` 同源，
+   *  无需玩家上下文。★issue#44-6 红队补强（2026-11-03）：`private`→`public`——
+   *  帮手链（MinionProj 的 UsageProxy 等价）在 vanilla 走同一个
+   *  `WorldGen.CanKillTile`，此前只能落到无 ctx 的 `Mounts.canKillTileAt` 回退
+   *  （困难模式下「巨石上方地狱熔炉」判反）。 */
+  canKillTile(x: number, y: number, blockDamagedOut?: { value: boolean }): boolean {
     return canKillTileAt(this.world.store, x, y, {
       hardMode: !!this.world.flags.hardMode,
       chestDestroyable: (cx, cy) => chestDestroyableAt(this.world.chests, cx, cy),
@@ -30366,7 +30494,14 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         if (st.wall[st.idx(x + dx, y + dy)] !== 0) return true;
       }
     }
-    if (framed) return false;   // 家具无侧/上锚（原版 Place2x1 只认支撑行/墙）
+    // ★G42-A R30 P3-4（2026-11-02）：平台族 framed 豁免——427 队伍平台/435-439 五色
+    //  队伍平台 def.framed:true 但 uccp=false（TileObjectData.cs:2141-2161 亲读：
+    //  CopyFrom 平台记录 UsesCustomCanPlace=false）→ 原版路由不走 TileObject.CanPlace
+    //  而落 PlaceThing_Tiles_BlockPlacementForAssortedThings（Player.cs:40096-40101
+    //  CustomPlace=false → else 支）= 四邻并集（:41567-41579）∪ 平台 3×3 回退
+    //  （:41652-41666,gate=TileID.Sets.Platforms 含 427/435-439）——与 19 同链。
+    //  旧 framed 早退=空中对角/邻平台续铺被拒（严于原版）。19 非 framed 不受影响。
+    if (framed && !PLATFORMS_SHEETS.has(sheet)) return false;   // 家具无侧/上锚（原版 Place2x1 只认支撑行/墙）
     // ★BJ754 TF-12（2026-11-02,issue#39）：普通块/平台邻接门 = 原版四邻并集
     //  （Player.cs:41567-41579 PlaceThing_Tiles_BlockPlacementForAssortedThings 尾
     //  else 支逐字）——四正交邻各贡献 `active() && (tileSolid ∨ IsBeam ∨ tileRope ∨
@@ -32920,7 +33055,8 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
    *  LastFoundHouse 缓存（WorldGen.LastFoundHouse :4237 静态位对应物，不入存档；
    *  任务蓝本写 world.lastFoundHouse,为守批2文件边界落 Game 私有字段——同
    *  homelessSpawnTimeout 先例;原版 clearWorld :6975 归零语义在下方 clearWorld 段
-   *  同步,StartNight/StartDay 均不清它(缓存非节流,字面核实 cs:64699-64712)。 */
+   *  同步,StartNight/StartDay 均不清它(缓存非节流,字面核实 1456 cs:64699-64712/
+   *  1457 :66189-66342 全函数——R31-F1 重锚日 0 命中亲证)。 */
   private lastFoundHouse: { x: number; y: number } | null = null;
   /** ★SW-BO1 2026-09-07（BJ2 债①清偿）：WorldGen.prioritizedTownNPCType（WorldGen.cs:4159
    *  静态位）跨帧优先型锁。写位①每 tick UpdatePrioritizedTownNPC（:72168-72183,自 NPC
@@ -39179,7 +39315,10 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     // ★BJ749-③：ShouldSpawnInvasionEnemies 深度门用 NPC.sHeight=1200 常量
     //  （NPC.cs:6793,Invasion.ts:181 `position.Y < worldSurface*16 + sHeight`）——
     //  旧相机窗高使小窗/放大时入侵怪纵深带变窄
-    const invaders = shouldSpawnInvasionEnemies(w, p.cx, p.cy, 1200,
+    const invaders = shouldSpawnInvasionEnemies(w, p.x, p.y, 1200,
+      // ★G41-A（bj749a D-2）：原版 SetSpawnFlags :404 传 player.position（顶边左,
+      //  X/Y 双锚）——townNpcXs 窗比较 `|position.X - npc.Center.X| < 3000`（:464）
+      //  同读 position.X;旧中心锚恒偏半身（X +10/Y +21px）。
       this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).map((n) => (n as TownNPC).cx));
     const activeIds = new Set<number>();
     // 月事件选怪需要 CountNPCS（场上同 id 数量）与 Boss 族 npcSlots 总和
@@ -39416,16 +39555,30 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
         && tn.npcKey !== 'skeleton_merchant'
         && Math.abs(tn.cx - p.cx) < 120 * TILE && Math.abs(tn.cy - p.cy) < 75 * TILE ? 1 : 0);
     }, 0);
-    const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
-      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx,
-      this.peaceCandleNear, p.buffs.has(BuffType.Sunflower),
-      p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle),
-      townNPCs, w.clock.isDay,
-      !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
-      !!w.clock.bloodMoon,
-      p.buffs.has(BuffType.Invisibility),          // 隐身（:611-615）
-      p.equipStats.anglerSetSpawnReduction,       // 渔夫套（:627-630）
-      this.scene?.zoneShadowCandle ?? false);     // ShadowCandle(:328-333)
+    // ★issue#46-N01（P1,2026-11-03）：具名入参——旧位置实参尾部三布尔
+    // （Invisibility/anglerSetSpawnReduction/zoneShadowCandle）与形参
+    // （shadowCandle/invis/anglerSet）同序错位（三者皆 boolean，tsc 零告警：
+    // 隐身误吃影子蜡烛槽、渔夫套吃隐身乘区、真影子蜡烛吃渔夫乘区）。
+    // 具名对象把字段身份交给编译器，生产调用不再存在位置可错位。
+    const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRateNamed({
+      playerYpx: p.y,                     // ★G41-A：深度带全读 position.Y（顶边）
+      nearbySlots: nearby,
+      waterCandle: this.heldWaterCandle || this.waterCandleNear,
+      sHeightPx,
+      playerXpx: p.cx,
+      peaceCandle: this.peaceCandleNear,
+      sunflower: p.buffs.has(BuffType.Sunflower),
+      calmed: p.buffs.has(BuffType.Calming),
+      battle: p.buffs.has(BuffType.Battle),
+      townNPCs,
+      dayTime: w.clock.isDay,
+      zoneEvil: !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
+      bloodMoon: !!w.clock.bloodMoon,
+      invisibility: p.buffs.has(BuffType.Invisibility),              // 1457 NPC.cs:703-710
+      anglerSetSpawnReduction: p.equipStats.anglerSetSpawnReduction, // 1457 NPC.cs:718-721
+      zoneShadowCandle: this.scene?.zoneShadowCandle ?? false,       // 1457 NPC.cs:400/:420-425
+      centerYpx: p.cy,   // ★G41-A（bj749a D-2）: :802 deep 门读 Center.Y（深度带用顶边 p.y）
+    });
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -39449,7 +39602,8 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     //  (MOD_SPAWN_RULES:zone/water/mult 门;scene 群系旗直读;命中即 spawnNpc)
     const modPicked = this.trySpawnModEnemy(p, rng, viewHalfW, viewHalfH);
     if (modPicked) return;
-    const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
+    const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH,
+      p.x, p.y);   // ★G41-A（bj749a D-2）：spawnArea 锚=position 顶边左（GetSpawnArea :958）;Center 参=SetSpawnFlags/checkNotSpawningOnScreen
     if (!picked) return;
     // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
     if (picked.vanillaId === 453) {
@@ -45139,15 +45293,28 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
   // ================= GameHooks 实现 =================
 
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：玩家 zone + 季节 + 血月 + 风 */
-  dropContext(): DropExtras {
-    const s = this.scene;
+  dropContext(who?: LootPlayerCtx | null): DropExtras {
+    // ★issue#46 N17：群系条件必须读**掉落结算选中的最近玩家**的 zone，而非恒读房主
+    //  scene。原版 `DropAttemptInfo.player` = NPCLoot 的 closestPlayer
+    //  （Player.FindClosest；Conditions.cs:829-861 SoulOfLight/Night 直读
+    //  `info.player.ZoneHallow/ZoneCorrupt/ZoneCrimson`，钥匙/悠悠球族同源）。
+    //  本仓单人（lootPlayers 缺席）closest=null → 原 scene 快路零变化；联机远端槽
+    //  无群系镜像（LootPlayerCtx 只带位置）→ 按该玩家中心位真实扫描 169×124 窗口
+    //  （scanScene 与本地玩家同源，非"字段改名"占位）。
+    const net = this.net;
+    const remote = who && net?.active && who.slot !== net.mySlot ? who : null;
+    const s = remote ? scanScene(this.world, remote.x, remote.y, 0) : this.scene;
     const c = this.world.clock;
     return {
       zoneHallow: s.zoneHallow, zoneCorrupt: s.zoneCorrupt, zoneCrimson: s.zoneCrimson,
       zoneJungle: s.zoneJungle, zoneSnow: s.zoneSnow, zoneDesert: s.zoneDesert,
       zoneDungeon: s.zoneDungeon, zoneBeach: s.zoneBeach,
       bloodMoon: !!c.bloodMoon, halloween: !!c.halloween, xmas: !!c.xMas,
-      windy: Math.abs(this.world.weather.windSpeedCurrent) > 0.5,
+      // ★issue#46 N11：原版 `Main.WindyEnoughForKiteDrops => Math.Abs(windSpeedTarget)
+      //  >= _maxWind`（1457 Main.cs:3003/:67637 `_maxWind = 0.4f`），Conditions.cs:1250
+      //  直接消费；旧实现读 windSpeedCurrent 且阈值 0.5 → ①0.45 档漏风筝 ②风速
+      //  回落/追随途中 current 仍高时错发（0/0.6）。判据单源 = NpcDrops 纯函数。
+      windy: windyEnoughForKiteDrops(this.world.weather.windSpeedTarget),
     };
   }
 
@@ -47537,6 +47704,73 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     return n;
   }
 
+  /** ★issue#46 N16：缺结构世界 Boss 补偿掉落 + 清普查旗（1457 NPC.cs:79689-79706
+   *  分支体 + :80375-80434 五实现）。
+   *
+   *  原版 NPCLoot 线性序：DropItems → DoDeathEvents（钱/心星/药水）→【本补偿
+   *  :79686-79707】→ DropMoney(:79712) → DropHeals(:79713)。本仓钱/心星/药水在
+   *  Enemy 死亡链内先结算，onEnemyKilled 已在其后 —— 补偿件与规则掉落/宝袋同拍落地
+   *  （掷源 Main.rand → Math.random，本仓掉落族惯例；不扰动 Enemy 侧 RNG）。
+   *
+   *  门谱（逐条对齐原文）：
+   *   - IsNPCValidForBestiaryKillCredit（:79689 外层 if + :79716-79729 本体）——
+   *     121 假、世吞 13/14/15 需 boss 实例旗，其余恒真（Bestiary.ts 同源）。
+   *   - 雕像产怪：NPCLoot 头部雕像门整单 return（:79648-79654）→ 不补偿。
+   *   - netPuppet：掉落权威在房主端，访客傀儡不结算（原版 netMode==1 同义）。
+   *
+   *  逐条（物品 id/数量/清旗，全部按 1457 原文；★石巨人 **不清** noTemple）：
+   *   - 克眼 4 + noAltars   → 5533 猩红 / 5532 腐化，清 noAltars（:80417-80428）
+   *   - 世吞 13/14/15 或 克脑 266 + noDungeon → 砖 1 堆 + 墙 3 堆，清 noDungeon
+   *     （:80375-80399；`Next(3)` 三色组，砖 ×500-600，墙 ×400-500）
+   *   - 骷髅王 35 + noHellforge → 221，清 noHellforge（:80430-80434）
+   *   - 世花 262 + noTemple → 1294、1292、1101×500-600、5376×1200-1500，清 noTemple
+   *     （:80408-80415）
+   *   - 石巨人 245 + lowTiles（**不是 noTemple**）→ 机关材料 ×5-10（:80401-80406）。
+   *     反编译该函数有平铺痕迹：`Next(4)` 后嵌套三元实际可达域 = 0→1149(长矛机关)
+   *     /非0→1146(飞镖机关)，1147/1148 两臂恒不可达——按原文执行，不推断"均匀四选"
+   *     （issue 明示不据此推断概率）。
+   */
+  skyblockBossCompensation(enemy: Enemy): void {
+    const id = enemy.vanillaId;
+    // ★issue#46 N16 红队勘正（2026-11-03）：雕像门是**条件式双门**，不是裸
+    // `spawnedFromStatue` 早退——原版 NPCLoot :79662 只在
+    // `NoEarlymodeLootWhenSpawnedFromStatue[type]`（NPCID.cs:4801 = {480,82,86,170,
+    // 180,171}）或 `StatueSpawnedDropRarity[type] != -1`（NPCID.cs:4797 表）时拦。
+    // 本补偿覆盖的类型集 {4,13,14,15,266,35,262,245}（NPC.cs:79697-79718）与两张
+    // 表**均不相交**，故雕像产的同型怪在原版照走补偿分支；旧裸门比原文窄。
+    // 注：vanilla 雕像产怪表不含 Boss，正常流程不可达（仅 mod/脚本/调试可达）。
+    if (id == null || enemy.netPuppet) return;
+    if (!isNpcValidForBestiaryKillCredit(id, enemy.killBossFlag)) return;
+    const w = this.world;
+    // 物品表/数量/清旗单源在 NpcDrops.rollSkyblockCompensation（纯函数，可测可变异）
+    const plan = rollSkyblockCompensation({
+      type: id, crimson: !!w.crimson,
+      noAltars: !!w.skyblockNoAltars, noDungeon: !!w.skyblockNoDungeon,
+      noTemple: !!w.skyblockNoTemple, noHellforge: !!w.skyblockNoHellforge,
+      lowTiles: !!w.skyblockLowTiles,
+    });
+    if (plan.drops.length === 0) return;
+    // 原文序：清旗在各实现函数首行（:80376/:80409/:80418/:80431），先于 Item.NewItem
+    for (const f of plan.clear) this.clearSkyblockCensus(f);
+    for (const d of plan.drops) {
+      const key = VANILLA_ITEM_KEY_BY_ID[d.id];
+      if (!key) { console.warn(`[NpcDrops] 物品 ${d.id} 无 key 映射，跳过`); continue; }
+      this.spawnDrop(enemy.cx, enemy.cy, key, d.n);   // 中心锚；vx/vy 缺省=逐件初速掷
+    }
+  }
+
+  /** 清 Skyblock 普查旗（= 原版 `WorldGen.Skyblock.noX = false`）：运行时权威旗 +
+   *  World 投影同步写（原版单静态源；本仓投影每 30t 会被下一轮 Calculate 重算覆盖，
+   *  与原版"下一轮全图巡检重新置位"同构）。 */
+  clearSkyblockCensus(flag: 'noAltars' | 'noDungeon' | 'noTemple' | 'noHellforge'): void {
+    if (this.skyblockRuntime) this.skyblockRuntime.flags[flag] = false;
+    const w = this.world;
+    if (flag === 'noAltars') { w.skyblockNoAltars = false; this._worldNoAltars = false; }
+    else if (flag === 'noDungeon') w.skyblockNoDungeon = false;
+    else if (flag === 'noTemple') w.skyblockNoTemple = false;
+    else w.skyblockNoHellforge = false;
+  }
+
   /** opts.petrifyBypassInteractionGate（H2-2,2026-09-04）：624 侏儒石化路径专用——
    *  原版石化在 AI_003 内直调 RegisterKill + CountKillForBannersAndDropThem
    *  （NPC.cs:56456-56463,netMode!=1 域）,【不经 checkDead→NPCLoot】,因此天然
@@ -47557,6 +47791,10 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);
+    // ★issue#46 N16：缺结构世界 Boss 补偿掉落 + 清旗（原版 NPCLoot :79686-79707，
+    // 落在 DropItems/DoDeathEvents 之后、DropMoney/DropHeals 之前；本仓死亡链的
+    // 钱/心星已先结算，故在本口尾部补——语义/掷源见 skyblockBossCompensation 头注）
+    if (enemy) this.skyblockBossCompensation(enemy);
     // 小丑(109)击杀记账（checkDead case 109 :80194-80195 downedClown=true）——
     // 裁缝小丑套装 503-505 上架门（R14-C10；此前旗仅存档解析,击杀不置位）。
     // ★双键：downedClown=原版名（.wld 导出 getter WldHeaderFields:123 直读此键,
@@ -49384,8 +49622,13 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
       && (gTile === T.GRASS || gTile === hallowGrassT || gTile === mowedGrassT || gTile === hallowMowedT)) {
       // 上岸金鱼块：1/400 金蚯蚓 448 → 2/3 蚯蚓 357 → 1/400 金金鱼 593 → 兜底 230
       // 洞穴层（deeperThanRockLayer）先走 gem 分支：1/5 松鼠、再 1/5 兔子（:2289-2298）
-      const lavaLineT = this.world.lavaLine || st.h - 200;
-      if (groundY >= this.world.rockLevel && groundY <= lavaLineT) {
+      // ★issue#46 D-C-4 清偿（2026-11-03）：门是 `y <= UnderworldLayer`
+      // （NPC.cs:2381 `raining && spawnTileY <= UnderworldLayer`），UnderworldLayer =
+      // maxTilesY−200（Main.cs:2886）——不是 World.lavaLine（GenVars 熔岩线）。
+      // 旧式 `lavaLine || h-200` 在生成过的世界恒取错线 → (lavaLine, h−200] 整段
+      // 漏 gem 松鼠/兔。单源 World.underworldLine。
+      const underworldT = this.world.underworldLine;
+      if (groundY >= this.world.rockLevel && groundY <= underworldT) {
         const gr = Math.random();
         if (gr < 0.2) { spawnVanilla(getGemSquirrelToSpawn(Math.random), tx * TILE + 8, groundY * TILE); return; }
         if (gr < 0.4) { spawnVanilla(getGemBunnyToSpawn(Math.random), tx * TILE + 8, groundY * TILE); return; }
@@ -49399,7 +49642,8 @@ case 2756: { // 性别转换药水（Player.cs:43519-43544）:Male 翻转
     // 草/土格、昼夜均可：1/3×1/5 gem 松鼠 + 2/3×1/5 gem 兔子（合计 1/5）。
     // 选色纯加权表（:5587-5645，与就近宝石无关）
     if (!surfaceWater && (gTile === T.GRASS || gTile === T.DIRT)
-      && groundY >= this.world.rockLevel && groundY <= (this.world.lavaLine || st.h - 200)) {
+      // ★issue#46 D-C-4（同上）：`y <= UnderworldLayer`（NPC.cs:2557-2562），非 lavaLine
+      && groundY >= this.world.rockLevel && groundY <= this.world.underworldLine) {
       const roll = Math.random();
       if (roll < 1 / 3) {
         if (Math.random() < 0.2) {
@@ -54871,7 +55115,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
         // 方向箭头显示门（Main.cs:46058-46065）：锁向下一格须 !active 或可替换块，
         // 否则传 null——渲染层见 null 即不画箭头（SmartCursor.smartCursorArrowAllowed）
         const arrow = sc.lockedDirection
-          && smartCursorArrowAllowed(this.world.store, sc.x, sc.y, sc.lockedDirection)
+          // ★issue#44-3：Main.tileCut 走内部 id 域镜像（IDG-T2）；缺省 decor 回退仅测试面
+          && smartCursorArrowAllowed(this.world.store, sc.x, sc.y, sc.lockedDirection,
+            (t) => TILE_CUT.has(t))
           ? sc.lockedDirection : null;
         return { x: sc.x, y: sc.y, smart: true as const, arrow };
       }
@@ -55725,6 +55971,18 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           world.store.netReporter = (op) => vc.reportTileOp(op);
           // ★P2-A（2026-10-25）：傀儡受击上报（Enemy.hurt 傀儡分支 → msg28 DamageNPC）
           entityNet.reportStrike = (netId, rawDmg, kbx, kby, crit) => vc.sendStrike(netId, rawDmg, kbx, kby, crit);
+          // ★BJ755-A T2（bj746a D4 清偿,2026-11-02）：HealProj 到位治疗上报（结算位
+          //  → msg66 HealPlayer,Projectile.cs:28943-28950 发送位同构）。槽位解析：
+          //  目标===本地玩家 → mySlot;远端代理 → __netSlot（simulateRemotePlayers
+          //  挂的镜像键）。SW 原生协议（ClientNet）无 66 通道——该面仅 vanilla
+          //  interop 注入（SW 原生房 heal 同步=登记债 D-BJ755-2）。
+          entityNet.reportHeal = (target, amount) => {
+            const slot = target === this.player
+              ? this.net?.mySlot
+              : (target as unknown as { __netSlot?: number }).__netSlot;
+            if (slot == null || slot < 0) return;
+            vc.sendHeal66(slot, amount);
+          };
           this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
             if (settled) return;
             settled = true;
@@ -55792,6 +56050,16 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
             p.dead = true;
             this.settlePlayerDeath(false);
           }
+        },
+        // ★BJ755-A T2（2026-11-02）：msg66 己槽收款（他人 HealProj 治疗本端——服务器
+        //  中继;自己发的 66 中继排除发送者无回声）。MessageBuffer.cs:3036-3042 1:1：
+        //  statLife+=amount 钳 statLifeMax2 + HealEffect(broadcast:false)（=绿飘字,
+        //  HealProj 本地结算同款 #40E080 通道——战斗飘字复用,渲染文件零改动）。
+        onPlayerHeal: (amount) => {
+          const p = this.player;
+          if (!p || p.dead) return;   // 原版对 dead 无特判,但 hp 钳后飘字无消费面;防御
+          p.hp = Math.min(p.maxHp, p.hp + amount);
+          this.addDamageNumber(p.cx, p.y, amount, false, '#40E080');
         },
         // CreativeUnlocks(5) 旅程服全量研究进度（服务器权威直写——幂等合并,已满不动）
         onJourneyUnlocksBulk: (entries) => {
@@ -56021,6 +56289,26 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       proxy.team = rp.team;
       proxy.hp = rp.hp;
       proxy.baseMaxHp = Math.max(1, rp.maxHp);
+      // ★BJ755-A T1（bj739a D-① 清偿,2026-11-02）：msg50 远端 buff 栏 → proxy.buffs
+      //  裸写镜像（buffType[n]=type; buffTime[n]=60 的 BuffState 等价——apply 族会
+      //  走 AddBuff 逻辑污染镜像,见 stats/Buffs.applyRemoteBuffMirror 头注）。
+      //  变更检测=44 元素直比（reader 原位改写同数组,snapshot 拷贝比对;变更才重放
+      //  ——含「全零拍清空」:对端 buff 全消亦须清镜像,摘守卫陷阱）。渲染消费面
+      //  （头顶 buff 图标/debuffTint）按任务书 item4 分期不在本刀——此为协议存储
+      //  面镜像（对端 buff 集 1:1 落代理栏）。
+      {
+        const srcB = rp.buffTypes;
+        if (srcB) {
+          const metaB = proxy as unknown as { __netBuffSnap?: number[] };
+          const prevB = metaB.__netBuffSnap;
+          let diffB = !prevB || prevB.length !== 44;
+          if (!diffB && prevB) for (let i = 0; i < 44; i++) if (prevB[i] !== srcB[i]) { diffB = true; break; }
+          if (diffB) {
+            metaB.__netBuffSnap = srcB.slice();
+            applyRemoteBuffMirror(proxy.buffs, srcB);
+          }
+        }
+      }
       // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）。
       // review C10：仅在外观串变化时解析（msg4 才变）——60TPS×每玩家 JSON.parse 纯浪费
       {

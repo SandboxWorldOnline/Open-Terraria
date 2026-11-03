@@ -18,6 +18,9 @@ const MATRIX = [
   { key: 'chest', label: 'P3-C 箱子开箱（40 槽内容）', script: 'scripts/_vanilla-p3-chest.mjs', timeout: 300 },
   { key: 'pvp', label: 'P2-F PvP 实战（双开 hostile 互打）', script: 'scripts/_vanilla-p2-pvp.mjs', timeout: 420 },
   { key: 'liquid', label: 'P3-B 液体扰动（注水→模拟→中继→store）', script: 'scripts/_vanilla-p3-liquid.mjs', timeout: 300 },
+  // ★BJ755-A T3（2026-11-02）：P3-D 回城药双锚+远端门（g36a D-⑫/bj738a D3 尾款 rig 验收）
+  //   ——探针顺带 T1 msg50/T2 msg66 实弹（三账判据见 _vanilla-p3-por.mjs 头注）。
+  { key: 'por', label: 'P3-D 回城药双锚+远端门（msg13 c3[2]/[6]）', script: 'scripts/_vanilla-p3-por.mjs', timeout: 420 },
 ];
 
 // 前置检查：桥+rig 端口
@@ -42,7 +45,9 @@ for (const item of MATRIX) {
   log(`\n▶ [${item.key}] ${item.label}`);
   const t0 = Date.now();
   const pass = await new Promise((resolve) => {
-    const p = spawn('node', ['tools/run-diag.mjs', item.script], {
+    // ★BJ755-A：--timeout 透传 run-diag（其缺省看门狗 120s 会截杀 >2min 的探针——
+    //   旧矩阵容许 timeout 300/420 但从未生效,长探针（por/duo/pvp）全靠跑得快侥幸）
+    const p = spawn('node', ['tools/run-diag.mjs', `--timeout=${item.timeout * 1000}`, item.script], {
       cwd: process.cwd(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });

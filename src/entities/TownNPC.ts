@@ -1709,7 +1709,10 @@ export class TownNPC extends Entity {
       flags: w.flags,
       x: this.cx, y: this.cy,
       worldSurfaceTile: w.groundLevel, rockLayerTile: w.rockLevel,
-      underworldTileY: w.lavaLine || w.h - 200,
+      // ★issue#46-N12（2026-11-03）：地狱顶 = Main.UnderworldLayer = maxTilesY-200
+      //（Main.cs:2886）；lavaLine 是世界生成熔岩线（TerrainPass waterLine+Next(50,79)），
+      //  非同一条线。单源 World.underworldLine（NpcDrops 活火块判据严格 >）。
+      underworldTileY: w.underworldLine,
       maxTilesX: w.w, maxTilesY: w.h,
       lifeMax: this.maxHp, friendly: true, boss: false,
       damage: VANILLA_NPCS[String(this.vanillaId)]?.damage ?? 10,

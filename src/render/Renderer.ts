@@ -1260,7 +1260,7 @@ import {
 import { BOSS_BAG_IDS } from '../data/vanillaBossBags';   // ★BJ603 掉落环绕光斑集（ItemID.Sets.BossBag）
 import { globalTimeWrappedHourly, gameTickCount } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
 import { drawInfernoRings, ensureFlameRingImage, type FlameRingPlayer } from './InfernoRing';   // ★BJ579 狱火药水火圈
-import { CRITTER_CATCH_BY_NPC } from '../data/critters';   // ★BJ739 B12 狩猎 friendly 谓词（NPC.catchItem>0 面）
+import { CRITTER_CATCH_BY_NPC } from '../data/critters';   // ★BJ756 狩猎 friendly 谓词（NPC.catchItem>0 面,hunterPotionAppearsFriendly 单源）
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
@@ -5822,6 +5822,12 @@ export class Renderer {
     this.whipLineAddBatch.length = 0;
     this.towerGlowQueue.length = 0;   // ★BJ509 四塔 GlowMask 残影队列逐帧重建（drawNpcGlow vel4 收集,7d''' 消费）
     this.npcWhiteLiftQueue.length = 0;   // ★BJ504 白提亮 40% 复绘队列逐帧重建（drawEnemy 收集,7d' 消费）
+    this.hunterFloorQueue.length = 0;   // ★BJ756 Hunter 钳底剪影队列逐帧重建（drawEnemy/drawTownNPC 收集,7b'' 消费;flush 不排空=GL 失败 2D 重放同源）
+    // ★BJ756 改判史（2026-11-02,g36a 任务书 T5/bj739a D-③）:CanApplyHunterPotionEffects
+    //  门（NPC.cs:92137 = Main.SceneMetrics.PerspectivePlayer.detectCreature——Player.cs:10111
+    //  buffType[17] 置位、:18496 每帧复位再派生）= 本地玩家 Hunter 药水在场。B12 近似层
+    //  同门（drawBuffHighlights buffs.has(Hunter)）随近似层退役收编至此。
+    this.hunterFloorActive = player.buffs.has(BuffType.Hunter);
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this.heldProjCarrierQueue.length = 0;   // ★BJ682 heldProj 载体队列逐帧重建（Arrow.draw 630 收集,7e⁴ 前冲刷）
     this._mouseX = mouseX;
@@ -7122,8 +7128,9 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // 6b. 洞穴探险/危险感/狩猎/群系视觉高亮（Main.cs:49500 段 Spelunker/Dangersense 溢色近似：
-    //     全屏 tile 扫描 + 呼吸 alpha；狩猎对小动物画框）
+    // 6b. 洞穴探险/危险感/群系视觉高亮（Main.cs:49500 段 Spelunker/Dangersense 溢色近似：
+    //     全屏 tile 扫描 + 呼吸 alpha。★BJ756:Hunter 面已迁 7b'' 真着色剪影 pass,
+    //     此处仅存 hunter 旗早退门）
     this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts, entities);
 
     ctx.restore();
@@ -7249,6 +7256,11 @@ export class Renderer {
         //  位 2D 跳过,失败/旗关=原位 2D 重放(烘焙幂等)。
         this._mlFloorGl = this.drawMoonLordFloorGL(entities, cam, viewW, viewH,
           lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+        // ★gladd 面⑦同型（BJ756,2026-11-02）:Hunter 钳底剪影 GL 会话——sink 式
+        //  （驱动器武装 _hunterFloorEmitGL,共用 applyHunterTintFloor 烘焙循环）;
+        //  成功=7b'' 位 2D 跳过,失败/旗关/无 Hunter=原位 2D 重放（烘焙幂等,队列不排空）。
+        this._hunterFloorGl = this.drawHunterFloorGL(cam, viewW, viewH,
+          lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
         // ★gladd 面⑧（2026-10-28,task#22）:茎蔓下限色 GL 会话——⑦ sink 同型;
         //  成功=7c 位 2D 跳过,失败/旗关/水罩活跃=原位 2D 重放。
         this._bvineGl = this.drawBrightVinesGL(entities, cam, z,
@@ -7361,6 +7373,22 @@ export class Renderer {
     } else {
       this.c10eCompositeIntoHud();   // ★C10e 加算垫底扫尾（黑晕域按需折）
       this.applyMoonLordLightFloor(entities, cam, viewW, viewH,
+        lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    }
+
+    // 7b''. ★BJ756 改判史（2026-11-02,g36a 任务书 T5）:Hunter 药水逐通道钳底剪影
+    //      （NPC.cs:92230-92258——npcColor 逐通道 max(tint×light, floor),Main.cs:23115
+    //      单点光采样;本仓光照=compositeLight 合成期全屏乘 → 合成后按
+    //      max(0,floor−tint×light) 差值加性补齐,applyMoonLordLightFloor「合成后补差」
+    //      范式同构）。暗场全黑处敌怪保底 (255,50,50)/友好族 (50,255,50) 可见
+    //      = 原版「黑暗中狩猎显形」体验面;B12 红绿框近似层（乘光前画框=暗处不透,
+    //      2026-10-31 止血层）本刀退役。
+    // ★gladd 面⑦同型:GL 会话成功（含零队列免开）=2D 跳过;失败/旗关=原位 2D 逐位。
+    if (this._hunterFloorGl !== null) {
+      this._hunterFloorGl = null;   // 帧界单消费（同⑦）
+    } else {
+      this.c10eCompositeIntoHud();   // ★刀A:回退支按需折（加算面黑晕域）
+      this.applyHunterTintFloor(cam, viewW, viewH,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     }
 
@@ -13479,6 +13507,41 @@ export class Renderer {
             }
           }
         }
+        // ★BJ756 改判史（2026-11-02,g36a 任务书 T5）:Hunter 钳底剪影收集位——本体
+        //  绘制链完成后捕获当帧帧矩形/变换（npcWhiteLiftQueue 同形制=与主 pass 同
+        //  变量零漂移）,7b'' applyHunterTintFloor 消费（NPC.cs:92230-92258 逐通道
+        //  钳底;门=CanApplyHunterPotionEffects+lifeMax>1+canDisplayBuffs :92144）。
+        //  掩模图=本体绘制图:xnaColor 合成精灵（彩色族,xnaCombined 近似族内）/其余
+        //  裸帧纹理 r.img（dbTint 乘区由差值式 max(0,floor−tint×light) 消化,不进
+        //  掩模——双重染色防）。排除族:恒色 GetAlpha 早退族 516/289/440/30/665/25/
+        //  59/60/694（NPC.cs:94652-94758 恒色支弃用输入色=原版钳底对其无效果;
+        //  694-ai3==3 伪装态常规支连带排除=登记边界）+behindTiles（D18-F8 判例:顶层
+        //  复绘顶穿前景 tile 遮挡语义;原版在其层内钳底=登记边界）。
+        //  ga 逐路径=本体 drawImage 实际 globalAlpha:xnaColor/duke 预乘对=1、
+        //  bodyTint370 染色=1−spawnAlpha/255、通用=半透族×出生 ramp（boost 烘焙失败
+        //  回落支/tinted 兜底支的 ga 差=退化路径登记）。
+        if (this.hunterFloorActive && e.canDisplayBuffs && e.maxHp > 1
+          && e.vanillaId !== 516 && e.vanillaId !== 289 && e.vanillaId !== 440
+          && e.vanillaId !== 30 && e.vanillaId !== 665 && e.vanillaId !== 25
+          && e.vanillaId !== 59 && e.vanillaId !== 60 && e.vanillaId !== 694
+          && !this.isBehindTilesEnemy(e)) {
+          this.hunterFloorQueue.push({
+            img: xnaColor ? xnaColor.c : r.img,
+            sx: xnaColor ? xnaColor.x : r.sx, sy: xnaColor ? xnaColor.y : r.sy,
+            sw: xnaColor ? xnaColor.w : r.sw, sh: xnaColor ? xnaColor.h : r.sh,
+            cx: e.cx, cy: e.cy, rot: gRot, mirror: gMirror, scale,
+            // 彩色族烘焙失败兜底支（tinted 两步式）绘于 anchorY,其余路径 bodyY
+            by: (drawColor && drawColor[3] > 0 && !xnaColor) ? anchorY : bodyY,
+            ga: (xnaColor || boost370) ? 1
+              : bodyTint370 ? (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)
+                : ((e.vanillaId != null && ((e.vanillaId >= 454 && e.vanillaId <= 459)
+                  || e.vanillaId === 521)) ? 150 / 255 : 1)
+                  * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255),
+            tint: dbTint ? [dbTint[0], dbTint[1], dbTint[2]] : null,
+            ...(e.ichorT > 0 ? { ichor: true } : {}),   // :92226-92229 替换先于钳底支
+            floor: Renderer.hunterPotionAppearsFriendly(e) ? [50, 255, 50] : [255, 50, 50],
+          });
+        }
         // ★BJ504（2026-10-05）GetAlpha 白提亮 40% 收集（NPC.cs:94679-94684,type 395/519
         //  同族,BJ503 登记债清偿）：原版两型 GetAlpha 早退支 tint=lerp(光照,White,0.4)
         //  （绕过缺省尾 num/num5;两型 SetDefaults alpha=0 → 与缺省面仅差白提亮项）。
@@ -13696,6 +13759,11 @@ export class Renderer {
    *  合成结果整幅快照,destination-in 单 drawImage 恢复合成 α。本布永不落主画布
    *  （不进 shim 登记域,Z4/BJ429-D4 刮擦布纪律同款）。 */
   private mlFloorMaskScratch: HTMLCanvasElement | null = null;
+  /** ★BJ756 Hunter 钳底剪影 scratch（applyHunterTintFloor，NPC.cs:92230-92258 族） */
+  private hunterFloorScratch: HTMLCanvasElement | null = null;
+  /** ★BJ756 剪影掩膜快照布（BJ481 判例同款:destination-in 整画布算子,单 drawImage
+   *  恢复合成 α——多精灵/彩色合成掩模防自擦除）。永不落主画布（刮擦布纪律同 ⑦）。 */
+  private hunterFloorMaskScratch: HTMLCanvasElement | null = null;
   /** 自发光弹光照地板账本（raiseSelfLuminousProjLight 抬亮过的格,四元组平铺
    *  idx,r,g,b——compositeLight 后 restoreSelfLuminousProjLight 按此还原原值） */
   private _lumFloorTouched: number[] = [];
@@ -17107,6 +17175,168 @@ export class Renderer {
     }
   }
 
+  /** ★BJ756 改判史（2026-11-02,g36a 任务书 T5/bj739a D-③ 真着色面）：AppearsFriendly
+   *  ToHunterPotion 单源（NPC.cs:92126-92135）——`friendly || catchItem>0 ||
+   *  (damage==0 && lifeMax==5)`,HunterPotionFriendlyOverride {689:false}（NPCID.cs:4462）
+   *  强制敌对。B12 近似层（红/绿框,2026-10-31）同谓词随近似层退役收编至此。
+   *  ★B12 近似层勘误翻案：城镇 NPC 在近似层走 def?.friendly（TownNPC 无 def 字段）
+   *  →恒红框;原版 NPC.friendly 城镇族恒 true → 钳 (50,255,50) 绿。真面按原版判绿。 */
+  static hunterPotionAppearsFriendly(
+    e: { vanillaId?: number | null; maxHp?: number; def?: { friendly?: boolean; damage?: number } | object },
+  ): boolean {
+    if (e instanceof TownNPC) return true;                    // 城镇族 friendly 恒 true
+    if (e.vanillaId === 689) return false;                    // HunterPotionFriendlyOverride（NPCID.cs:4462）
+    const d = e.def as { friendly?: boolean; damage?: number } | undefined;
+    return !!d?.friendly                                      // :92128 friendly
+      || ((CRITTER_CATCH_BY_NPC[e.vanillaId ?? -1] ?? 0) > 0) // :92128 catchItem > 0
+      || ((d?.damage ?? 1) === 0 && e.maxHp === 5);           // :92128 damage==0 && lifeMax==5
+  }
+
+  /** ★BJ756 改判史（2026-11-02,g36a 任务书 T5 清偿,bj739a D-③/bj739 B12 真着色缺口）
+   *  Hunter 药水逐通道钳底剪影 pass——原版 NPC.cs:92230-92258（GetNPCColorTintedByBuffs
+   *  尾段）`CanApplyHunterPotionEffects(:92137) && lifeMax>1` 把 npcColor 逐通道钳底
+   *  AppearsFriendlyToHunterPotion ? (50,255,50) : (255,50,50)——npcColor = 单点光照
+   *  （Main.cs:23115 Lighting.GetColor(中心格)）× debuff 乘区（:92148-92229）,钳底
+   *  作用其上 ⇒ 全黑暗保底可见（原版「黑暗中仍见红/绿」体验面）、暗化 debuff
+   *  （poison R×0.65 等）即使全亮也被抬回 floor。
+   *
+   *  本仓光照 = compositeLight 合成期全屏乘（精灵调制期无法表达钳底——BJ739 近似层
+   *  病灶:乘光前调制会被乘暗抹掉,Enemy.debuffTintRGB :1865 注 C 类登记即此）。
+   *  等价拆差（applyMoonLordLightFloor「合成后补差」同构范式,16981 先例）:
+   *    vanilla = sprite×max(tint×light, floor)
+   *    本仓已绘 = sprite×tint×light（tint 在精灵调制期,light 在合成期）
+   *    → 差值加性补 = sprite×max(0, floor − tint×light)
+   *  掩模 = hunterFloorQueue 本体位快照（drawEnemy/drawTownNPC 捕获,dye/scale/朝向
+   *  与主 pass 同变量=零漂移）;三步烘焙（本体重绘→multiply 差值色→destination-in
+   *  掩膜快照恢复 α,BJ481 判例）→ 'lighter' 加性 blit（GL 会话=⑦ sink 同款单源）。
+   *  光照采样 = 实体中心格单点（:23115 同粒度）;光图区域外 = 黑（⑦ 判例同口径）。
+   *  已知边界（备案登记,见刀报告）:①xnaColor 彩色族掩模含 ka 基底项=xnaCombined
+   *  近似族内误差;②水罩（_veilActive）无 escapeVeil 镜像（⑦ 同款登记）;③behindTiles
+   *  /恒色 GetAlpha 族/自绘 boss 族不入队（捕获位门控,详见捕获点注）。 */
+  private applyHunterTintFloor(
+    cam: Camera, viewW: number, viewH: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): void {
+    if (this.fullbright) return;                    // 开灯模式全屏原色,钳底无意义（⑦ 同门）
+    const q = this.hunterFloorQueue;
+    if (!q.length) return;
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const scratch = this.hunterFloorScratch ??= document.createElement('canvas');
+    const sctx = scratch.getContext('2d');
+    if (!sctx) return;
+    const mask = this.hunterFloorMaskScratch ??= document.createElement('canvas');
+    const mctx = mask.getContext('2d');
+    if (!mctx) return;
+    const z = cam.zoom;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    for (const it of q) {
+      // 中心格单点光照（Main.cs:23115 (position+size*0.5)/16 整除格;区域外=黑,⑦ 判例）
+      let lr = 0, lg = 0, lb = 0;
+      const tx = Math.floor(it.cx / TILE), ty = Math.floor(it.cy / TILE);
+      if (tx >= lrx && ty >= lry && tx < lrx + lrw && ty < lry + lrh) {
+        const li = (ty - lry) * lrw + (tx - lrx);
+        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+      }
+      // ★逐通道差值 = max(0, floor − tint×light)（:92247-92258 逐通道 if(c<b)c=b 的
+      //   补差形）。ichor 整色替换支（:92226-92229 替换先于钳底）:pre-floor 值=替换
+      //   色常量（非 light×tint）→ 差值 = max(replaceC, floorC) − lightC×replaceC/255
+      //   ——暗处 G=255（替换色盖过 floor 50）,与原版 (255,255,50) 逐通道吻合。
+      const tR = it.tint ? it.tint[0] / 255 : 1, tG = it.tint ? it.tint[1] / 255 : 1,
+        tB = it.tint ? it.tint[2] / 255 : 1;
+      const dr = it.ichor && it.tint
+        ? Math.max(0, Math.round(Math.max(it.tint[0], it.floor[0]) - lr * tR))
+        : Math.max(0, Math.round(it.floor[0] - lr * tR));
+      const dg = it.ichor && it.tint
+        ? Math.max(0, Math.round(Math.max(it.tint[1], it.floor[1]) - lg * tG))
+        : Math.max(0, Math.round(it.floor[1] - lg * tG));
+      const db = it.ichor && it.tint
+        ? Math.max(0, Math.round(Math.max(it.tint[2], it.floor[2]) - lb * tB))
+        : Math.max(0, Math.round(it.floor[2] - lb * tB));
+      if (dr + dg + db === 0) continue;             // 全亮且无暗化 debuff → 零差值零开销
+      // 本体 dest 四角（局部纹素域,与捕获位 drawImage 同参:−sw/2 起、by 起）经
+      // translate(cx,cy)·rotate·scale(±s,s) 的世界 AABB → 屏区 ∩ 视口
+      const m = it.mirror ? -it.scale : it.scale;
+      const cos = Math.cos(it.rot), sin = Math.sin(it.rot);
+      const lx0 = -it.sw / 2, lx1 = it.sw / 2, ly0 = it.by, ly1 = it.by + it.sh;
+      let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
+      for (const [px, py] of [[lx0, ly0], [lx1, ly0], [lx0, ly1], [lx1, ly1]] as const) {
+        const wxp = it.cx + px * m * cos - py * it.scale * sin;
+        const wyp = it.cy + px * m * sin + py * it.scale * cos;
+        if (wxp < wx0) wx0 = wxp;
+        if (wxp > wx1) wx1 = wxp;
+        if (wyp < wy0) wy0 = wyp;
+        if (wyp > wy1) wy1 = wyp;
+      }
+      const ox = Math.round(viewW / 2) - camRX * z, oy = Math.round(viewH / 2) - camRY * z;
+      const bx0 = Math.max(0, Math.floor(wx0 * z + ox)), by0 = Math.max(0, Math.floor(wy0 * z + oy));
+      const bx1 = Math.min(viewW, Math.ceil(wx1 * z + ox)), by1 = Math.min(viewH, Math.ceil(wy1 * z + oy));
+      const bw = bx1 - bx0, bh = by1 - by0;
+      if (bw <= 0 || bh <= 0) continue;
+      if (scratch.width !== bw || scratch.height !== bh) {
+        scratch.width = bw; scratch.height = bh;
+        mask.width = bw; mask.height = bh;
+      } else {
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.globalCompositeOperation = 'source-over';
+        sctx.clearRect(0, 0, bw, bh);
+        mctx.setTransform(1, 0, 0, 1, 0, 0);
+        mctx.globalCompositeOperation = 'source-over';
+        mctx.clearRect(0, 0, bw, bh);
+      }
+      // 1st: 本体重绘（世界→scratch 变换同实体 pass 式;变换参数=捕获位同变量）
+      sctx.setTransform(z, 0, 0, z,
+        Math.round(viewW / 2) - bx0 - camRX * z, Math.round(viewH / 2) - by0 - camRY * z);
+      sctx.save();
+      sctx.translate(it.cx, it.cy);
+      sctx.rotate(it.rot);
+      sctx.scale(m, it.scale);
+      sctx.globalAlpha = it.ga;
+      sctx.drawImage(it.img, it.sx, it.sy, it.sw, it.sh, -it.sw / 2, it.by, it.sw, it.sh);
+      sctx.restore();
+      sctx.globalAlpha = 1;
+      // 2nd/3rd: BJ481 掩膜快照三步烘焙（multiply 差值色 + destination-in 单 op 恢复 α）
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.drawImage(scratch, 0, 0);
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = 'multiply';
+      sctx.fillStyle = `rgb(${dr},${dg},${db})`;
+      sctx.fillRect(0, 0, bw, bh);                             // 2nd: 乘差值色
+      sctx.globalCompositeOperation = 'destination-in';
+      sctx.drawImage(mask, 0, 0);                              // 3rd: 合成 α 恢复（单 op）
+      sctx.globalCompositeOperation = 'source-over';
+      // ★gladd 面⑦ 同款 sink 分支:有 _hunterFloorEmitGL = 上传+quad vCol=(1,1,1,0)
+      //  加性整数 1:1（差值色已烘进画布）;无 sink = 原 2D 'lighter' blit 逐字
+      const glEmit = this._hunterFloorEmitGL;
+      if (glEmit) {
+        const key = `hfloor:slot${this._hunterFloorSlot++}`;
+        const t = this._hunterFloorTex.get(key);
+        const e = t ? glEmit.texRefresh(key, scratch) : glEmit.texFromImage(key, scratch, false, true);
+        if (!e) { this._hunterFloorEmitFailed = true; return; }
+        if (!t) this._hunterFloorTex.set(key, { e });
+        const vd = new Float32Array(48);   // 6 顶点 × 8 float——⑦ 同 stride
+        const x1 = bx0 + bw, y1 = by0 + bh;
+        const V = [bx0, by0, 0, 0, x1, by0, 1, 0, x1, y1, 1, 1, bx0, by0, 0, 0, x1, y1, 1, 1, bx0, y1, 0, 1];
+        for (let i = 0; i < 6; i++) {
+          vd[i * 8] = V[i * 4]; vd[i * 8 + 1] = V[i * 4 + 1];
+          vd[i * 8 + 2] = V[i * 4 + 2]; vd[i * 8 + 3] = V[i * 4 + 3];
+          vd[i * 8 + 4] = 1; vd[i * 8 + 5] = 1; vd[i * 8 + 6] = 1; vd[i * 8 + 7] = 0;
+        }
+        const ok = this.gladdQuadEmit(glEmit, e, vd, true, false);   // 加性合批（整数位 NEAREST）
+        if (!ok) { this._hunterFloorEmitFailed = true; return; }
+        continue;
+      }
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(scratch, bx0, by0);                        // 加性补差（BJ756）
+      ctx.restore();
+    }
+  }
+
   /** ★T1 自发光弹光照地板系数表（2026-09-02 清偿"登记不修"批;同日红队 I′ 对抗
    *  F1/F2 修订:地板动态化 + 对弹自身 α 敏感）——原版这些弹的绘制顶点色在
    *  【光照结算之后】向白提亮 = 自发光,暗处仍亮——
@@ -18389,6 +18619,23 @@ export class Renderer {
         } else {
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
         }
+        // ★BJ756 改判史（2026-11-02,g36a 任务书 T5）:Hunter 钳底剪影收集位（城镇族）
+        //  ——vanilla 城镇 NPC 走同一 DrawNPC 通用链（GetAlpha(npcColor) 吃钳底,
+        //  NPC.friendly 恒 true → 钳 (50,255,50) 绿,NPC.cs:92235-92238）;maxHp 250>1
+        //  恒过 lifeMax 门。变换=本位同款（translate 盒心+facing 镜像,无 rotation/
+        //  scale;ga=微光渐显同款读现值）。彩虹镇史莱姆 676/681 排除——原版 shader
+        //  逐像素重着色（GameShaders.Misc["RainbowTownSlime"].Apply,Main.cs:25780）
+        //  覆盖 npcColor=钳底不可观。城镇 debuff 染色乘区（GetNPCColorTintedByBuffs
+        //  对城镇族同样生效）本仓未建模 → tint=null 与主 pass 同相（登记边界）。
+        if (this.hunterFloorActive && n.maxHp > 1 && nidT !== 676 && nidT !== 681) {
+          this.hunterFloorQueue.push({
+            img: r.img, sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh,
+            cx: n.cx, cy: n.cy, rot: 0, mirror: n.facing > 0, scale: 1,
+            by: -r.sh / 2 + addYT, ga: ctx.globalAlpha,
+            tint: null,
+            floor: Renderer.hunterPotionAppearsFriendly(n) ? [50, 255, 50] : [255, 50, 50],
+          });
+        }
         // ---- 160/209 Glow 变体档（Main.cs:25769-25799，S 备案 npcGlowVariantTex 接通）----
         //      城镇 NPC 不经 drawNpcGlow → 本体后挂同档 Glow：Color(128−α/2,×3,0)
         //      A=0 → 'lighter' 加性（'128a2' 同款表达式）；160 松露人微光态 Glow_352、
@@ -19018,6 +19265,26 @@ export class Renderer {
      *  语义保持）;0=A=0 纯加算（erase 免除,lighter 单面）;>0=两步式。 */
     tintA?: number;
   }> = [];
+  /** ★BJ756 改判史（2026-11-02,g36a 任务书 T5/bj739a D-③ 真着色面清偿）：Hunter 药水
+   *  逐通道钳底剪影队列——drawEnemy/drawTownNPC 本体绘制位捕获当帧变换/帧矩形,
+   *  7b''（compositeLight 合成后）applyHunterTintFloor 消费。帧头清（5824 位）,
+   *  flush 不排空 = GL 会话失败时 2D 位原样重放（烘焙幂等,towerGlowQueue 惯例）。
+   *  掩模图 = 本体绘制图（xnaColor 合成精灵 / 裸帧纹理 r.img）——dbTint 不进掩模
+   *  （差值式 max(0,floor−tint×light) 已消化乘区,掩模再乘=双重染色）。 */
+  private hunterFloorQueue: Array<{
+    img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number;
+    cx: number; cy: number; rot: number; mirror: boolean; scale: number;
+    by: number; ga: number;
+    /** debuff 乘区快照（Enemy.debuffTintRGB 0-255 域;null=无染色;ichor=[255,255,0] 整色替换） */
+    tint: [number, number, number] | null;
+    /** ★ichor 整色替换支（NPC.cs:92226-92229——替换【先于】钳底,替换色 (255,255,0)
+     *  与 floor 逐通道取大;通用乘区式会把 G 欠到 floor（50）,替换支 G=255） */
+    ichor?: boolean;
+    /** 钳底色（AppearsFriendlyToHunterPotion ? (50,255,50) : (255,50,50),NPC.cs:92235-92246） */
+    floor: [number, number, number];
+  }> = [];
+  /** ★BJ756:CanApplyHunterPotionEffects 帧快照（render 帧头置位,NPC.cs:92137） */
+  private hunterFloorActive = false;
   /** ★条带拖尾全亮队列（2026-09-03 用户实报"天顶剑拖尾黑椭圆"止血/F2 正修）：
    *  拖尾原在实体段直绘 worldCanvas（透明底）——alpha 通道经 compositeLight 保 α
    *  后被 source-over 回主画布=**替换**而非加算（次暗像素 (13,5,3,255) 落近黑椭圆,
@@ -27127,6 +27394,57 @@ export class Renderer {
     return gl;
   }
 
+  /** ★BJ756 gladd 面⑦同型（2026-11-02）:Hunter 钳底剪影 GL 会话桥——sink 式零复制
+   *  （驱动器武装 _hunterFloorEmitGL,applyHunterTintFloor 尾段 blit 分支化:有 sink=
+   *  scratch 上传+quad vCol=(1,1,1,0) 加性整数 1:1——差值色已烘进画布,与 2D 'lighter'
+   *  blit 逐位;无 sink=原 2D 逐字）,烘焙循环（掩膜快照/multiply/destination-in）单源
+   *  共用=零复制漂移。失败=失败旗+弃 FBO,2D 位原样重放（队列帧头清不排空,烘焙幂等）。
+   *  fullbright 门/零队列免开在驱动器与共用循环内同源。
+   *  ★D-BJ756-① 登记（本刀不落刀）:⑦月总同型驱动 applyMoonLordLightFloor 的 GL 分支
+   *  尾为裸 `return`（:17111 一带）——⑧ bvine 同构位为 `continue`（多段全发射）;⑦的
+   *  return 使多部件 GL 发射在首件后截断（gladd 契约「GL 成功=2D 跳过逐位」被破,
+   *  2D 臂四件全补差/GL 臂仅首件）。⑦验收探针 _gladd-mlfloor-strict.mjs 场景为白天地
+   *  表+lighting.compute 冻结（光≈255→差值 0→双臂零发射）=GA 空转未触该面。本驱动
+   *  逐实体 `continue`（⑧ 习语）,⑦ 修复另派刀（须暗场活体复现+逐字节对拍）。 */
+  private _hunterFloorTex = new Map<string, { e: TexEntry }>();
+  private _hunterFloorEmitGL: GLSpriteLayer | null = null;
+  private _hunterFloorEmitFailed = false;
+  private _hunterFloorSlot = 0;
+  /** 探针面（?gladd=1 验收）:gl=会话发射/empty=零队列免开/fb=回 2D */
+  gladdHunterFloorStats = { gl: 0, empty: 0, fb: 0 };
+  /** ★BJ756:本帧 GL 会话结果(null=失败/旗关走 2D;非 null=已发射)。 */
+  private _hunterFloorGl: GLSpriteLayer | null = null;
+  private drawHunterFloorGL(
+    cam: Camera, viewW: number, viewH: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): GLSpriteLayer | null {
+    const gl = this.acquireCloudPipe();
+    if (!gl || gl.unavailable) { this.gladdHunterFloorStats.fb++; return null; }
+    if (this.fullbright || !this.hunterFloorQueue.length) { this.gladdHunterFloorStats.empty++; return gl; }
+    gl.begin('hfloor');
+    if (gl.unavailable) { this.gladdHunterFloorStats.fb++; return null; }
+    this._hunterFloorSlot = 0;
+    this._hunterFloorEmitGL = gl;
+    this._hunterFloorEmitFailed = false;
+    let ok = true;
+    try {
+      this.applyHunterTintFloor(cam, viewW, viewH, lightR, lightG, lightB, lrx, lry, lrw, lrh);
+      ok = !this._hunterFloorEmitFailed;
+    } finally {
+      this._hunterFloorEmitGL = null;
+      this._hunterFloorEmitFailed = false;
+    }
+    if (!ok) {
+      gl.end(false);   // 弃 FBO——2D 位原样重放（烘焙幂等,队列未排空）
+      this.gladdHunterFloorStats.fb++;
+      return null;
+    }
+    gl.end(true, true);   // over present（⑦⑧同收集语义）
+    this.gladdHunterFloorStats.gl++;
+    return gl;
+  }
+
   /** ★gladd Phase 1 面⑧（2026-10-28,task#22）:食人怪茎蔓下限色 GL 会话桥——⑦
    *  sink 式同型:驱动器武装 _bvineEmitGL,drawBrightVines 逐段 blit 分支化(有
    *  sink=段烘焙 texRefresh 上传+旋转仿射 quad vCol=(1,1,1,0)——下限色已 source-
@@ -27759,7 +28077,7 @@ export class Renderer {
       this._gqV.length = 0;
       for (const rb of st.rollbacks) { try { rb(); } catch { /* 复原失败不连环 */ } }
       this._shineAddGl = null; this._flareGl = null; this._litNatureGl = null;
-      this._vlensGl = null; this._mlFloorGl = null; this._bvineGl = null;
+      this._vlensGl = null; this._mlFloorGl = null; this._hunterFloorGl = null; this._bvineGl = null;
       this._vdustGl = null; this._fpartGl = null; this._entGlowGl = null;
       this._whipGl = null; this._wiresGl = null; this._infernoGl = null; this._trailGl = null;
       this._wingGl = null; this._towerGl = null;
@@ -27779,7 +28097,7 @@ export class Renderer {
         this._gqV.length = 0;
         for (const rb of st.rollbacks) { try { rb(); } catch { /* 复原失败不连环 */ } }
         this._shineAddGl = null; this._flareGl = null; this._litNatureGl = null;
-        this._vlensGl = null; this._mlFloorGl = null; this._bvineGl = null;
+        this._vlensGl = null; this._mlFloorGl = null; this._hunterFloorGl = null; this._bvineGl = null;
         this._vdustGl = null; this._fpartGl = null; this._entGlowGl = null;
         this._whipGl = null; this._wiresGl = null; this._infernoGl = null;
         this._trailGl = null; this._wingGl = null; this._towerGl = null;
@@ -29099,7 +29417,9 @@ export class Renderer {
       biomeCorrupt, biomeCrimson, biomeHallow, lesion, flesh, crispyHoney };
   })();
 
-  /** R3 视觉 Buff 高亮叠层：Spelunker(9)/Dangersense(111)/Hunter(17)/BiomeSight(343) */
+  /** R3 视觉 Buff 高亮叠层：Spelunker(9)/Dangersense(111)/BiomeSight(343)——
+   *  ★BJ756（2026-11-02）:Hunter(17) 面退役迁 7b'' 真着色剪影 pass（applyHunterTintFloor）,
+   *  本方法 hunter 旗仅剩早退门（hunter-only 帧免空扫）;entities 形参随之无消费面。 */
   private drawBuffHighlights(
     ctx: CanvasRenderingContext2D, world: World, player: Player,
     cam: Camera, viewW: number, viewH: number, z: number, ts: number,
@@ -29176,35 +29496,16 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 1;
-    // Hunter 药水（Player.cs:9719 detectCreature）★BJ739 B12（2026-10-31）：双色分道
-    //  + lifeMax>1 门——原版 NPC.cs:92230-92258 GetNPCColorTintedByBuffs 尾段
-    //  `CanApplyHunterPotionEffects && lifeMax>1` 把 NPC 色逐通道钳底：
-    //  AppearsFriendlyToHunterPotion（:92126-92135）= friendly || catchItem>0 ||
-    //  (damage==0 && lifeMax==5)，友好族 (50,255,50)/其余 (255,50,50);
-    //  HunterPotionFriendlyOverride {689:false}（NPCID.cs:4462）强制敌对。真着色面
-    //  = 乘光后钳底（Enemy.ts debuffTintRGB 注 C 类登记——需光照收口后剪影 pass
-    //  新基建,维持登记）;本红框近似层升级为双色+lifeMax 门（issue#29 B12 核心
-    //  诉求=友好/敌对颜色区分）。仅 NPC 族吃框（敌怪/小动物/城镇——原版遍历
-    //  Main.npc;掉落物/弹幕不画）
-    if (hunter) {
-      const pulseH = 0.35 + 0.15 * Math.sin(performance.now() / 200);
-      ctx.globalAlpha = pulseH;
-      ctx.lineWidth = 1.5;
-      const camLeft = cam.x - viewW / 2 / z, camTop = cam.y - viewH / 2 / z;
-      for (const ent of entities) {
-        if ((ent as { dead?: boolean }).dead) continue;
-        const e = ent as { x: number; y: number; w: number; h: number; maxHp?: number;
-          vanillaId?: number; def?: { friendly?: boolean; damage?: number } };
-        if (typeof e.maxHp !== 'number' || e.maxHp <= 1) continue;   // :92230 lifeMax>1 门
-        const friendly = e.vanillaId !== 689                          // HunterPotionFriendlyOverride
-          && (!!e.def?.friendly
-            || ((CRITTER_CATCH_BY_NPC[e.vanillaId ?? -1] ?? 0) > 0)
-            || ((e.def?.damage ?? 1) === 0 && e.maxHp === 5));
-        ctx.strokeStyle = friendly ? '#32FF32' : '#FF3232';   // (50,255,50)/(255,50,50)
-        ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);
-      }
-      ctx.globalAlpha = 1;
-    }
+    // ★BJ756 改判史（2026-11-02,g36a 任务书 T5/bj739a D-③ 清偿）：B12 红绿框近似层
+    //  【退役】——真着色面已落地（光照合成后逐通道钳底剪影 pass:drawEnemy/drawTownNPC
+    //  本体位收集 → 7b'' applyHunterTintFloor 加性补差,NPC.cs:92230-92258 1:1）。
+    //  退役理由（刀内定谳）:①原版无边框——红绿框是钳底效果的近似替身,真面在位后
+    //  保留=双重指示且与 1:1 面矛盾（白天地表原版仅通道偏色,框却恒在）;②「无 Hunter
+    //  诊断开关」=自造非原版语义（晶塔自造 false 旗判例反模式）;③谓词单源保留
+    //  （Renderer.hunterPotionAppearsFriendly,近似层语义收编+城镇族判绿勘误）。
+    //  近似层已知缺陷随退役销账:框画在乘光【前】=暗处不透（BJ739 病灶本体）、
+    //  TownNPC 无 def.friendly 字段=恒红框（原版应绿）。hunter 旗仅存于方法头早退
+    //  门（hunter-only 帧免空扫 tile 网格）。
   }
 
   /** ★BJ742-A R23-⑪（2026-10-31）：群系视觉悬浮尘 267（TileDrawing.cs:963-971）——

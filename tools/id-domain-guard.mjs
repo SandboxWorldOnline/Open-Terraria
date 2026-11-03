@@ -205,7 +205,7 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/DesertPass.ts',
     'world/gen/vanilla/MicroBiomesPass.ts', 'world/gen/vanilla/CorruptionPass.ts',
     'world/gen/vanilla/BrokenTrapCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts']],
-  ['PLATFORMS_SHEETS', ['data/tiles.ts', 'world/Torch.ts',
+  ['PLATFORMS_SHEETS', ['data/tiles.ts', 'world/Torch.ts', 'world/BoulderMech.ts',   // ★G41:solidTileNoPlatforms 窄集排除单源(与 Torch 同族合法消费)
     'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/BuriedChestsPass.ts',
     'world/evolution/WorldEvolution.ts', 'world/gen/vanilla/SurfaceDecorPasses.ts',
     'core/Game.ts', 'entities/LeashedCritter.ts', 'entities/Player.ts',

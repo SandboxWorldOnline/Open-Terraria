@@ -30,6 +30,7 @@ import npcValueJson from '../data/vanilla-npcvalue.json';
 import { STATUES } from '../data/vanillaStyleDrops';
 import { ITEM_NO_GRAVITY_VIDS } from '../data/items';
 import type { RNG } from '../core/rng';
+import type { LootPlayerCtx } from '../entities/types';
 import { Lang } from '../i18n/Lang';
 
 // MechdusaKill 目标集（Conditions.cs:581：{127 毁灭者, 126 Retinazer 侧眼,
@@ -73,6 +74,117 @@ export function registerModNpcValue(npcId: number, value: number): void {
 export function npcValueOf(netIdOrType: number): number {
   if (netIdOrType >= 800 && MOD_NPC_VALUE.has(netIdOrType)) return MOD_NPC_VALUE.get(netIdOrType)!;
   return NPC_VALUE[String(netIdOrType)] ?? 0;
+}
+
+// ---------------------------------------------------------------------------
+// ★issue#46 N11 / N16：掉落域纯函数（Game.dropContext / Game.skyblockBossCompensation
+//   的求值源——数据与判据单源，Game 只负责注入世界投影与派发落地）
+// ---------------------------------------------------------------------------
+
+/** Main.WindyEnoughForKiteDrops（1457 Main.cs:3003 `Math.Abs(windSpeedTarget) >=
+ *  _maxWind`；`_maxWind = 0.4f` Main.cs:67637）——判据用 **windSpeedTarget**（不是
+ *  跟随中的 current），阈值 0.4 且为 `>=`。消费 = Conditions.WindyEnoughForKiteDrops
+ *  （Conditions.cs:1246-1252 直读该属性）。
+ *  ★issue#46 N11：旧实现读 windSpeedCurrent 且 `> 0.5`——①0.45 档漏发风筝
+ *  ②风速回落/追随途中 current 仍高时错发（0/0.6）。 */
+export function windyEnoughForKiteDrops(windSpeedTarget: number): boolean {
+  return Math.abs(windSpeedTarget) >= 0.4;
+}
+
+/** Player.FindClosest（1457 Player.cs:4934-4958）在掉落结算玩家表上的 1:1 投影。
+ *  原版是**两步式**：①`result` 先置为【最小槽位】的 active 玩家（**不排除 dead**）；
+ *  ②按槽位 0..254 **升序**、严格 `<` 取曼哈顿中心距最近的存活者；③全员死亡时返回
+ *  ①（首个 active，哪怕已死）。返回值恒被 `Main.player[...]` 解引用（NPC.cs:79634
+ *  `NPCLoot` 的 closestPlayer、:80332/:80412 的 luck/hp/mana）——故「全员死亡」
+ *  不能返回 null。
+ *  ★issue#46 N17 红队勘正（2026-11-03）：`Game.lootPlayers` 的排列是
+ *  `[本地, ...net.players 插入序]`，不是槽位序；旧 Enemy 侧遍历直接按它取最近，
+ *  两头偏离原文——等距破缺取本地/插入序靠前者（原版取低槽），全员死亡时保持 null
+ *  （→ dropContext 回落房主 scene，魂/钥匙群系条件随房主位置翻转）。 */
+export function pickClosestLootPlayer(
+  players: readonly LootPlayerCtx[], cx: number, cy: number,
+): LootPlayerCtx | null {
+  let best: LootPlayerCtx | null = null;
+  let bestD = -1;
+  for (const c of players) {
+    if (c.dead) continue;
+    const d = Math.abs(c.x - cx) + Math.abs(c.y - cy);
+    // 等距 → 低槽优先（原版按槽位升序遍历 + 严格 `<`，先到者不退让）
+    if (bestD < 0 || d < bestD || (d === bestD && best !== null && c.slot < best.slot)) {
+      bestD = d;
+      best = c;
+    }
+  }
+  if (best) return best;
+  // 全员死亡：原版 result 仍停在首个 active 槽（Player.cs:4938-4946 只认 active）
+  let first: LootPlayerCtx | null = null;
+  for (const c of players) if (!first || c.slot < first.slot) first = c;
+  return first;
+}
+
+export interface SkyblockCompensationInput {
+  /** 原版 NPC.type（非 netID；负变体不进本表） */
+  type: number;
+  /** WorldGen.crimson（NPCLoot_DropAltar :80417-80428 二选一） */
+  crimson: boolean;
+  noAltars: boolean; noDungeon: boolean; noTemple: boolean; noHellforge: boolean;
+  lowTiles: boolean;
+}
+
+export interface SkyblockCompensationResult {
+  /** 待发放物品（原版 id + 堆叠数；调用方按 GetItemSource_Loot 盒中心锚生成） */
+  drops: Array<{ id: number; n: number }>;
+  /** 需清除的普查旗（= 原版 `WorldGen.Skyblock.noX = false`；245 **不含** noTemple） */
+  clear: Array<'noAltars' | 'noDungeon' | 'noTemple' | 'noHellforge'>;
+}
+
+/** 缺结构世界 Boss 补偿表（1457 NPC.cs:79689-79706 分支 + :80375-80434 五实现）。
+ *  调用方门谱（不在本函数内）：IsNPCValidForBestiaryKillCredit（:79689）、雕像产怪
+ *  NPCLoot 头早退（:79648-79654）、netPuppet 不结算。
+ *  逐条按原文：`Next(a,b)` = [a,b) 整数（上界开）。
+ *  ★石巨人 245 的触发旗是 **lowTiles**（:79703），函数体 :80401-80406 **不写
+ *  noTemple**——勿"多修"。该函数反编译有平铺痕迹：`Next(4)` 后嵌套三元实际可达域
+ *  = 0→1149(长矛机关) / 非0→1146(飞镖机关)，1147/1148 两臂恒不可达；按原文执行，
+ *  不据此推断"均匀四选"（issue 明示）。 */
+export function rollSkyblockCompensation(
+  s: SkyblockCompensationInput, rand: () => number = Math.random,
+): SkyblockCompensationResult {
+  const out: SkyblockCompensationResult = { drops: [], clear: [] };
+  const next = (lo: number, hiEx: number): number => lo + Math.floor(rand() * Math.max(1, hiEx - lo));
+  const drop = (id: number, n = 1): void => { out.drops.push({ id, n }); };
+  // 克眼 4 + 无祭坛 → 便携祭坛（猩红 5533 / 腐化 5532），清 noAltars
+  if (s.type === 4 && s.noAltars) {
+    drop(s.crimson ? 5533 : 5532);
+    out.clear.push('noAltars');
+  }
+  // 世吞 13/14/15 或 克脑 266 + 无地牢 → 砖 1 堆(×500-600) + 墙 3 堆(×400-500)，清 noDungeon
+  if ((s.type === 13 || s.type === 14 || s.type === 15 || s.type === 266) && s.noDungeon) {
+    switch (next(0, 3)) {
+      case 0: drop(134, next(500, 601)); drop(5365, next(400, 501));
+        drop(5367, next(400, 501)); drop(5366, next(400, 501)); break;
+      case 1: drop(137, next(500, 601)); drop(5371, next(400, 501));
+        drop(5373, next(400, 501)); drop(5372, next(400, 501)); break;
+      default: drop(139, next(500, 601)); drop(5368, next(400, 501));
+        drop(5370, next(400, 501)); drop(5369, next(400, 501)); break;
+    }
+    out.clear.push('noDungeon');
+  }
+  // 骷髅王 35 + 无地狱熔炉 → 221，清 noHellforge
+  if (s.type === 35 && s.noHellforge) {
+    drop(221);
+    out.clear.push('noHellforge');
+  }
+  // 世花 262 + 无神庙 → 1294、1292、1101×500-600、5376×1200-1500，清 noTemple
+  if (s.type === 262 && s.noTemple) {
+    drop(1294); drop(1292);
+    drop(1101, next(500, 601)); drop(5376, next(1200, 1501));
+    out.clear.push('noTemple');
+  }
+  // 石巨人 245 + 低格世界（**不是 noTemple**）→ 机关材料×5-10；原文不清旗
+  if (s.type === 245 && s.lowTiles) {
+    drop(next(0, 4) === 0 ? 1149 : 1146, next(5, 11));
+  }
+  return out;
 }
 
 /** 条件求值补充上下文（玩家 zone/季节/风——Game 侧提供） */
@@ -309,16 +421,21 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'SkyblockIsUpNoSickle':
       // Conditions.cs:1552-1566：lowTiles 且玩家背包/虚空袋【无】1786 镰刀
       return !!ctx.skyblockLowTiles && !ctx.playerHasSickle;
-    case 'WindyEnoughForKiteDrops': return !!ex?.windy;
+    case 'WindyEnoughForKiteDrops':
+      // ★issue#46 N11：1457 Conditions.cs:1246-1252 直接读 `Main.WindyEnoughForKiteDrops`
+      // =|windSpeedTarget| >= _maxWind(0.4)（Main.cs:3003/:67637）——数据源 = Game.dropContext
+      // 的 ex.windy（本轮改 target/0.4，旧实现 current/>0.5 两向偏差）
+      return !!ex?.windy;
     case 'EyeOfCthulhuDefeatedAndNoAltarsInWorld':
       // Conditions.cs:1422-1437：NPC.downedBoss1 && WorldGen.Skyblock.noAltars——
       // skyblock 世界的坠星补给（僵尸族 2/317/318/190-194/133 掉 43 坠星 1/50，
       // ItemDropDatabase.cs:1086-1088）。downedBoss1 = EoC（world.flags.downed_4，
       // 与 Game.shopCondOk 同口径含 downedEyeOfCthulhu 旧键）；noAltars = 读档普查
       // 无恶魔祭坛（ctx.noAltarsInWorld，Enemy 注入）。
-      // ★登记：原版 EoC(type 4) 击杀会 NPCLoot_DropAltar（NPC.cs:79676-79679 →
-      // :80393-80403 掉 5532/5533 便携祭坛并置 noAltars=false 终结坠星供给）——
-      // 本仓未接该重置支，skyblock 世击杀 EoC 后坠星持续（行为偏差，非条件缺口）
+      // ★issue#46 N16 清偿（原"未接重置支"登记）：EoC 击杀掉落便携祭坛并清
+      // noAltars 的分支已接——1457 实锚 NPC.cs:79691-79694 分支体 +
+      // :80417-80428 NPCLoot_DropAltar；本仓落点 Game.skyblockBossCompensation
+      // （onEnemyKilled 死亡结算口），清旗同步运行时普查旗 + World 投影。
       return !!(ctx.flags['downed_4'] || ctx.flags.downedEyeOfCthulhu) && !!ctx.noAltarsInWorld;
     case 'NamedNPC': {
       // Conditions.cs:957-981：info.npc.HasGivenName && GivenName ==
@@ -332,14 +449,20 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       return key !== undefined && ctx.npcGivenName === Lang.text(key);
     }
     case 'LivingFlames':
-      // Conditions.cs:939 lifeMax>5 && value>0 && !friendly && hardMode && y>UnderworldLayer
-      // && !IsInSimulation（后者仅图鉴模拟，运行时恒 false）——语义已 1:1
+      // ★issue#46 N12：1457 Conditions.cs:935-944 —— lifeMax>5 && value>0 && !friendly
+      // && hardMode && `npc.position.Y / 16f > Main.UnderworldLayer`（**严格 >**；
+      // UnderworldLayer = maxTilesY-200,Main.cs:2886）+ !IsInSimulation（仅图鉴模拟
+      // 恒 false）。判据本身 1:1；缺陷在数据源——调用方曾把 UnderworldLayer 填成
+      // GenVars.lavaLine（≈h-340±，见 World.lavaLine 注）。现应取 World.underworldLine。
       return ctx.lifeMax > 5 && ctx.value > 0 && !ctx.friendly && ctx.hardMode
         && ctx.y / 16 > ctx.underworldTileY;
     case 'SoulOfLight': case 'SoulOfNight': {
       // SoulOfWhateverConditionCanDrop(Conditions.cs:1574)：hardMode && lifeMax>1 &&
       // !friendly && !boss && y>rockLayer && value>=1；先拒 NPCID.Sets.DontDropDungeonKeysOrSouls
       // （= {23} 诅咒骷髅头，NPCID.cs:4438）再排除 switch 黑名单 {1,13,14,15,121,535}
+      // ★issue#46 N17：zone 族（本条件 + 钥匙/悠悠球/DesertKey）在原版读
+      // `info.player.Zone*`（Conditions.cs:827-861）——player = 掉落结算的最近玩家
+      // （NPCLoot closestPlayer），非房主。extras 由 Game.dropContext(最近玩家) 供。
       if (ctx.type === 23) return false;
       if (!ctx.hardMode || ctx.lifeMax <= 1 || ctx.friendly || ctx.boss || ctx.value < 1) return false;
       if (ctx.y / 16 <= ctx.rockLayerTile) return false;

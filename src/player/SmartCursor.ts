@@ -26,6 +26,7 @@ import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
 import { canCutTile } from '../world/CanCutTile';
+import { canKillTileAt } from '../entities/Mounts';   // ★issue#44-6：WorldGen.CanKillTile 全式单源
 
 // ===================== 原版 TileID.Sets / ItemID.Sets 集合（TileID.cs / ItemID.cs 行号注释） =====================
 
@@ -174,6 +175,35 @@ export const DEFAULT_SMART_CURSOR_SETTINGS: SmartCursorSettings = {
   holdCanReleaseMidUse: false, // Player.cs:330
 };
 
+/**
+ * ★issue#44-8：controlSmart 电平（原版 1457 TriggersSet.cs:783-796
+ * `if (CurrentInputMode != XBoxGamepadUI && !CursorIsBusy) { … p.controlSmart = SmartCursor; }`
+ * ——电平本身**无** mouseInterface/界面门；CursorIsBusy 只覆盖环形菜单
+ * PlayerInput.cs:436-443）。全屏地图才清零 controlSmart（Player.cs:24998）。
+ * 界面门只挂在**切换调用**上（Player.cs:25056-25071）：
+ *   `if (UsingGamepad || !mouseInterface || !ItemSlot.Options.DisableLeftShiftTrashCan) TryToToggleSmartCursor(…)`
+ *
+ * ★红队勘正（2026-11-03，issue#44 复核）：旧注「DisableLeftShiftTrashCan 默认
+ * false ⇒ 门恒真」**是误读**——`ItemSlot.cs:28` 明确 `= true`。故桌面非手柄档
+ * 门 = `!mouseInterface`，语义是「**光标悬停在任何 UI 上时不切换**」，与「某个
+ * 面板是否打开」无关：面板开着但鼠标在世界一侧，原版照常切换；鼠标压在面板/
+ * 背包/时间条/天气伞上，原版不切换。`mouseInterface` 由 Main 每帧帧头清零
+ * （Main.cs:62758-62759）、悬停 UI 时置位（Main.cs:41729 等）——是本仓
+ * `inpOverDomUi() || timeUiHover || weatherUiHover` 的等价面。
+ *
+ * 本仓 `Input.downAction` 首行 `if (uiBlocking) return false` ⇒ 模态界面内电平
+ * 恒 false、切换失效（旧实现的两向偏差：面板内**任意**位置都切不了）。修法：
+ * ①未遮挡帧照旧走 downAction；②`uiBlocking` 帧补物理/触摸键裸电平（不含虚拟
+ * action 通道——登记债 D-A-2）；③悬停门与全屏地图门按原文门序收口（门关时
+ * `updateWanted` 整段不执行，与原版「不调用 TryToToggleSmartCursor」同构）。
+ */
+export function smartCursorControlSmart(
+  downAction: boolean, rawKeyDown: boolean, fullMapOpen: boolean,
+): boolean {
+  if (fullMapOpen) return false;   // Player.cs:24998 全屏地图清零 controlSmart
+  return downAction || rawKeyDown; // 无模式门：Toggle/Hold 读同一电平（:29042-29071）
+}
+
 // ===================== 输入上下文 =====================
 
 export interface SmartCursorHeld {
@@ -197,6 +227,23 @@ export interface SmartCursorEnv {
   settings: SmartCursorSettings;
   /** tileBoost（放置物加 blockRange；Game 侧与 inTileRange 同公式） */
   tileBoost: number;
+  /** ★issue#44-4：Simple.GetRanges 的基础射程（Player.tileRangeX/Y 经射程配饰
+   *  +3/+2、工具箱 +1、旅程远置 ×2+8 后，已按 TileReachCheckSettings.cs:28-42
+   *  钳 ≤20）。Game 侧传 `this.tileReach(0)`；缺省 5/3 = 无配饰单人基线。
+   *  tileRegion 在钳【后】再加 tileBoost（GetTileRegion :53-57 原序）。 */
+  reachX?: number;
+  reachY?: number;
+  /** ★issue#44-6：WorldGen.CanKillTile 全式（1457 WorldGen.cs:62716-62832）——
+   *  ForceCursor :2259 / MineSolids :2502 两消费点原以「pick>=0 类型近似」代读，
+   *  缺动态拒绝面（上邻树干/箱下/祭坛下/锁门/巨石压箱等）。Game 侧注入带 ctx 的
+   *  Game.canKillTile（hardMode + chestDestroyable 宝箱表）；未注入的调用方
+   *  （帮工链/测试）回退 entities/Mounts.ts canKillTileAt【同一实现】。 */
+  canKillTile?: (x: number, y: number) => boolean;
+  /** ★issue#44-3：Main.tileCut 的【内部 id 域】判定。Game 侧注入
+   *  `(t) => TILE_CUT.has(t)`（Game.ts:1609 = TILE_CUT_SHEETS 经 TILE_DEFS 平移，
+   *  与 data/tiles.ts 权威表同源；IDG-T2 禁 player 面直查 sheet 表）。
+   *  缺省回退 `TILE_DEFS[t].decor`（旧近似，仅测试/非 Game 调用方可达）。 */
+  tileCut?: (t: number) => boolean;
   /** 多彩扳手/宏伟蓝图当前模式位（TOOL_*；仅 MulticolorWrench 策略用） */
   wireToolMode: number;
   /** EmptyTile 判定的占位实体（玩家 + NPC，px 盒） */
@@ -257,10 +304,31 @@ const tileSolidTopType = (t: number): boolean => !!TILE_DEFS[t]?.platform;      
  *  ★2026-09-03 对账翻案：曾以 def.axe>=0 代读——def.axe 是"斧力需求"画像，平台 19
  *  等显式 axe:0 的非斧族格被误判入斧族（ForceCursor 镐支/stepAxe 扫描面失真） */
 const tileAxeType = (t: number): boolean => TILE_AXE_SHEETS.has(sheetOf(t)); // Main.tileAxe
-/** WorldGen.CanKillTile 子集（SmartCursorHelper 用法：不查镐力，只看"不可破坏"） */
-const canKillTile = (t: number): boolean => (TILE_DEFS[t]?.pick ?? -1) >= 0;
+/** WorldGen.CanKillTile 全式判定（SmartCursorHelper **两处均按坐标读**：
+ *  ForceCursor :2259 `tile.active() && WorldGen.CanKillTile(x, y)` /
+ *  MineSolids :2502 `if (!WorldGen.CanKillTile(_targets[m].X, _targets[m].Y))`）。
+ *  ★issue#44-6 改判史：旧实现 `(TILE_DEFS[t]?.pick ?? -1) >= 0` 只按类型判，
+ *  丢掉 1457 WorldGen.cs:62716-62832 的全部动态拒绝面（上邻树干/箱下/祭坛下/
+ *  锁门/传送器顶箱/巨石压箱/容器非空……）→ 智能光标钉在挖不动的格上。
+ *  env.canKillTile（Game 注入，带 hardMode/chestDestroyable ctx）优先；
+ *  未注入时回退 Mounts.canKillTileAt 同一实现（不造第二套；无 ctx 的最宽近似）。 */
+function canKillTileAtEnv(env: SmartCursorEnv, x: number, y: number): boolean {
+  if (env.canKillTile) return env.canKillTile(x, y);
+  return canKillTileAt(env.st, x, y);
+}
 const tileFrameImportantType = (t: number): boolean => !!TILE_DEFS[t]?.framed;  // Main.tileFrameImportant
-const tileCutType = (t: number): boolean => !!TILE_DEFS[t]?.decor;              // Main.tileCut（可割植物）
+/** Main.tileCut（可割植物）判定。★issue#44-3 改判史：旧实现读
+ *  `TILE_DEFS[t].decor`——decor 语义 =「装饰物（不碰撞、任意工具秒清）」，与
+ *  Main.tileCut 不等价，两向偏差 78 项（decor 多：树干/绳/梁柱/墓碑/金币堆…）
+ *  +22 项（tileCut 独有：蛛网/草簇/苔藓/生命果…）。
+ *  权威表 = data/tiles.ts:1180 TILE_CUT_SHEETS（1457 Main.cs:7502-10388 全 41 条
+ *  tileCut 赋值提取）。★IDG-T2：player 面新消费禁止直查 sheet 表——Game 侧经
+ *  env.tileCut 注入其【内部 id 域】镜像 Game.TILE_CUT（同表派生，TILE_DEFS 注册序）。
+ *  缺省回退 decor 仅测试/非 Game 调用方可达：lookup 生产调用点唯一 =
+ *  Game.updateSmartCursor；帮工链只用导出核（stepAxeCore/stepMineSolidsCore），
+ *  不经本谓词。 */
+const tileCutType = (env: SmartCursorEnv, t: number): boolean =>
+  env.tileCut ? env.tileCut(t) : !!TILE_DEFS[t]?.decor;
 
 /** Main.cs:46058-46065 方向箭头显示门：锁向下一格须 !active 或可替换块才画
  *  SmartCursorArrow。"可替换" = PlaceThing_IsReplaceableBlock（Player.cs:39094-
@@ -268,17 +336,23 @@ const tileCutType = (t: number): boolean => !!TILE_DEFS[t]?.decor;              
  *  等不可覆盖块时返回 false → 调用方传 null，渲染层不画箭头。
  *  越界按"未激活"处理（原版越界 Tile 为空 → !active() → 画；SmartCursor 已钳到
  *  [10, w-10]，锁向 ±1 实际不会越界）。 */
-export function smartCursorArrowAllowed(st: TileStore, x: number, y: number, dir: Pt): boolean {
+export function smartCursorArrowAllowed(
+  st: TileStore, x: number, y: number, dir: Pt,
+  /** ★issue#44-3：Main.tileCut 内部 id 域判定；缺省回退旧 decor 近似（测试面） */
+  isTileCut?: (t: number) => boolean,
+): boolean {
   const nx = x + dir.x, ny = y + dir.y;
   if (!st.inBounds(nx, ny)) return true;
   // Main.cs:47423 `(num2 >= 0 && !tile.active()) || …IsReplaceableBlock`——active() 口径
   if (!hasTileAt(st, nx, ny)) return true;
   const type = st.type[st.idx(nx, ny)];
   const sheet = sheetOf(type);
-  // PlaceThing_IsReplaceableBlock（Player.cs:40066-40074）：
-  // (!tileCut || 484 || 711) && 非 drip 族 {373-375,461,709} → BreakableWhenPlacing；否则 true。
-  // 曾仅 tileCut 口径（比原版窄——BWP 族树苗 20 原版画箭头我方不画；红蓝对抗 F2）。
-  if ((!tileCutType(type) || sheet === 484 || sheet === 711)
+  // PlaceThing_IsReplaceableBlock（1457 Player.cs:40068-40075）：
+  // (!Main.tileCut || 484 || 711) && 非 drip 族 {373-375,461,709} → BreakableWhenPlacing；否则 true。
+  // ★issue#44-3：原版 41 条 tileCut 与 decor 不等价——如树苗 sheet20 为 decor 但
+  //  ∉ Main.tileCut 且 ∉ BreakableWhenPlacing ⇒ 原版不画箭头（旧实现误画）。
+  const cut = isTileCut ? isTileCut(type) : !!TILE_DEFS[type]?.decor;
+  if ((!cut || sheet === 484 || sheet === 711)
     && sheet !== 373 && sheet !== 374 && sheet !== 375 && sheet !== 461 && sheet !== 709) {
     return breakableWhenPlacing(sheet);
   }
@@ -529,16 +603,24 @@ export function stepAxeCore(
       let num2 = i, k = j;
       if (IS_A_TREE_TRUNK.has(sheet)) {
         // :2611-2646 多格树干帧校正（左右子块归位到主干列）+ 沿 Y 下到底（树根）
+        // ★issue#44-9 改判史：原版 :2623-2651 三个 if 是【逐次重读】Main.tile[num2,k]
+        //  （第一个 if 令 num2++ 后，后两个读的是新格）；旧版缓存首次索引，三判都读
+        //  原格。原生树帧表下首支命中后的目标格不与后续签名交集（见 test 注证明），
+        //  但世界编辑/模组/遗留帧可构造交叉签名 → 按 1:1 逐次重取（零行为代价）。
         if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-          const i2 = st.idx(num2, k);
+          let i2 = st.idx(num2, k);
           if (st.frameY[i2] >= 198 && st.frameX[i2] === 44) num2++;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 66 && st.frameY[i2] <= 44) num2++;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 44 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2++;
         }
         if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-          const i2 = st.idx(num2, k);
+          let i2 = st.idx(num2, k);
           if (st.frameY[i2] >= 198 && st.frameX[i2] === 66) num2--;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 88 && st.frameY[i2] >= 66 && st.frameY[i2] <= 110) num2--;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 22 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2--;
         }
         for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet // :2653 active()
@@ -547,14 +629,17 @@ export function stepAxeCore(
       }
       if (sheet === 80) {
         // :2647-2674 仙人掌帧校正 + 下到底
+        // ★issue#44-9：同上（原版 :2659-2679 逐次重读；旧版缓存首索引）——仙人掌 ±1 两支
         if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-          const i2 = st.idx(num2, k);
+          let i2 = st.idx(num2, k);
           if (st.frameX[i2] === 54) num2++;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 108 && st.frameY[i2] === 36) num2++;
         }
         if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
-          const i2 = st.idx(num2, k);
+          let i2 = st.idx(num2, k);
           if (st.frameX[i2] === 36) num2--;
+          i2 = st.idx(num2, k);
           if (st.frameX[i2] === 108 && st.frameY[i2] === 18) num2--;
         }
         for (; hasTileAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80 // :2681 active()
@@ -665,8 +750,10 @@ export function stepMineSolidsCore(
     pi++;
     endpoints.shift();
   }
-  // :2489-2501 CanKillTile 过滤（不查镐力）
-  const killable = targets.filter((t) => canKillTile(st.get(t.x, t.y)));
+  // :2489-2501 CanKillTile 过滤（不查镐力；1457 :2502 `WorldGen.CanKillTile(X, Y)`）
+  // ★issue#44-6：按【坐标】读全式——旧版只按类型 pick>=0，树根/箱下/祭坛下的
+  // 候选不被剔除 → 光标钉在挖不动的格上。
+  const killable = targets.filter((t) => canKillTileAtEnv(env, t.x, t.y));
   if (killable.length > 0) {
     // :2502-2576 择近 = 格中心+8px 到玩家 Center（单人无联机偏移）
     let best = -1;
@@ -713,11 +800,21 @@ export class SmartCursor {
   lockedContinuity: Pt | null = null;
   private prevSmart = false;
 
-  /** Player.cs:28344-28374 TryToToggleSmartCursor 1:1。
-   *  返回 true = 发生按下沿（调用方播音效 12 / menuTick）。 */
-  updateWanted(controlSmart: boolean, controlUseItem: boolean, s: SmartCursorSettings): boolean {
+  /** Player.cs:29042-29071 TryToToggleSmartCursor 1:1。
+   *  返回 true = 发生按下沿（调用方播音效 12 / menuTick）。
+   *  ★红队勘正（2026-11-03）：旧注行号 `:28344-28374` 是 1456 旧档，1457 实锚
+   *  29042-29071。
+   *  `gateOpen`：原版界面门（Player.cs:25057 `!mouseInterface`）关的是**对
+   *  TryToToggleSmartCursor 的整段调用**，不是里面的某一个分支。故门关时本函数
+   *  `wanted`/`sessionWanted` **冻结**，但 `prevSmart` 仍须跟随 controlSmart
+   *  （原版 `releaseSmart` 的更新在门**外**：Player.cs:25072-25079）——否则
+   *  「按住 Ctrl 划过面板再把鼠标移出」会在门开的瞬间补一次本不该有的切换沿。 */
+  updateWanted(
+    controlSmart: boolean, controlUseItem: boolean, s: SmartCursorSettings, gateOpen = true,
+  ): boolean {
     const edge = controlSmart && !this.prevSmart;
     this.prevSmart = controlSmart;
+    if (!gateOpen) return false;   // 原版整段 TryToToggleSmartCursor 不执行
     if (s.toggleMode) {
       if (edge) this.wanted = !this.wanted;
       sessionWanted = this.wanted; // ★SW-BJ84 切换拍回写会话态（跨世界保留）
@@ -758,8 +855,10 @@ export class SmartCursor {
     // :92 让位集（★SW-FX27：gravDir 实况——314 轨道倒挂不让位）
     const blocks = isHoveringOverAnInteractableTile(st, screenX, screenY, env.gravDir ?? 1);
     // :94-103 可达区 = GetTileRegion(tileBoost)（TileReachCheckSettings.cs:53）。
-    // blockRange（放置物额外射程）已由 Game 侧并入 env.tileBoost（Builder 药水/配饰同公式）
-    const reach = tileRegion(env.actor, env.tileBoost, st);
+    // TB（item.tileBoost + 放置物 blockRange）已由 Game 侧并入 env.tileBoost；
+    // 基础射程由 env.reachX/Y（Game.tileReach(0)，含配饰/工具箱/旅程）提供——
+    // ★issue#44-4：旧实现硬编码 5/3，配饰/旅程下智能光标区比放置判定窄。
+    const reach = tileRegion(env.actor, env.tileBoost, st, env.reachX ?? 5, env.reachY ?? 3);
     // :104 让位集命中且鼠标格在可达区内 → 本次不查找
     if (blocks
       && inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) {
@@ -801,7 +900,7 @@ export class SmartCursor {
       () => this.stepEmptyBuckets(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
       () => this.stepActuators(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
       () => this.stepAlchemySeeds(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
-      () => this.stepPlanterBox(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPlanterBox(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
       () => this.stepClayPots(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
       () => this.stepStaffOfRegrowth(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
     );
@@ -859,7 +958,10 @@ export class SmartCursor {
     if (!inTileBounds(x, y, reach.x0, reach.y0, reach.x1, reach.y1)) return;
     const t = st.get(x, y);
     const sheet = sheetOf(t);
-    let flag = hasTileAt(st, x, y) && canKillTile(t) && (!tileSolidType(t) || tileSolidTopType(t)); // :2259 active()
+    // :2259 `tile.active() && WorldGen.CanKillTile(x, y) && (!Main.tileSolid || tileSolidTop)`
+    // ★issue#44-6：坐标全式（含动态拒绝面），旧版只按类型 pick>=0。
+    let flag = hasTileAt(st, x, y) && canKillTileAtEnv(env, x, y)
+      && (!tileSolidType(t) || tileSolidTopType(t)); // :2259 active()
     if (flag && tileAxeType(t) && sem.axe < 1) flag = false;      // :2250-2253
     if (flag && isHammerTile(sheet) && sem.hammer < 1) flag = false; // :2254-2257
     if (flag && !isHammerTile(sheet) && !tileAxeType(t) && sem.pick < 1) flag = false; // :2258-2261
@@ -940,20 +1042,28 @@ export class SmartCursor {
     if (sem.vid !== 3625 || taken()) return; // :1726
     const st = env.st;
     const toolMode = env.wireToolMode; // WiresUI.Settings.ToolMode（Game.wireToolMode）
+    // ★issue#44-2 改判史：工具位（WiresUI.MultiToolMode：Red=1/Green=2/Blue=4/
+    //  Yellow=8；wiringToolBits.ts 同值）与线位（TileStore：WIRE_RED=1/WIRE_BLUE=2/
+    //  WIRE_GREEN=4/WIRE_YELLOW=8）两套位序不同。旧版把工具位当线位用（bit2 工具
+    //  Green 去查 WIRE_BLUE、bit4 工具 Blue 去查 WIRE_GREEN），蓝/绿单色模式指错色。
+    //  正确映射 = 红1→红1、绿2→绿4、蓝4→蓝2、黄8→黄8；序保持原版
+    //  flag(红)/flag2(蓝)/flag3(绿)/flag4(黄)（SmartCursorHelper.cs:1764-1768）。
     const bits: Array<[boolean, number]> = [
-      [(toolMode & 1) !== 0, TS.WIRE_RED],
-      [(toolMode & 2) !== 0, TS.WIRE_BLUE],
-      [(toolMode & 4) !== 0, TS.WIRE_GREEN],
-      [(toolMode & 8) !== 0, TS.WIRE_YELLOW],
+      [(toolMode & 1) !== 0, TS.WIRE_RED],      // Red
+      [(toolMode & 4) !== 0, TS.WIRE_BLUE],     // Blue（工具位 4 → 线位 2）
+      [(toolMode & 2) !== 0, TS.WIRE_GREEN],    // Green（工具位 2 → 线位 4）
+      [(toolMode & 8) !== 0, TS.WIRE_YELLOW],   // Yellow
     ];
     const cutter = (toolMode & 32) !== 0;
-    // :1733-1750 鼠标格已有线组合 == 工具模式（去 Cutter 位）→ 让位
+    // :1743-1758 鼠标格已有线组合 → multiToolMode（**工具位域**）：
+    //   wire()=红→Red1 / wire2()=蓝→Blue4 / wire3()=绿→Green2 / wire4()=黄→Yellow8。
+    //   旧版蓝/绿两支同样互换了工具位（wire2→|=2、wire3→|=4）。
     const hoverWire = st.inBounds(screenX, screenY) ? st.wire[st.idx(screenX, screenY)] : 0;
     let mouseMode = 0;
-    if (hoverWire & TS.WIRE_RED) mouseMode |= 1;
-    if (hoverWire & TS.WIRE_BLUE) mouseMode |= 2;
-    if (hoverWire & TS.WIRE_GREEN) mouseMode |= 4;
-    if (hoverWire & TS.WIRE_YELLOW) mouseMode |= 8;
+    if (hoverWire & TS.WIRE_RED) mouseMode |= 1;      // Red
+    if (hoverWire & TS.WIRE_BLUE) mouseMode |= 4;     // Blue（线位 2 → 工具位 4）
+    if (hoverWire & TS.WIRE_GREEN) mouseMode |= 2;    // Green（线位 4 → 工具位 2）
+    if (hoverWire & TS.WIRE_YELLOW) mouseMode |= 8;   // Yellow
     if ((toolMode & ~32) === mouseMode) return;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
@@ -997,6 +1107,7 @@ export class SmartCursor {
     if (sem.hammer <= 0 || taken()) return; // :1540/:1683
     const st = env.st;
     const p = env.actor;
+    const gravDir = env.gravDir ?? 1;   // ★issue#44-7b：:1608 逆重力档（原钉 1 缺支）
     let mouse = { ...env.mouse };
     // :1542-1554 3:1 方向归约（同 MineSolids）
     const vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
@@ -1016,6 +1127,10 @@ export class SmartCursor {
     const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
     let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
     if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
+    // ★issue#44-7b：SmartCursorHelper.cs:1608-1611 `if (player.gravDir == -1f &&
+    //  num2 == 0) num9++;`（num2 = signY）——倒挂且纯水平瞄准时端点行再 +1。
+    //  旧版 stepHammers 整支缺该档（stepMineSolids :2435/:2439 两档齐备可对照）。
+    if (gravDir === -1 && signY === 0) num9++;
     num9 = Math.max(10, Math.min(num9, st.h - 10));
     const num10 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
     const num11 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
@@ -1048,7 +1163,11 @@ export class SmartCursor {
         if (st.wall[st.idx(i, j)] > 0 && hitWallSubstep(st, i, j)) targets2.push({ x: i, y: j });
       }
     }
-    const pick2 = pickNonAltar(st, targets2, (t) => toWorld(t), env.mouse);
+    // ★issue#44-7a 改判史：原版 :1555-1564 是【就地改写】 providedInfo.mouse
+    //  （`providedInfo.mouse.Y = providedInfo.Center.Y`），故本回退段 :1716 的择近
+    //  基准是【已 3:1 归约】的鼠标。旧版此处用未归约 env.mouse，纯水平瞄准时
+    //  原始 mouse.y 的噪声会翻转远近排序（实测 (50,102) vs 原版 (50,95)）。
+    const pick2 = pickNonAltar(st, targets2, (t) => toWorld(t), mouse);
     if (pick2 && inTileBounds(pick2.x, pick2.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
       set(pick2.x, pick2.y);
     }
@@ -1135,7 +1254,7 @@ export class SmartCursor {
           const nx = i + dir.x, ny = j + dir.y;
           if (!st.inBounds(nx, ny)) continue;
           const nt = st.get(nx, ny);
-          if ((!hasTileAt(st, nx, ny) || tileCutType(nt)) && this.allowedForContinuity(nx, ny, 2)) { // :1359 active()
+          if ((!hasTileAt(st, nx, ny) || tileCutType(env, nt)) && this.allowedForContinuity(nx, ny, 2)) { // :1359 active()
             targets.push({ x: nx, y: ny });
             points.push({ x: dir.x, y: dir.y });
           }
@@ -1227,7 +1346,7 @@ export class SmartCursor {
               if (!st.inBounds(x, y)) return false;
               const t = st.get(x, y);
               // :1225 等 `!tile.active() || tileCut || BreakableWhenPlacing`
-              return !hasTileAt(st, x, y) || tileCutType(t) || breakableWhenPlacing(sheetOf(t));
+              return !hasTileAt(st, x, y) || tileCutType(env, t) || breakableWhenPlacing(sheetOf(t));
             };
             // :1215-1238 六方向延伸（斜向带让位规则）
             if (upLeft && open(i - 1, j - 1) && !(!diag(1, 1) && diag(1, -1)) && !diag(-1, 1)) targets.push({ x: i - 1, y: j - 1 });
@@ -1268,7 +1387,7 @@ export class SmartCursor {
               if (!st.inBounds(nx, j)) continue;
               const nt = st.get(nx, j);
               // :1294/:1299 `!tile.active() || Main.tileCut[tile.type] || TileID.Sets.BreakableWhenPlacing[tile.type]`
-              if (!hasTileAt(st, nx, j) || tileCutType(nt) || breakableWhenPlacing(sheetOf(nt))) {
+              if (!hasTileAt(st, nx, j) || tileCutType(env, nt) || breakableWhenPlacing(sheetOf(nt))) {
                 targets.push({ x: nx, y: j });
               }
             }
@@ -1436,7 +1555,7 @@ export class SmartCursor {
             const t = st.get(k, l);
             if (l === j - 1) {
               if (!solidTile(st, k, l)) flag = false;
-            } else if (hasTileAt(st, k, l) && (!tileCutType(t) || sheetOf(t) === 454)) { // :1002 active()
+            } else if (hasTileAt(st, k, l) && (!tileCutType(env, t) || sheetOf(t) === 454)) { // :1002 active()
               flag = false;
             }
           }
@@ -1471,7 +1590,7 @@ export class SmartCursor {
         for (let l = j - 1; l <= j; l++) {
           if (!st.inBounds(k, l)) return false;
           const t = st.get(k, l);
-          if (hasTileAt(st, k, l) && !tileCutType(t)) return false; // :930 active()
+          if (hasTileAt(st, k, l) && !tileCutType(env, t)) return false; // :930 active()
         }
       }
       // :936-949(1457) 玩家命中盒净空：32×32 @ (i*16, j*16-16)（= 上方 2×2 格区）
@@ -1508,7 +1627,7 @@ export class SmartCursor {
         if (notWaterTorch && st.liquid[ii] > 0) continue;
         // :2825 占位格被 active 格（active() 口径，含已致动）占据且不可顶替 → 跳过
         if (hasTileAt(st, i, j) && !breakableWhenPlacing(sheetOf(t))
-          && (!tileCutType(t) || sheetOf(t) === 82 || sheetOf(t) === 83)) continue;
+          && (!tileCutType(env, t) || sheetOf(t) === 82 || sheetOf(t) === 83)) continue;
         // :2819-2838 17×17 内已有火把 → 排除
         let near = false;
         outer: for (let k = i - 8; k <= i + 8; k++) {
@@ -1565,7 +1684,7 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
-        if (!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) { // :2740 active()
+        if (!hasTileAt(st, i, j) || tileCutType(env, t) || breakableWhenPlacing(sheetOf(t))) { // :2740 active()
           // :2732-2749 四邻实心（非平台）计数 ≥2（:2743-55 active() 口径）
           let n = 0;
           for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
@@ -1617,7 +1736,7 @@ export class SmartCursor {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const t = st.get(i, j);
-        if (!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t))) { // :843 active()
+        if (!hasTileAt(st, i, j) || tileCutType(env, t) || breakableWhenPlacing(sheetOf(t))) { // :843 active()
           // :835-851 四邻任一实心（非平台，:846-58 active() 口径）
           let ok = false;
           for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
@@ -1765,8 +1884,8 @@ export class SmartCursor {
         const t = st.get(i, j);
         const below = st.get(i, j + 1);
         // :2055 自身/上方须空（active() 口径；可割植物/可顶替件放行），下方须实心
-        if ((hasTileAt(st, i, j) && !tileCutType(t) && !breakableWhenPlacing(sheetOf(t)))
-          || (hasTileAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))
+        if ((hasTileAt(st, i, j) && !tileCutType(env, t) && !breakableWhenPlacing(sheetOf(t)))
+          || (hasTileAt(st, i, j - 1) && !tileCutType(env, st.get(i, j - 1))
             && !breakableWhenPlacing(sheetOf(st.get(i, j - 1))))
           || !hasTileAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue; // :2065 active()
         // :2059-2060 ±1/±3 内已有树苗（:2069-70 active() 口径）→ 间距门
@@ -1824,8 +1943,8 @@ export class SmartCursor {
         // :2189 GroundTest 读裸 type（残型也过，随后 tile3.active() 把幽灵地面挡下——
         //  同序保留）；active() 口径（含已致动格占位）
         if (!groundOk(below) || !hasTileAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
-        if (hasTileAt(st, i, j) && !tileCutType(t) && !breakableWhenPlacing(sheetOf(t))) continue; // :2189
-        if (hasTileAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))
+        if (hasTileAt(st, i, j) && !tileCutType(env, t) && !breakableWhenPlacing(sheetOf(t))) continue; // :2189
+        if (hasTileAt(st, i, j - 1) && !tileCutType(env, st.get(i, j - 1))
           && !breakableWhenPlacing(sheetOf(st.get(i, j - 1)))) continue;
         // :2179 ±3 内无树苗（:2189 active() 口径）、无液体、5×TreeHeightMax 净空
         let sapling = false;
@@ -1925,7 +2044,7 @@ export class SmartCursor {
         //  可割植物（82/83 药草除外）/ 成熟药草可收（WorldGen.cs:66173）
         const replaceable = !hasTileAt(st, i, j) // :506 active()（含已致动格占位）
           || breakableWhenPlacing(sheetOf(t))
-          || (tileCutType(t) && sheetOf(t) !== 82 && sheetOf(t) !== 83)
+          || (tileCutType(env, t) && sheetOf(t) !== 82 && sheetOf(t) !== 83)
           || isHarvestableHerbWithSeed(st, i, j, env);
         if (!replaceable) continue;
         // :497 下方 nactive（active 且 !inActive）+ 平顶无坡
@@ -1957,13 +2076,16 @@ export class SmartCursor {
 
   /** :427-480 种植盆（createTile 380）：已有盆的左右空位 */
   private stepPlanterBox(
-    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     if (sem.createTileSheet !== 380 || taken()) return;
     const st = env.st;
     // :431-435 鼠标正悬在已有种植盆上 → 让位（原版不是"鼠标格占用即停"，只认盆本身；
     //  :445 active() 口径）
+    // ★issue#44-1 改判史：旧版形参表漏 screenX/screenY，本行两标识符落到 lib.dom 的
+    //  全局 `window.screenX/screenY`（浏览器窗口屏幕坐标，恒 (0,0)）→ 让位门恒假，
+    //  TS 不报错。补形参（lookup 调用点与 stepClayPots 同口径）。
     if (st.inBounds(screenX, screenY) && hasTileAt(st, screenX, screenY)
       && sheetOf(st.get(screenX, screenY)) === 380) return;
     const targets: Pt[] = [];
@@ -1976,7 +2098,7 @@ export class SmartCursor {
           const nx = i + ox;
           if (!st.inBounds(nx, j)) continue;
           const nt = st.get(nx, j);
-          if (!hasTileAt(st, nx, j) || tileCutType(nt) || breakableWhenPlacing(sheetOf(nt))) {
+          if (!hasTileAt(st, nx, j) || tileCutType(env, nt) || breakableWhenPlacing(sheetOf(nt))) {
             targets.push({ x: nx, y: j });
           }
         }
@@ -2003,7 +2125,7 @@ export class SmartCursor {
         const t = st.get(i, j);
         const below = st.get(i, j + 1);
         // :395 自身空（active() 口径）/可割/BreakableWhenPlacing，下方 nactive 无坡无半砖且实心
-        if ((!hasTileAt(st, i, j) || tileCutType(t) || breakableWhenPlacing(sheetOf(t)))
+        if ((!hasTileAt(st, i, j) || tileCutType(env, t) || breakableWhenPlacing(sheetOf(t)))
           && activeAt(st, i, j + 1) // :405 下方 nactive()（KEEP 口径：active && !inActive）
           && !inActiveAt(st, i, j + 1)
           && st.half[st.idx(i, j + 1)] === 0 && st.slope[st.idx(i, j + 1)] === 0
@@ -2045,10 +2167,15 @@ export class SmartCursor {
 /** ★BJ433 导出（帮工链扫区用）：x0..x1 闭区间 */
 export interface Region { x0: number; y0: number; x1: number; y1: number }
 
-/** TileReachCheckSettings.GetTileRegion（TileReachCheckSettings.cs:53）+ clamp 世界 [10,max-10]（:100-103） */
-function tileRegion(p: SmartCursorActor, tb: number, st: TileStore): Region {
-  const x = Math.min(20, 5) + tb;
-  const y = Math.min(20, 3) + tb;
+/** TileReachCheckSettings.GetTileRegion（TileReachCheckSettings.cs:53-62）+ clamp 世界
+ *  [10,max-10]（SmartCursorHelper.cs:100-103）。
+ *  ★issue#44-4：baseX/baseY = GetRanges 输出（Player.tileRangeX/Y 经射程配饰 +3/+2、
+ *  工具箱 +1、旅程远置 ×2+8，已钳 ≤20——Game.tileReach(0) 同式）。TB 在钳【后】加
+ *  （GetTileRegion :55-57 `x += TB`）——本函数保留该次序；旧实现硬编码 5/3，
+ *  配饰/工具箱/旅程下智能光标可达区窄 3/2 格（旅程最多 13/15 格）。 */
+function tileRegion(p: SmartCursorActor, tb: number, st: TileStore, baseX = 5, baseY = 3): Region {
+  const x = Math.min(20, baseX) + tb;
+  const y = Math.min(20, baseY) + tb;
   const LX = Math.floor(p.x / 16) - x;
   const HX = Math.ceil((p.x + p.w) / 16) - 1 + x;
   const LY = Math.floor(p.y / 16) - y;
